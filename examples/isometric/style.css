@@ -1,3 +1,110 @@
+/* Component Palette */
+
+#palette {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 160px;
+    background: #fff;
+    border-right: 1px solid #e0e0e0;
+    padding: 16px 10px;
+    font-family: sans-serif;
+    font-size: 0.82em;
+    color: #333;
+    overflow-y: auto;
+    z-index: 10;
+    box-sizing: border-box;
+}
+
+.palette-title {
+    font-weight: 600;
+    font-size: 0.9em;
+    color: #111;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
+.palette-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 7px 8px;
+    margin-bottom: 4px;
+    background: #fafafa;
+    border: 1px solid #e8e8e8;
+    border-radius: 3px;
+    text-align: left;
+    font-family: inherit;
+    font-size: 1em;
+    color: #333;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.palette-item:hover {
+    background: #f0f0f0;
+    border-color: #ccc;
+}
+
+.palette-item:active {
+    background: #e8e8e8;
+}
+
+.palette-item-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: #bbb;
+    flex-shrink: 0;
+}
+
+.palette-item[data-kind="firewall"]      .palette-item-dot { background: #ed2637; }
+.palette-item[data-kind="load-balancer"] .palette-item-dot { background: #e67e22; }
+.palette-item[data-kind="server"]        .palette-item-dot { background: #2980b9; }
+.palette-item[data-kind="storage"]       .palette-item-dot { background: #8e44ad; }
+.palette-item[data-kind="switch"]        .palette-item-dot { background: #27ae60; }
+.palette-item[data-kind="router"]        .palette-item-dot { background: #16a085; }
+
+/* Save / Load buttons (bottom of palette column) */
+
+#save-btn,
+#load-btn {
+    position: fixed;
+    bottom: 10px;
+    width: 68px;
+    padding: 7px 0;
+    background: #fafafa;
+    border: 1px solid #e0e0e0;
+    border-radius: 3px;
+    font-family: sans-serif;
+    font-size: 0.8em;
+    color: #333;
+    cursor: pointer;
+    z-index: 10;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+#save-btn { left: 10px; }
+#load-btn { left: 82px; }
+
+#save-btn:hover,
+#load-btn:hover {
+    background: #f0f0f0;
+    border-color: #bbb;
+}
+
+#save-btn:active,
+#load-btn:active {
+    background: #e4e4e4;
+}
+
+/* shift toggle button and inspector to not overlap palette */
 #toggle {
     position: fixed;
     top: 10px;
@@ -20,4 +127,113 @@
     position: fixed;
     bottom: 10px;
     right: 10px;
+}
+
+/* Property Panel */
+
+#inspector {
+    position: fixed;
+    top: 55px;
+    right: 10px;
+    width: 220px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    padding: 12px 14px 14px;
+    font-family: sans-serif;
+    font-size: 0.8em;
+    color: #333;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+#inspector.inspector-hidden {
+    display: none;
+}
+
+.inspector-title {
+    font-weight: 600;
+    font-size: 0.95em;
+    color: #111;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #eee;
+    letter-spacing: 0.02em;
+}
+
+.inspector-row {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 8px;
+}
+
+.inspector-row label {
+    font-size: 0.78em;
+    color: #888;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.inspector-row input,
+.inspector-row textarea {
+    border: 1px solid #ddd;
+    border-radius: 2px;
+    padding: 5px 7px;
+    font-size: 0.9em;
+    font-family: inherit;
+    color: #222;
+    background: #fafafa;
+    outline: none;
+    resize: vertical;
+    transition: border-color 0.15s;
+}
+
+.inspector-row input:focus,
+.inspector-row textarea:focus {
+    border-color: #ed2637;
+    background: #fff;
+}
+
+.inspector-row textarea {
+    line-height: 1.4;
+}
+
+.inspector-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid #eee;
+}
+
+.inspector-action-btn {
+    flex: 1;
+    padding: 6px 0;
+    border-radius: 3px;
+    border: 1px solid #ddd;
+    font-family: inherit;
+    font-size: 0.8em;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.inspector-btn-secondary {
+    background: #fafafa;
+    color: #333;
+}
+
+.inspector-btn-secondary:hover {
+    background: #f0f0f0;
+    border-color: #bbb;
+}
+
+.inspector-btn-danger {
+    background: #fafafa;
+    color: #c0392b;
+    border-color: #e8c4c1;
+}
+
+.inspector-btn-danger:hover {
+    background: #fdf0ef;
+    border-color: #c0392b;
 }

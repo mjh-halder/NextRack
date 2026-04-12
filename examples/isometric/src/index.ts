@@ -1,17 +1,50 @@
-import { g, dia } from '@joint/core';
+import { g, dia, V } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View } from './shapes/isometric-shape';
 import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, cellNamespace } from './shapes';
 import { sortElements, drawGrid, switchView } from './utils';
-import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE } from './theme';
+import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
+import { PropertyPanel } from './inspector';
+import { ComponentPalette } from './palette';
+import { saveGraph, loadGraph } from './persistence';
 
 import '../style.css';
 
 const canvasEl = document.getElementById('canvas') as HTMLDivElement;
 const buttonEl = document.getElementById('toggle') as HTMLButtonElement;
+const inspectorEl = document.getElementById('inspector') as HTMLDivElement;
+const paletteEl = document.getElementById('palette') as HTMLDivElement;
+const saveBtnEl = document.getElementById('save-btn') as HTMLButtonElement;
+const loadBtnEl = document.getElementById('load-btn') as HTMLButtonElement;
+
+function deleteSelected() {
+    if (!currentCell) return;
+    currentCell.remove();
+    // currentCell and panel are cleaned up by the graph 'remove' listener below
+}
+
+function duplicateSelected() {
+    if (!currentCell || currentCell instanceof Link) return;
+    const clone = currentCell.clone() as IsometricShape;
+    const { x, y } = currentCell.position();
+    clone.position(x + GRID_SIZE * 2, y + GRID_SIZE * 2);
+    clone.toggleView(currentView);
+    graph.addCell(clone);
+    paper.removeTools();
+    clone.addTools(paper, currentView);
+    panel.show(clone);
+    currentCell = clone;
+    if (currentView === View.Isometric) sortElements(graph);
+}
+
+const panel = new PropertyPanel(inspectorEl, {
+    onDelete: deleteSelected,
+    onDuplicate: duplicateSelected,
+});
 
 let currentView = View.Isometric;
 let currentCell: IsometricShape | Link = null;
+let currentZoom = 1;
 
 const graph = new dia.Graph({}, { cellNamespace });
 
@@ -117,6 +150,28 @@ const l7 = new Link().source(admin).target(ad1);
 
 graph.resetCells([c1, c2, db1, ad1, l1, l2, l3, l4, admin, l5, firewall, l6, user, l7, switchEl, router]);
 
+// Clean up selection when a cell is removed by any means (tool, keyboard, inspector)
+
+graph.on('remove', (cell: dia.Cell) => {
+    if (currentCell && currentCell.id === cell.id) {
+        currentCell = null;
+        panel.hide();
+    }
+});
+
+// Keyboard: Delete/Backspace → delete selected; Ctrl+D → duplicate selected
+
+document.addEventListener('keydown', (e: KeyboardEvent) => {
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        deleteSelected();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
+        e.preventDefault();
+        duplicateSelected();
+    }
+});
+
 // Sort cells on position and size change
 
 graph.on('change:position change:size', () => {
@@ -124,14 +179,68 @@ graph.on('change:position change:size', () => {
     sortElements(graph);
 });
 
+// Save / Load
+
+saveBtnEl.addEventListener('click', () => {
+    saveGraph(graph);
+});
+
+loadBtnEl.addEventListener('click', () => {
+    loadGraph(graph, () => {
+        paper.removeTools();
+        currentCell = null;
+        panel.hide();
+        switchView(paper, currentView, currentCell);
+    });
+});
+
+// Zoom via mouse wheel (blank and cell areas)
+
+function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
+    evt.preventDefault();
+    const step = delta > 0 ? 1.1 : 1 / 1.1;
+    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * step));
+    if (newZoom === currentZoom) return;
+    const factor = newZoom / currentZoom;
+    currentZoom = newZoom;
+    // Scale the current matrix around the cursor position in screen coordinates
+    const mx = paper.matrix();
+    paper.matrix(
+        V.createSVGMatrix()
+            .translate(x, y)
+            .scale(factor)
+            .translate(-x, -y)
+            .multiply(mx)
+    );
+}
+
+paper.on('blank:mousewheel', (evt: dia.Event, x: number, y: number, delta: number) => {
+    applyWheelZoom(evt, x, y, delta);
+});
+
+paper.on('cell:mousewheel', (_cellView: dia.CellView, evt: dia.Event, x: number, y: number, delta: number) => {
+    applyWheelZoom(evt, x, y, delta);
+});
+
 // Switch between isometric and 2D view
 
 buttonEl.addEventListener('click', () => {
     currentView = (currentView === View.Isometric) ? View.TwoDimensional : View.Isometric;
+    currentZoom = 1; // reset zoom on view switch — matrices are incompatible across views
     switchView(paper, currentView, currentCell);
 });
 
 switchView(paper, currentView, currentCell);
+
+new ComponentPalette(paletteEl, graph, () => currentView, (shape) => {
+    paper.removeTools();
+    shape.addTools(paper, currentView);
+    panel.show(shape);
+    currentCell = shape;
+    if (currentView === View.Isometric) {
+        sortElements(graph);
+    }
+});
 
 // Show/Hide tools on cell pointer events
 
@@ -140,6 +249,7 @@ paper.on('link:pointerup', (linkView: dia.LinkView) => {
     paper.removeTools();
     link.addTools(paper);
     currentCell = link;
+    panel.showLink(link);
 });
 
 paper.on('element:pointerup', (elementView: dia.ElementView) => {
@@ -147,11 +257,13 @@ paper.on('element:pointerup', (elementView: dia.ElementView) => {
     paper.removeTools();
     shape.addTools(paper, currentView);
     currentCell = shape;
+    panel.show(shape);
 });
 
 paper.on('blank:pointerdown', () => {
     paper.removeTools();
     currentCell = null;
+    panel.hide();
 });
 
 // Setup scrolling

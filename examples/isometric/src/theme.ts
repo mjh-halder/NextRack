@@ -5,3 +5,6 @@ export const BG_COLOR = '#FFFFFF';
 export const SCALE = 2;
 export const ISOMETRIC_SCALE = 0.8602
 export const ROTATION_DEGREES = 30;
+
+export const MIN_ZOOM = 0.1;
+export const MAX_ZOOM = 3;
