@@ -3,11 +3,11 @@ import IsometricShape, { View } from './shapes/isometric-shape';
 import { GRID_COUNT, GRID_SIZE, SCALE, ISOMETRIC_SCALE, ROTATION_DEGREES } from './theme';
 import { Link } from './shapes';
 
-export const transformationMatrix = (view: View = View.Isometric, margin: number = 20) => {
-    let matrix = V.createSVGMatrix().translate(margin, margin);
+export const transformationMatrix = (view: View = View.Isometric, margin: number = 20, leftInset: number = 0, gridCount: number = GRID_COUNT) => {
+    let matrix = V.createSVGMatrix().translate(margin + leftInset, margin);
     if (view === View.Isometric) {
         matrix = matrix
-            .translate(GRID_COUNT * GRID_SIZE * SCALE * ISOMETRIC_SCALE, 0)
+            .translate(gridCount * GRID_SIZE * SCALE * ISOMETRIC_SCALE, 0)
             .rotate(ROTATION_DEGREES)
             .skewX(-ROTATION_DEGREES)
             .scaleNonUniform(SCALE, SCALE * ISOMETRIC_SCALE);
@@ -103,16 +103,17 @@ export const drawGrid = (paper: dia.Paper, size: number, step: number, color = '
         'stroke': color
     });
     gridVEl.appendTo(paper.getLayerNode(dia.Paper.Layers.BACK));
+    return gridVEl;
 }
 
-export const switchView = (paper: dia.Paper, view: View, selectedCell: IsometricShape | Link) => {
+export const switchView = (paper: dia.Paper, view: View, selectedCell: IsometricShape | Link, leftInset: number = 0, gridCount: number = GRID_COUNT) => {
     paper.model.getElements().forEach((element: IsometricShape) => {
         element.toggleView(view);
     });
     if (view === View.Isometric) {
         sortElements(paper.model);
     }
-    paper.matrix(transformationMatrix(view));
+    paper.matrix(transformationMatrix(view, 20, leftInset, gridCount));
     if (selectedCell) {
         selectedCell.addTools(paper, view);
     }

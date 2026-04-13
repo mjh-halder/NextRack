@@ -5,20 +5,20 @@
     <rect @selector="base" @group-selector="common"
         width="calc(w)"
         height="calc(h)"
-        fill="#91C7B1"
+        fill="#4589ff"
         stroke="#333"
         stroke-linejoin="round"
     />
 
     <path @selector="front" @group-selector="iso"
-        fill="#91C7B1"
+        fill="#4589ff"
         stroke="#333"
         stroke-linejoin="round"
         :d="M 0 calc(h) L calc(w) calc(h) L calc(w - {{isometricHeight}}) calc(h - {{isometricHeight}}) L -{{isometricHeight}} calc(h - {{isometricHeight}}) Z"
     />
 
     <path @selector="side" @group-selector="iso"
-        fill="#6AB496"
+        fill="#0f62fe"
         stroke="#333"
         stroke-linejoin="round"
         :d="M calc(w) calc(h) L calc(w) 0 L calc(w - {{isometricHeight}}) -{{isometricHeight}} L calc(w - {{isometricHeight}}) calc(h - {{isometricHeight}}) Z"
@@ -27,7 +27,7 @@
     <rect @selector="top" @group-selector="iso"
         width="calc(w)"
         height="calc(h)"
-        fill="#52A382"
+        fill="#0043ce"
         stroke="#333"
         stroke-linejoin="round"
         :x="{{topXPosition([isometricHeight], 10)}}"

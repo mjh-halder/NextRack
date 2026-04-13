@@ -9,34 +9,34 @@
     />
 
     <path @selector="bodySide" @group-selector="iso"
-        fill="#E59F71"
+        fill="#ffd9be"
         stroke="#333"
         stroke-linejoin="round"
         :d="{{bodySideData([isometricHeight, size])}}"
     />
 
     <path @selector="bodyFront"  @group-selector="iso"
-        fill="#ECB998"
+        fill="#fff2e8"
         stroke="#333"
         stroke-linejoin="round"
         :d="{{bodyFrontData([isometricHeight, size])}}"
     />
 
     <path @selector="headSide" @group-selector="iso"
-        fill="#DF8B53"
+        fill="#ffb784"
         stroke="#333"
         stroke-linejoin="round"
         :d="{{headSideData([isometricHeight, size])}}"
     />
     <path @selector="headFront" @group-selector="iso"
-        fill="#D97430"
+        fill="#ff832b"
         stroke="#333"
         stroke-linejoin="round"
         :d="{{headFrontData([isometricHeight, size])}}"
     />
 
     <path @selector="body2D" @group-selector="2d"
-        fill="#ECB998"
+        fill="#fff2e8"
         stroke="#333"
         stroke-linejoin="round"
         d="M 0 calc(h) L calc(w) calc(h) C calc(w) 5 0 5 0 calc(h)"
@@ -46,7 +46,7 @@
         cx="calc(0.5 * w)"
         cy="calc(0.25 * h)"
         r="calc(0.25 * h)"
-        fill="#D97430"
+        fill="#ff832b"
         stroke="#333"
         stroke-linejoin="round"
     />

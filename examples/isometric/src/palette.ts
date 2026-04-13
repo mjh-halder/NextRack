@@ -4,6 +4,9 @@ import { Computer, Database, Firewall, Switch, Router } from './shapes';
 import { META_KEY, NodeMeta } from './inspector';
 import { GRID_SIZE } from './theme';
 
+// Carbon overflow-menu icon (3 vertical dots)
+const ICON_OVERFLOW = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor" width="16" height="16" aria-hidden="true"><circle cx="16" cy="8" r="2"/><circle cx="16" cy="16" r="2"/><circle cx="16" cy="24" r="2"/></svg>`;
+
 interface PaletteItem {
     label: string;
     kind: string;
@@ -26,6 +29,7 @@ const STAGGER = GRID_SIZE * 3;
 const STAGGER_COLS = 4;
 
 export type OnCreatedCallback = (shape: IsometricShape) => void;
+export type OnMenuClickCallback = (anchor: HTMLElement) => void;
 
 export class ComponentPalette {
 
@@ -33,43 +37,80 @@ export class ComponentPalette {
     private graph: dia.Graph;
     private getView: () => View;
     private onCreated: OnCreatedCallback;
+    private onMenuClick: OnMenuClickCallback;
     private placeCount = 0;
 
     constructor(
         el: HTMLElement,
         graph: dia.Graph,
         getView: () => View,
-        onCreated: OnCreatedCallback
+        onCreated: OnCreatedCallback,
+        onMenuClick: OnMenuClickCallback
     ) {
         this.el = el;
         this.graph = graph;
         this.getView = getView;
         this.onCreated = onCreated;
+        this.onMenuClick = onMenuClick;
         this.build();
     }
 
     private build() {
-        const title = document.createElement('div');
-        title.className = 'palette-title';
-        title.textContent = 'Components';
-        this.el.appendChild(title);
+        // Panel header: product name + overflow menu trigger
+        const header = document.createElement('div');
+        header.className = 'nr-panel-header';
+
+        const title = document.createElement('span');
+        title.className = 'nr-panel-title';
+        title.textContent = 'NextRack';
+
+        const menuBtn = document.createElement('button');
+        menuBtn.className = 'cds--btn cds--btn--ghost cds--btn--icon-only nr-panel-menu-btn';
+        menuBtn.type = 'button';
+        menuBtn.setAttribute('aria-label', 'Menu');
+        menuBtn.title = 'Menu';
+        menuBtn.innerHTML = ICON_OVERFLOW;
+        menuBtn.addEventListener('click', () => this.onMenuClick(menuBtn));
+
+        header.appendChild(title);
+        header.appendChild(menuBtn);
+        this.el.appendChild(header);
+
+        // Section label
+        const sectionLabel = document.createElement('p');
+        sectionLabel.className = 'cds--side-nav__group-title nr-section-label';
+        sectionLabel.textContent = 'Components';
+        this.el.appendChild(sectionLabel);
+
+        // Nav items list
+        const navList = document.createElement('ul');
+        navList.className = 'cds--side-nav__items nr-nav-list';
 
         for (const item of PALETTE_ITEMS) {
+            const li = document.createElement('li');
+            li.className = 'cds--side-nav__item';
+
             const btn = document.createElement('button');
-            btn.className = 'palette-item';
+            btn.className = 'cds--side-nav__link nr-nav-link';
+            btn.type = 'button';
             btn.setAttribute('data-kind', item.kind);
 
             const dot = document.createElement('span');
-            dot.className = 'palette-item-dot';
+            dot.className = 'nr-kind-dot';
+            dot.setAttribute('data-kind', item.kind);
+
+            const labelEl = document.createElement('span');
+            labelEl.className = 'cds--side-nav__link-text';
+            labelEl.textContent = item.label;
+
             btn.appendChild(dot);
-
-            const label = document.createElement('span');
-            label.textContent = item.label;
-            btn.appendChild(label);
-
+            btn.appendChild(labelEl);
             btn.addEventListener('click', () => this.addToGraph(item));
-            this.el.appendChild(btn);
+            li.appendChild(btn);
+            navList.appendChild(li);
         }
+
+        this.el.appendChild(navList);
     }
 
     private addToGraph(item: PaletteItem) {

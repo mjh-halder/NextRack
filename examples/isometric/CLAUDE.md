@@ -277,3 +277,19 @@ Not:
 - flashy
 - decorative
 - consumer app style
+
+# Use Carbon Design System strictly.
+
+Requirements:
+	•	Use official Carbon React components from @carbon/react wherever a matching component exists.
+	•	Do not create custom-styled replacements for existing Carbon components.
+	•	Use Carbon design tokens for color, type, spacing, layering, and states.
+	•	Follow Carbon interaction and accessibility patterns.
+	•	Keep custom CSS to layout-only concerns unless no Carbon token/component exists.
+	•	If a requested UI pattern is not covered by Carbon, implement the smallest possible custom extension in a way that visually matches Carbon.
+	•	Do not invent a new design language.
+
+Implementation sources of truth:
+	•	official Carbon React components
+	•	official Carbon tokens/theming model
+	•	official Carbon Figma kit for visual alignment

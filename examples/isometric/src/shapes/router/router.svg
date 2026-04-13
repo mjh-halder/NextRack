@@ -7,13 +7,13 @@
         cy="calc(0.5 * h)"
         rx="calc(0.5 * w)"
         ry="calc(0.5 * h)"
-        fill="#ADADFF"
+        fill="#82cfff"
         stroke="#333"
         stroke-linejoin="round"
     />
 
     <path @selector="side" @group-selector="iso"
-        fill="#ADADFF"
+        fill="#82cfff"
         stroke="#333"
         stroke-linejoin="round"
         :d="{{getSideData([size, isometricHeight])}}"
@@ -24,7 +24,7 @@
         :cy="{{topCenterY([size, isometricHeight])}}"
         rx="calc(0.5 * w)"
         ry="calc(0.5 * h)"
-        fill="#8585FF"
+        fill="#33b1ff"
         stroke="#333"
         stroke-linejoin="round"
     />

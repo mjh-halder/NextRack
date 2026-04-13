@@ -1,4 +1,28 @@
-/* Component Palette */
+/* Design name label — shown after creating a new design.
+   No exact Carbon component match; styled with Carbon design tokens. */
+
+#design-name {
+    display: none;
+    position: fixed;
+    top: var(--cds-spacing-03, 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+    font-weight: var(--cds-body-compact-01-font-weight, 400);
+    color: var(--cds-text-secondary, #525252);
+    background-color: var(--cds-layer-01, #f4f4f4);
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    padding: var(--cds-spacing-02, 4px) var(--cds-spacing-05, 16px);
+    pointer-events: none;
+    z-index: 5;
+}
+
+/* Component Palette — Carbon UI Shell-style side panel */
 
 #palette {
     position: fixed;
@@ -6,102 +30,115 @@
     left: 0;
     bottom: 0;
     width: 160px;
-    background: #fff;
-    border-right: 1px solid #e0e0e0;
-    padding: 16px 10px;
-    font-family: sans-serif;
-    font-size: 0.82em;
-    color: #333;
+    background: var(--cds-background, #ffffff);
+    border-right: 1px solid var(--cds-border-subtle-00, #e0e0e0);
     overflow-y: auto;
     z-index: 10;
     box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
 }
 
-.palette-title {
-    font-weight: 600;
-    font-size: 0.9em;
-    color: #111;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #eee;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
-}
-
-.palette-item {
+/* Panel header: product name + overflow menu trigger */
+.nr-panel-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
+    padding: 0 var(--cds-spacing-03, 8px) 0 var(--cds-spacing-05, 16px);
+    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    min-height: 48px;
+    flex-shrink: 0;
+}
+
+.nr-panel-title {
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+    font-weight: 600;
+    color: var(--cds-text-primary, #161616);
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+/* Override Carbon ghost icon-only button to fit the compact header */
+.nr-panel-menu-btn.cds--btn--icon-only {
+    width: 32px;
+    height: 32px;
+    min-height: 32px;
+    padding: 0;
+    color: var(--cds-icon-secondary, #525252);
+}
+
+.nr-panel-menu-btn.cds--btn--icon-only:hover {
+    color: var(--cds-icon-primary, #161616);
+}
+
+/* Section group label */
+.nr-section-label {
+    padding: var(--cds-spacing-04, 12px) var(--cds-spacing-05, 16px) var(--cds-spacing-02, 4px);
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--cds-text-secondary, #525252);
+    margin: 0;
+}
+
+/* Nav list: reset Carbon defaults that assume full-page side nav */
+.nr-nav-list {
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+
+/* Nav link item: full-width button styled as a side nav entry */
+.nr-nav-link.cds--side-nav__link {
+    display: flex;
+    align-items: center;
+    gap: var(--cds-spacing-03, 8px);
     width: 100%;
-    padding: 7px 8px;
-    margin-bottom: 4px;
-    background: #fafafa;
-    border: 1px solid #e8e8e8;
-    border-radius: 3px;
-    text-align: left;
-    font-family: inherit;
-    font-size: 1em;
-    color: #333;
+    height: 32px;
+    padding: 0 var(--cds-spacing-05, 16px);
+    background: none;
+    border: none;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+    font-weight: 400;
+    color: var(--cds-text-secondary, #525252);
     cursor: pointer;
-    transition: background 0.12s, border-color 0.12s;
+    text-align: left;
+    transition: background 0.1s, color 0.1s;
 }
 
-.palette-item:hover {
-    background: #f0f0f0;
-    border-color: #ccc;
+.nr-nav-link.cds--side-nav__link:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+    color: var(--cds-text-primary, #161616);
 }
 
-.palette-item:active {
-    background: #e8e8e8;
+.nr-nav-link.cds--side-nav__link:active {
+    background: var(--cds-layer-active-01, #c6c6c6);
 }
 
-.palette-item-dot {
+/* Colored dot indicating component kind */
+.nr-kind-dot {
     display: inline-block;
     width: 8px;
     height: 8px;
     border-radius: 2px;
-    background: #bbb;
+    background: var(--cds-border-subtle-01, #c6c6c6);
     flex-shrink: 0;
 }
 
-.palette-item[data-kind="firewall"]      .palette-item-dot { background: #ed2637; }
-.palette-item[data-kind="load-balancer"] .palette-item-dot { background: #e67e22; }
-.palette-item[data-kind="server"]        .palette-item-dot { background: #2980b9; }
-.palette-item[data-kind="storage"]       .palette-item-dot { background: #8e44ad; }
-.palette-item[data-kind="switch"]        .palette-item-dot { background: #27ae60; }
-.palette-item[data-kind="router"]        .palette-item-dot { background: #16a085; }
+.nr-kind-dot[data-kind="firewall"]      { background: #ff8389; } /* Carbon Red-40 */
+.nr-kind-dot[data-kind="load-balancer"] { background: #3ddbd9; } /* Carbon Teal-30 */
+.nr-kind-dot[data-kind="server"]        { background: #4589ff; } /* Carbon Blue-40 */
+.nr-kind-dot[data-kind="storage"]       { background: #be95ff; } /* Carbon Purple-40 */
+.nr-kind-dot[data-kind="switch"]        { background: #3ddbd9; } /* Carbon Teal-30 */
+.nr-kind-dot[data-kind="router"]        { background: #82cfff; } /* Carbon Cyan-30 */
 
-/* Save / Load buttons (bottom of palette column) */
-
-#save-btn,
-#load-btn {
-    position: fixed;
-    bottom: 10px;
-    width: 68px;
-    padding: 7px 0;
-    background: #fafafa;
-    border: 1px solid #e0e0e0;
-    border-radius: 3px;
-    font-family: sans-serif;
-    font-size: 0.8em;
-    color: #333;
-    cursor: pointer;
-    z-index: 10;
-    transition: background 0.12s, border-color 0.12s;
-}
-
-#save-btn { left: 10px; }
-#load-btn { left: 82px; }
-
-#save-btn:hover,
-#load-btn:hover {
-    background: #f0f0f0;
-    border-color: #bbb;
-}
-
-#save-btn:active,
-#load-btn:active {
-    background: #e4e4e4;
+/* Layout: Carbon TextInput wrapper has no default width; must stretch inside the modal */
+.cds--modal .cds--text-input-wrapper {
+    inline-size: 100%;
 }
 
 /* shift toggle button and inspector to not overlap palette */
