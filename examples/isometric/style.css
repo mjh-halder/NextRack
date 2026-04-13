@@ -135,29 +135,39 @@
 .nr-kind-dot[data-kind="storage"]       { background: #be95ff; } /* Carbon Purple-40 */
 .nr-kind-dot[data-kind="switch"]        { background: #3ddbd9; } /* Carbon Teal-30 */
 .nr-kind-dot[data-kind="router"]        { background: #82cfff; } /* Carbon Cyan-30 */
+.nr-kind-dot[data-kind="zone"]          { background: #0072c3; border-radius: 0; outline: 1.5px dashed #0072c3; outline-offset: 2px; background: transparent; }
 
 /* Layout: Carbon TextInput wrapper has no default width; must stretch inside the modal */
 .cds--modal .cds--text-input-wrapper {
     inline-size: 100%;
 }
 
-/* shift toggle button and inspector to not overlap palette */
+/* Toggle view button — Carbon ghost button style */
 #toggle {
     position: fixed;
     top: 10px;
     right: 10px;
-    padding: 10px;
-    background: white;
-    border: 2px solid #ed2637;
-    border-radius: 2px;
-    color: #ed2637;
-    font-family: sans-serif;
-    font-size: 1em;
+    height: 2rem;
+    padding: 0 var(--cds-spacing-04, 12px);
+    background: var(--cds-background, #ffffff);
+    border: 1px solid var(--cds-border-subtle-01, #c6c6c6);
+    color: var(--cds-text-secondary, #525252);
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.875rem;
+    font-weight: 400;
+    cursor: pointer;
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
 }
 
 #toggle:hover {
-    background: #ed2637;
-    color: white;
+    background: var(--cds-layer-hover-01, #e8e8e8);
+    border-color: var(--cds-border-strong-01, #8d8d8d);
+    color: var(--cds-text-primary, #161616);
+}
+
+#toggle:focus-visible {
+    outline: 2px solid var(--cds-focus, #0f62fe);
+    outline-offset: -2px;
 }
 
 #logo {
@@ -166,111 +176,135 @@
     right: 10px;
 }
 
-/* Property Panel */
+/* Property Panel — Carbon-inspired enterprise style */
 
 #inspector {
     position: fixed;
-    top: 55px;
+    top: 48px;
     right: 10px;
-    width: 220px;
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 3px;
-    padding: 12px 14px 14px;
-    font-family: sans-serif;
-    font-size: 0.8em;
-    color: #333;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    width: 240px;
+    background: var(--cds-background, #ffffff);
+    border: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+    color: var(--cds-text-primary, #161616);
+    box-sizing: border-box;
 }
 
 #inspector.inspector-hidden {
     display: none;
 }
 
+/* Panel heading row */
 .inspector-title {
+    padding: var(--cds-spacing-03, 8px) var(--cds-spacing-05, 16px);
+    font-size: 0.6875rem;
     font-weight: 600;
-    font-size: 0.95em;
-    color: #111;
-    margin-bottom: 10px;
-    padding-bottom: 6px;
-    border-bottom: 1px solid #eee;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--cds-text-secondary, #525252);
+    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    background: var(--cds-layer-01, #f4f4f4);
+    margin: 0;
 }
 
+/* Field area — padding scoped to section only */
+.inspector-section {
+    padding: var(--cds-spacing-05, 16px);
+    display: flex;
+    flex-direction: column;
+    gap: var(--cds-spacing-04, 12px);
+}
+
+/* Each label + input pair */
 .inspector-row {
     display: flex;
     flex-direction: column;
-    margin-bottom: 8px;
+    gap: var(--cds-spacing-02, 4px);
 }
 
 .inspector-row label {
-    font-size: 0.78em;
-    color: #888;
-    margin-bottom: 3px;
+    font-size: 0.6875rem;
+    font-weight: 400;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    color: var(--cds-text-secondary, #525252);
 }
 
+/* Carbon field-01 style: flat fill, no side borders, strong bottom border */
 .inspector-row input,
 .inspector-row textarea {
-    border: 1px solid #ddd;
-    border-radius: 2px;
-    padding: 5px 7px;
-    font-size: 0.9em;
+    background: var(--cds-field-01, #f4f4f4);
+    border: none;
+    border-bottom: 1px solid var(--cds-border-strong-01, #8d8d8d);
+    padding: 0 var(--cds-spacing-04, 12px);
+    height: 2rem;
     font-family: inherit;
-    color: #222;
-    background: #fafafa;
+    font-size: 0.875rem;
+    color: var(--cds-text-primary, #161616);
     outline: none;
-    resize: vertical;
-    transition: border-color 0.15s;
-}
-
-.inspector-row input:focus,
-.inspector-row textarea:focus {
-    border-color: #ed2637;
-    background: #fff;
+    box-sizing: border-box;
+    width: 100%;
+    transition: border-color 0.1s;
 }
 
 .inspector-row textarea {
+    height: auto;
+    min-height: 4rem;
+    padding: var(--cds-spacing-03, 8px) var(--cds-spacing-04, 12px);
+    resize: none;
     line-height: 1.4;
 }
 
+/* Carbon focus ring: inset 2px solid blue, no border change */
+.inspector-row input:focus,
+.inspector-row textarea:focus {
+    outline: 2px solid var(--cds-focus, #0f62fe);
+    outline-offset: -2px;
+    border-bottom-color: var(--cds-focus, #0f62fe);
+}
+
+/* Footer action bar */
 .inspector-actions {
     display: flex;
-    gap: 6px;
-    margin-top: 12px;
-    padding-top: 10px;
-    border-top: 1px solid #eee;
+    gap: var(--cds-spacing-03, 8px);
+    padding: var(--cds-spacing-04, 12px) var(--cds-spacing-05, 16px);
+    border-top: 1px solid var(--cds-border-subtle-00, #e0e0e0);
 }
 
+/* Shared button base — Carbon compact ghost button shape */
 .inspector-action-btn {
     flex: 1;
-    padding: 6px 0;
-    border-radius: 3px;
-    border: 1px solid #ddd;
+    height: 2rem;
+    padding: 0 var(--cds-spacing-04, 12px);
     font-family: inherit;
-    font-size: 0.8em;
+    font-size: 0.875rem;
+    font-weight: 400;
+    letter-spacing: 0.01em;
     cursor: pointer;
-    transition: background 0.12s, border-color 0.12s;
+    border: 1px solid;
+    background: transparent;
+    transition: background 0.1s, color 0.1s;
 }
 
+/* Duplicate — ghost neutral */
 .inspector-btn-secondary {
-    background: #fafafa;
-    color: #333;
+    color: var(--cds-text-primary, #161616);
+    border-color: var(--cds-border-subtle-01, #c6c6c6);
 }
 
 .inspector-btn-secondary:hover {
-    background: #f0f0f0;
-    border-color: #bbb;
+    background: var(--cds-layer-hover-01, #e8e8e8);
+    border-color: var(--cds-border-strong-01, #8d8d8d);
 }
 
+/* Delete — ghost danger */
 .inspector-btn-danger {
-    background: #fafafa;
-    color: #c0392b;
-    border-color: #e8c4c1;
+    color: var(--cds-support-error, #da1e28);
+    border-color: var(--cds-support-error, #da1e28);
 }
 
 .inspector-btn-danger:hover {
-    background: #fdf0ef;
-    border-color: #c0392b;
+    background: var(--cds-support-error, #da1e28);
+    color: #ffffff;
 }

@@ -76,6 +76,7 @@ export class PropertyPanel {
 
         // Node fields
         this.nodeSection = document.createElement('div');
+        this.nodeSection.className = 'inspector-section';
         for (const field of NODE_FIELDS) {
             const { row, input } = this.buildRow(
                 `node-${field.key}`, field.label, field.label, field.multiline
@@ -88,6 +89,7 @@ export class PropertyPanel {
 
         // Link fields
         this.linkSection = document.createElement('div');
+        this.linkSection.className = 'inspector-section';
         for (const field of LINK_FIELDS) {
             const { row, input } = this.buildRow(
                 `link-${field.key}`, field.label, field.placeholder

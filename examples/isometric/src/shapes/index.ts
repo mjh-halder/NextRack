@@ -8,6 +8,8 @@ import { Database } from './database/database'
 import { ActiveDirectory } from './active-directory/active-directory'
 import { User } from './user/user'
 import { Firewall } from './firewall/firewall'
+import { Frame } from './frame/frame'
+import { KubernetesWorkerNode } from './kubernetes-worker-node/kubernetes-worker-node'
 
 export const cellNamespace = {
     ...shapes,
@@ -18,7 +20,9 @@ export const cellNamespace = {
     Database,
     ActiveDirectory,
     User,
-    Firewall
+    Firewall,
+    Frame,
+    KubernetesWorkerNode,
 }
 
 export {
@@ -29,5 +33,7 @@ export {
     Database,
     ActiveDirectory,
     User,
-    Firewall
+    Firewall,
+    Frame,
+    KubernetesWorkerNode,
 }

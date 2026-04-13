@@ -55,13 +55,15 @@ const topologicalSort = (nodes: Node[]) => {
 
 export const sortElements = (graph) => {
     const elements = graph.getElements();
-    const nodes: Node[] = elements.map(el => {
-        return {
+    // Frames always stay at z = -1 (behind everything); exclude them from the
+    // isometric topological sort so their z is never overwritten.
+    const nodes: Node[] = elements
+        .filter(el => !el.get('isFrame'))
+        .map(el => ({
             el: el,
             behind: [],
             visited: false
-        }
-    });
+        }));
 
     for (let i = 0; i < nodes.length; ++i)
     {

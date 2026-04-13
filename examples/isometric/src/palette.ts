@@ -1,6 +1,6 @@
 import { dia } from '@joint/core';
 import IsometricShape, { View } from './shapes/isometric-shape';
-import { Computer, Database, Firewall, Switch, Router } from './shapes';
+import { Computer, Database, Firewall, Switch, Router, Frame, KubernetesWorkerNode } from './shapes';
 import { META_KEY, NodeMeta } from './inspector';
 import { GRID_SIZE } from './theme';
 
@@ -14,12 +14,17 @@ interface PaletteItem {
 }
 
 const PALETTE_ITEMS: PaletteItem[] = [
-    { label: 'Firewall',      kind: 'firewall',      create: () => new Firewall()  },
-    { label: 'Load Balancer', kind: 'load-balancer', create: () => new Switch()    },
-    { label: 'Server',        kind: 'server',        create: () => new Computer()  },
-    { label: 'Storage',       kind: 'storage',       create: () => new Database()  },
-    { label: 'Switch',        kind: 'switch',        create: () => new Switch()    },
-    { label: 'Router',        kind: 'router',        create: () => new Router()    },
+    { label: 'Firewall',             kind: 'firewall',               create: () => new Firewall()              },
+    { label: 'Load Balancer',        kind: 'load-balancer',          create: () => new Switch()                },
+    { label: 'Server',               kind: 'server',                 create: () => new Computer()              },
+    { label: 'Storage',              kind: 'storage',                create: () => new Database()              },
+    { label: 'Switch',               kind: 'switch',                 create: () => new Switch()                },
+    { label: 'Router',               kind: 'router',                 create: () => new Router()                },
+    { label: 'K8s Worker Node',      kind: 'kubernetes-worker-node', create: () => new KubernetesWorkerNode()  },
+];
+
+const CONTAINER_ITEMS: PaletteItem[] = [
+    { label: 'Zone',          kind: 'zone',          create: () => new Frame()     },
 ];
 
 // Stagger new elements so they don't land on top of each other
@@ -76,17 +81,22 @@ export class ComponentPalette {
         header.appendChild(menuBtn);
         this.el.appendChild(header);
 
-        // Section label
+        this.el.appendChild(this.buildSection('Components', PALETTE_ITEMS));
+        this.el.appendChild(this.buildSection('Containers', CONTAINER_ITEMS));
+    }
+
+    private buildSection(title: string, items: PaletteItem[]): DocumentFragment {
+        const fragment = document.createDocumentFragment();
+
         const sectionLabel = document.createElement('p');
         sectionLabel.className = 'cds--side-nav__group-title nr-section-label';
-        sectionLabel.textContent = 'Components';
-        this.el.appendChild(sectionLabel);
+        sectionLabel.textContent = title;
+        fragment.appendChild(sectionLabel);
 
-        // Nav items list
         const navList = document.createElement('ul');
         navList.className = 'cds--side-nav__items nr-nav-list';
 
-        for (const item of PALETTE_ITEMS) {
+        for (const item of items) {
             const li = document.createElement('li');
             li.className = 'cds--side-nav__item';
 
@@ -110,7 +120,8 @@ export class ComponentPalette {
             navList.appendChild(li);
         }
 
-        this.el.appendChild(navList);
+        fragment.appendChild(navList);
+        return fragment;
     }
 
     private addToGraph(item: PaletteItem) {

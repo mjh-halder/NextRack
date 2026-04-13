@@ -1,7 +1,7 @@
 import { g, dia, V } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View } from './shapes/isometric-shape';
-import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, cellNamespace } from './shapes';
+import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, Frame, cellNamespace } from './shapes';
 import { sortElements, drawGrid, switchView } from './utils';
 import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
 import { PropertyPanel } from './inspector';
@@ -70,16 +70,21 @@ const paper = new dia.Paper({
     // Prevent the elements from being dragged outside of the paper
     // and from being dropped on top of other elements
     restrictTranslate: (elementView) => {
-        const element = elementView.model as IsometricShape;
-        const { width, height } = element.size();
+        const element = elementView.model;
+        // Frames are not tracked as obstacles; they move freely within the canvas.
+        if (element.get('isFrame')) {
+            return (x: number, y: number) => ({ x: Math.max(0, x), y: Math.max(0, y) });
+        }
+        const isometricEl = element as IsometricShape;
+        const { width, height } = isometricEl.size();
         // a little memory allocation optimization
         // we don't need to create a new rect on every call, we can reuse the same one
         const newBBox = new g.Rect();
         return function(x, y) {
-            newBBox.update(x , y, width, height);
-            return obstacles.isFree(newBBox, element.cid)
+            newBBox.update(x, y, width, height);
+            return obstacles.isFree(newBBox, isometricEl.cid)
                 ? { x, y }
-                : element.position();
+                : isometricEl.position();
         }
     },
     gridSize: GRID_SIZE,
@@ -526,8 +531,13 @@ function showMenuPopup(anchor: HTMLElement) {
 new ComponentPalette(paletteEl, graph, () => currentView, (shape) => {
     paper.removeTools();
     shape.addTools(paper, currentView);
-    panel.show(shape);
-    currentCell = shape;
+    if (shape.get('isFrame')) {
+        currentCell = null;
+        panel.hide();
+    } else {
+        currentCell = shape;
+        panel.show(shape);
+    }
     if (currentView === View.Isometric) {
         sortElements(graph);
     }
@@ -544,8 +554,16 @@ paper.on('link:pointerup', (linkView: dia.LinkView) => {
 });
 
 paper.on('element:pointerup', (elementView: dia.ElementView) => {
-    const shape = elementView.model as IsometricShape;
+    const model = elementView.model;
     paper.removeTools();
+    if (model.get('isFrame')) {
+        // Frames show resize/remove tools but do not open the inspector.
+        (model as Frame).addTools(paper, currentView);
+        currentCell = null;
+        panel.hide();
+        return;
+    }
+    const shape = model as IsometricShape;
     shape.addTools(paper, currentView);
     currentCell = shape;
     panel.show(shape);

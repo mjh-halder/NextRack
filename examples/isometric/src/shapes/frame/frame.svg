@@ -1,0 +1,19 @@
+<g highlighter-selector="body">
+    <rect @selector="body"
+        width="calc(w)"
+        height="calc(h)"
+        fill="rgba(0, 114, 195, 0.08)"
+        stroke="#0072c3"
+        stroke-width="1.5"
+        stroke-dasharray="8 4"
+    />
+    <text @selector="label"
+        x="8"
+        y="16"
+        font-family="IBM Plex Sans, sans-serif"
+        font-size="11"
+        font-weight="600"
+        fill="#0072c3"
+        text="Zone"
+    />
+</g>
