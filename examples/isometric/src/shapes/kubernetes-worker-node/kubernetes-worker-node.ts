@@ -89,7 +89,7 @@ export class KubernetesWorkerNode extends CuboidShape {
         ].join(' ');
     }
 
-    // Image position on the top face
+    // Image and badge position on the top face
     @Function()
     topXPosition(): number {
         return -this.isometricHeight;
@@ -98,5 +98,15 @@ export class KubernetesWorkerNode extends CuboidShape {
     @Function()
     topYPosition(): number {
         return -this.isometricHeight;
+    }
+
+    @Function()
+    topCenterX(): number {
+        return this.topCenter.x;
+    }
+
+    @Function()
+    topCenterY(): number {
+        return this.topCenter.y;
     }
 }

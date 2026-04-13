@@ -1,3 +1,211 @@
+/* Left navigation rail — vertical icon-based view switcher */
+
+#nav-rail {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 48px;
+    background: var(--cds-background-inverse, #161616);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: var(--cds-spacing-05, 16px);
+    gap: 2px;
+    z-index: 20;
+    box-sizing: border-box;
+}
+
+/* Icon button in the rail */
+.nr-rail-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.4);
+    transition: background 0.1s, color 0.1s;
+}
+
+.nr-rail-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.nr-rail-item:focus-visible {
+    outline: 2px solid var(--cds-focus, #0f62fe);
+    outline-offset: -2px;
+}
+
+/* Active state: full-white icon + left accent bar */
+.nr-rail-item--active {
+    color: #ffffff;
+}
+
+.nr-rail-item--active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    background: var(--cds-focus, #0f62fe);
+    border-radius: 0 2px 2px 0;
+}
+
+/* Component Designer — fills the editor area when Component Designer is active */
+
+#component-designer {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 48px;
+    right: 0;
+    bottom: 0;
+    background: var(--cds-background, #ffffff);
+    z-index: 9;
+    flex-direction: row;
+}
+
+/* Left sidebar: icon picker + shape selector */
+
+#cd-sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    background: var(--cds-background, #ffffff);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.cd-section {
+    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+}
+
+.cd-section-title {
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--cds-text-secondary, #525252);
+    background: var(--cds-layer-01, #f4f4f4);
+    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    padding: var(--cds-spacing-03, 8px) var(--cds-spacing-05, 16px);
+    margin: 0;
+}
+
+/* Icon picker grid */
+
+#cd-icon-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--cds-spacing-02, 4px);
+    padding: var(--cds-spacing-03, 8px);
+}
+
+.cd-icon-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: var(--cds-spacing-03, 8px) var(--cds-spacing-02, 4px);
+    background: var(--cds-layer-01, #f4f4f4);
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    cursor: pointer;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.625rem;
+    color: var(--cds-text-secondary, #525252);
+    text-align: center;
+    transition: border-color 0.1s, background 0.1s;
+    line-height: 1.2;
+}
+
+.cd-icon-btn:hover {
+    border-color: var(--cds-border-strong-01, #8d8d8d);
+    background: var(--cds-layer-hover-01, #e8e8e8);
+}
+
+.cd-icon-btn--active {
+    border-color: var(--cds-focus, #0f62fe);
+    background: var(--cds-highlight, #d0e2ff);
+    color: var(--cds-text-primary, #161616);
+}
+
+.cd-icon-btn img {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    display: block;
+}
+
+/* Base shape selector */
+
+#cd-shape-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--cds-spacing-02, 4px);
+    padding: var(--cds-spacing-03, 8px);
+}
+
+.cd-shape-btn {
+    height: 2rem;
+    padding: 0 var(--cds-spacing-03, 8px);
+    background: var(--cds-layer-01, #f4f4f4);
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    cursor: pointer;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.8125rem;
+    color: var(--cds-text-secondary, #525252);
+    transition: border-color 0.1s, background 0.1s, color 0.1s;
+}
+
+.cd-shape-btn:hover {
+    border-color: var(--cds-border-strong-01, #8d8d8d);
+    background: var(--cds-layer-hover-01, #e8e8e8);
+    color: var(--cds-text-primary, #161616);
+}
+
+.cd-shape-btn--active {
+    border-color: var(--cds-focus, #0f62fe);
+    background: var(--cds-highlight, #d0e2ff);
+    color: var(--cds-text-primary, #161616);
+}
+
+/* Preview area */
+
+#cd-preview-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--cds-layer-01, #f4f4f4);
+    overflow: hidden;
+}
+
+#cd-preview-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--cds-spacing-07, 32px);
+}
+
+#cd-preview-svg {
+    width: 100%;
+    height: 100%;
+    max-width: 480px;
+    max-height: 480px;
+    aspect-ratio: 1;
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    background: #ffffff;
+    display: block;
+}
+
 /* Design name label — shown after creating a new design.
    No exact Carbon component match; styled with Carbon design tokens. */
 
@@ -27,7 +235,7 @@
 #palette {
     position: fixed;
     top: 0;
-    left: 0;
+    left: 48px;
     bottom: 0;
     width: 160px;
     background: var(--cds-background, #ffffff);

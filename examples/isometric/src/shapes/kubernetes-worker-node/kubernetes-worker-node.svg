@@ -6,14 +6,14 @@
     <!-- Front face: octagon at (0,0), shown in both 2D and isometric views -->
     <polygon @selector="base" @group-selector="common"
         :points="{{baseOctagonPoints([size])}}"
-        fill="#42be65"
+        fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
 
     <!-- Bottom-facing band: traces the lower visible faces of the octagonal prism -->
     <path @selector="front" @group-selector="iso"
-        fill="#42be65"
+        fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
         :d="{{frontPath([size, isometricHeight])}}"
@@ -21,7 +21,7 @@
 
     <!-- Right-facing face: the right-flat rectangular face of the prism -->
     <path @selector="side" @group-selector="iso"
-        fill="#24a148"
+        fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
         :d="{{sidePath([size, isometricHeight])}}"
@@ -30,9 +30,17 @@
     <!-- Top octagonal face, shifted by (-iH, -iH) -->
     <polygon @selector="top" @group-selector="iso"
         :points="{{topOctagonPoints([size, isometricHeight])}}"
-        fill="#198038"
+        fill="#a8a8a8"
         stroke="#333"
         stroke-linejoin="round"
+    />
+
+    <!-- Colored logo badge on the top face -->
+    <circle @selector="badge" @group-selector="iso"
+        r="calc(0.32 * w)"
+        fill="#198038"
+        :cx="{{topCenterX([size, isometricHeight])}}"
+        :cy="{{topCenterY([size, isometricHeight])}}"
     />
 
     <image @selector="topImage" @group-selector="iso"
@@ -42,6 +50,14 @@
         transform="translate(2,2)"
         :x="{{topXPosition([isometricHeight])}}"
         :y="{{topYPosition([isometricHeight])}}"
+    />
+
+    <!-- Colored logo badge for 2D view -->
+    <circle @selector="badge2D" @group-selector="2d"
+        cx="calc(0.5 * w)"
+        cy="calc(0.5 * h)"
+        r="calc(0.32 * w)"
+        fill="#198038"
     />
 
     <image @selector="2DImage" @group-selector="2d"

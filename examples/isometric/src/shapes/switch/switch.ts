@@ -30,4 +30,14 @@ export class Switch extends ProportionalCuboidShape {
     topYPosition(): number {
         return this.topY;
     }
+
+    @Function()
+    topCenterX(): number {
+        return this.topCenter.x;
+    }
+
+    @Function()
+    topCenterY(): number {
+        return this.topCenter.y;
+    }
 }

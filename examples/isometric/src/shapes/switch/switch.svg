@@ -6,20 +6,20 @@
     <rect @selector="base" @group-selector="common"
         width="calc(w)"
         height="calc(h)"
-        fill="#3ddbd9"
+        fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
 
     <path @selector="front" @group-selector="iso"
-        fill="#3ddbd9"
+        fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
         :d="M 0 calc(h) L calc(w) calc(h) L calc(w - {{isometricHeight}}) calc(h - {{isometricHeight}}) L -{{isometricHeight}} calc(h - {{isometricHeight}}) Z"
     />
 
     <path @selector="side" @group-selector="iso"
-        fill="#08bdba"
+        fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
         :d="M calc(w) calc(h) L calc(w) 0 L calc(w - {{isometricHeight}}) -{{isometricHeight}} L calc(w - {{isometricHeight}}) calc(h - {{isometricHeight}}) Z"
@@ -28,11 +28,18 @@
     <rect @selector="top" @group-selector="iso"
         width="calc(w)"
         height="calc(h)"
-        fill="#009d9a"
+        fill="#a8a8a8"
         stroke="#333"
         stroke-linejoin="round"
         :x="{{topXPosition([isometricHeight])}}"
         :y="{{topYPosition([isometricHeight])}}"
+    />
+
+    <circle @selector="badge" @group-selector="iso"
+        r="calc(0.32 * w)"
+        fill="#009d9a"
+        :cx="{{topCenterX([size, isometricHeight])}}"
+        :cy="{{topCenterY([size, isometricHeight])}}"
     />
 
     <image @selector="topImage" @group-selector="iso"
@@ -42,6 +49,13 @@
         transform="translate(2,2)"
         :x="{{topXPosition([isometricHeight])}}"
         :y="{{topYPosition([isometricHeight])}}"
+    />
+
+    <circle @selector="badge2D" @group-selector="2d"
+        cx="calc(0.5 * w)"
+        cy="calc(0.5 * h)"
+        r="calc(0.32 * w)"
+        fill="#009d9a"
     />
 
     <image @selector="2DImage" @group-selector="2d"
