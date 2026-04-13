@@ -5,9 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <meta name="description" content="The JointJS Isometric demo serves as a template to help bring your idea to life in no time."/>
     <title>Isometric Diagram | JointJS</title>
+    <!-- Apply theme before first paint to avoid flash -->
+    <script>
+      (function(){
+        var t = localStorage.getItem('nr-theme');
+        document.documentElement.className = t === 'dark' ? 'cds--g100' : 'cds--white';
+      })();
+    </script>
   </head>
   <body>
-    <nav id="nav-rail" aria-label="Application navigation">
+    <nav id="nav-rail" class="cds--g100" aria-label="Application navigation">
       <button id="nav-grid" class="nr-rail-item nr-rail-item--active" type="button"
               title="System Designer" aria-label="System Designer" aria-current="page">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
@@ -22,36 +29,31 @@
           <path d="M10 1L19 10 10 19 1 10z"/>
         </svg>
       </button>
+      <button id="nav-theme" class="nr-rail-item nr-rail-item--bottom" type="button"
+              title="Switch to dark mode" aria-label="Switch to dark mode">
+        <!-- Icon is set by JS on init; placeholder keeps the button sized correctly -->
+      </button>
     </nav>
     <div id="palette"></div>
     <div id="design-name"></div>
     <div id="canvas"></div>
-    <button id="toggle">Toggle 2D / Isometric View</button>
+    <div id="view-toggle-container"></div>
     <div id="inspector"></div>
     <div id="component-designer" aria-hidden="true">
-      <!-- Left sidebar: Section 2 (Icon) + Section 3 (Base Shape) -->
-      <aside id="cd-sidebar">
-        <section class="cd-section">
-          <p class="cd-section-title">Icon</p>
-          <div id="cd-icon-grid"></div>
-        </section>
-        <section class="cd-section">
-          <p class="cd-section-title">Base Shape</p>
-          <div id="cd-shape-grid">
-            <button class="cd-shape-btn cd-shape-btn--active" data-shape="square" type="button">Square</button>
-            <button class="cd-shape-btn" data-shape="rectangle" type="button">Rectangle</button>
-            <button class="cd-shape-btn" data-shape="round" type="button">Round</button>
-            <button class="cd-shape-btn" data-shape="octagon" type="button">Octagon</button>
-          </div>
-        </section>
-      </aside>
-      <!-- Right area: Section 1 (Preview) -->
-      <div id="cd-preview-area">
-        <p class="cd-section-title">Preview</p>
-        <div id="cd-preview-wrap">
-          <svg id="cd-preview-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div id="cd2-palette"></div>
+      <div id="cd2-design-name"></div>
+      <div id="cd2-canvas-wrap">
+        <div class="cd2-view-pane">
+          <span class="cd2-pane-label">2D</span>
+          <div id="cd2-canvas-2d"></div>
+        </div>
+        <div class="cd2-view-pane">
+          <span class="cd2-pane-label">Isometric</span>
+          <div id="cd2-canvas"></div>
         </div>
       </div>
+      <div id="cd2-view-toggle-container"></div>
+      <div id="cd2-inspector"></div>
     </div>
     <a rel="noopener" target="_blank" href="https://www.jointjs.com">
       <img alt="JointJS logo" id="logo" src="assets/jj-logo.svg" width="200" height="50"></img>

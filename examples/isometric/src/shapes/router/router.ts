@@ -1,14 +1,9 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './router.svg';
 import { CylinderShape } from '../isometric-shape';
-import { GRID_SIZE } from '../../theme';
+import { ShapeRegistry } from '../shape-registry';
 
-const defaultSize = {
-    width: GRID_SIZE * 2,
-    height: GRID_SIZE * 2
-};
-
-const defaultIsometricHeight = GRID_SIZE / 2;
+const { defaultSize, defaultIsometricHeight } = ShapeRegistry['router'];
 
 @Model({
     attributes: {

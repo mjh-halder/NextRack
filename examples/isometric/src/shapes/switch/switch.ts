@@ -1,14 +1,9 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './switch.svg';
 import { ProportionalCuboidShape } from '../isometric-shape';
-import { GRID_SIZE } from '../../theme';
+import { ShapeRegistry } from '../shape-registry';
 
-const defaultSize = {
-    width: GRID_SIZE * 2,
-    height: GRID_SIZE * 2
-};
-
-const defaultIsometricHeight = GRID_SIZE / 2;
+const { defaultSize, defaultIsometricHeight } = ShapeRegistry['switch'];
 
 @Model({
     attributes: {
@@ -39,5 +34,40 @@ export class Switch extends ProportionalCuboidShape {
     @Function()
     topCenterY(): number {
         return this.topCenter.y;
+    }
+
+    @Function()
+    baseCuboidPath(): string {
+        return super.baseCuboidPath();
+    }
+
+    @Function()
+    topCuboidPath(): string {
+        return super.topCuboidPath();
+    }
+
+    @Function()
+    cuboidFrontPath(): string {
+        return super.cuboidFrontPath();
+    }
+
+    @Function()
+    cuboidSidePath(): string {
+        return super.cuboidSidePath();
+    }
+
+    @Function()
+    cuboidCornerV1Path(): string {
+        return super.cuboidCornerV1Path();
+    }
+
+    @Function()
+    cuboidCornerV2Path(): string {
+        return super.cuboidCornerV2Path();
+    }
+
+    @Function()
+    cuboidCornerV3Path(): string {
+        return super.cuboidCornerV3Path();
     }
 }

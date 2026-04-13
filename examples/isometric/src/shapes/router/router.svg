@@ -60,6 +60,18 @@
         height="calc(h - 4)"
     />
 
+    <image @selector="topIcon" @group-selector="iso"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
+    <image @selector="topIcon2D" @group-selector="2d"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
     <text @selector="label" @group-selector="common"
         text-anchor="left"
         text-vertical-anchor="middle"

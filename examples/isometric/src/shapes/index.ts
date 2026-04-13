@@ -10,6 +10,10 @@ import { User } from './user/user'
 import { Firewall } from './firewall/firewall'
 import { Frame } from './frame/frame'
 import { KubernetesWorkerNode } from './kubernetes-worker-node/kubernetes-worker-node'
+import { Pyramid } from './pyramid/pyramid'
+import { Hexagonal } from './hexagonal/hexagonal'
+import { Octagon } from './octagon/octagon'
+import { Hexahedron } from './hexahedron/hexahedron'
 
 export const cellNamespace = {
     ...shapes,
@@ -23,6 +27,10 @@ export const cellNamespace = {
     Firewall,
     Frame,
     KubernetesWorkerNode,
+    Pyramid,
+    Hexagonal,
+    Octagon,
+    Hexahedron,
 }
 
 export {
@@ -36,4 +44,8 @@ export {
     Firewall,
     Frame,
     KubernetesWorkerNode,
+    Pyramid,
+    Hexagonal,
+    Octagon,
+    Hexahedron,
 }

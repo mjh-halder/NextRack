@@ -7,6 +7,7 @@ import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOO
 import { PropertyPanel } from './inspector';
 import { ComponentPalette } from './palette';
 import { saveGraph, loadGraph } from './persistence';
+import { ViewToggle } from './view-toggle';
 
 // Inline Carbon SVG icons (16 × 16) used in the menu components
 const CDS_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 4.7l-.7-.7L8 7.3 4.7 4l-.7.7L7.3 8 4 11.3l.7.7L8 8.7l3.3 3.3.7-.7L8.7 8z"/></svg>`;
@@ -14,7 +15,7 @@ const CDS_ICON_CHEVRON_DOWN = `<svg class="cds--select__arrow" xmlns="http://www
 const CDS_ICON_WARNING = `<svg class="cds--text-input__invalid-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 1C4.2 1 1 4.2 1 8s3.2 7 7 7 7-3.1 7-7-3.1-7-7-7zm-.5 3h1v5h-1V4zm.5 8.2c-.4 0-.8-.4-.8-.8s.4-.8.8-.8.8.4.8.8-.4.8-.8.8z"/></svg>`;
 
 export const canvasEl = document.getElementById('canvas') as HTMLDivElement;
-export const buttonEl = document.getElementById('toggle') as HTMLButtonElement;
+export const viewToggleContainerEl = document.getElementById('view-toggle-container') as HTMLDivElement;
 const inspectorEl = document.getElementById('inspector') as HTMLDivElement;
 export const paletteEl = document.getElementById('palette') as HTMLDivElement;
 export const designNameEl = document.getElementById('design-name') as HTMLDivElement;
@@ -232,8 +233,8 @@ paper.on('cell:mousewheel', (_cellView: dia.CellView, evt: dia.Event, x: number,
 
 // Switch between isometric and 2D view
 
-buttonEl.addEventListener('click', () => {
-    currentView = (currentView === View.Isometric) ? View.TwoDimensional : View.Isometric;
+new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
+    currentView = view === 'isometric' ? View.Isometric : View.TwoDimensional;
     currentZoom = 1; // reset zoom on view switch — matrices are incompatible across views
     switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCount);
 });

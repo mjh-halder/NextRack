@@ -2,36 +2,70 @@
     magnet-selector="base"
     highlighter-selector="base"
 >
-    <rect @selector="base" @group-selector="common"
-        width="calc(w)"
-        height="calc(h)"
+    <!-- 2D footprint — hit area, magnet, and 2D view representation -->
+    <path @selector="base" @group-selector="common"
+        :d="{{baseCuboidPath([size, cornerRadius])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
 
+    <!-- ISO: front face (bottom edge V2→V3) -->
     <path @selector="front" @group-selector="iso"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
-        :d="M 0 calc(h) L calc(w) calc(h) L calc(w - {{isometricHeight}}) calc(h - {{isometricHeight}}) L -{{isometricHeight}} calc(h - {{isometricHeight}}) Z"
+        :d="{{cuboidFrontPath([size, isometricHeight, cornerRadius, chamferSize])}}"
     />
 
+    <!-- ISO: side face (right edge V1→V2) -->
     <path @selector="side" @group-selector="iso"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
-        :d="M calc(w) calc(h) L calc(w) 0 L calc(w - {{isometricHeight}}) -{{isometricHeight}} L calc(w - {{isometricHeight}}) calc(h - {{isometricHeight}}) Z"
+        :d="{{cuboidSidePath([size, isometricHeight, cornerRadius, chamferSize])}}"
     />
 
-    <rect @selector="top" @group-selector="iso"
-        width="calc(w)"
-        height="calc(h)"
+    <!-- ISO: corner strips — rendered before top face -->
+    <path @selector="cornerV1" @group-selector="iso"
+        fill="#c6c6c6"
+        stroke="#333"
+        stroke-linejoin="round"
+        :d="{{cuboidCornerV1Path([size, isometricHeight, cornerRadius, chamferSize])}}"
+    />
+    <path @selector="cornerV2" @group-selector="iso"
+        fill="#c6c6c6"
+        stroke="#333"
+        stroke-linejoin="round"
+        :d="{{cuboidCornerV2Path([size, isometricHeight, cornerRadius, chamferSize])}}"
+    />
+    <path @selector="cornerV3" @group-selector="iso"
+        fill="#e0e0e0"
+        stroke="#333"
+        stroke-linejoin="round"
+        :d="{{cuboidCornerV3Path([size, isometricHeight, cornerRadius, chamferSize])}}"
+    />
+
+    <!-- ISO: top face — same footprint path shifted by (-iH, -iH) -->
+    <path @selector="top" @group-selector="iso"
         fill="#a8a8a8"
         stroke="#333"
         stroke-linejoin="round"
-        :x="{{topXPosition([isometricHeight], 10)}}"
-        :y="{{topYPosition([isometricHeight])}}"
+        :d="{{topCuboidPath([size, isometricHeight, cornerRadius, chamferSize])}}"
+    />
+
+    <!-- ISO: icon image on the top face; position/size set via attr() -->
+    <image @selector="topIcon" @group-selector="iso"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
+    <!-- 2D: icon image centered in the shape bounding box; position/size set via attr() -->
+    <image @selector="topIcon2D" @group-selector="2d"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
     />
 
     <text @selector="label" @group-selector="common"

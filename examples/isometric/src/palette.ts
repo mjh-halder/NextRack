@@ -1,8 +1,10 @@
 import { dia } from '@joint/core';
 import IsometricShape, { View } from './shapes/isometric-shape';
-import { Computer, Database, Firewall, Switch, Router, Frame, KubernetesWorkerNode } from './shapes';
+import { Frame } from './shapes';
 import { META_KEY, NodeMeta } from './inspector';
 import { GRID_SIZE } from './theme';
+import { ShapeRegistry } from './shapes/shape-registry';
+import { getPreviewFactory } from './shapes/shape-factories';
 
 // Carbon overflow-menu icon (3 vertical dots)
 const ICON_OVERFLOW = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor" width="16" height="16" aria-hidden="true"><circle cx="16" cy="8" r="2"/><circle cx="16" cy="16" r="2"/><circle cx="16" cy="24" r="2"/></svg>`;
@@ -13,18 +15,8 @@ interface PaletteItem {
     create: () => IsometricShape;
 }
 
-const PALETTE_ITEMS: PaletteItem[] = [
-    { label: 'Firewall',             kind: 'firewall',               create: () => new Firewall()              },
-    { label: 'Load Balancer',        kind: 'load-balancer',          create: () => new Switch()                },
-    { label: 'Server',               kind: 'server',                 create: () => new Computer()              },
-    { label: 'Storage',              kind: 'storage',                create: () => new Database()              },
-    { label: 'Switch',               kind: 'switch',                 create: () => new Switch()                },
-    { label: 'Router',               kind: 'router',                 create: () => new Router()                },
-    { label: 'K8s Worker Node',      kind: 'kubernetes-worker-node', create: () => new KubernetesWorkerNode()  },
-];
-
 const CONTAINER_ITEMS: PaletteItem[] = [
-    { label: 'Zone',          kind: 'zone',          create: () => new Frame()     },
+    { label: 'Zone', kind: 'zone', create: () => new Frame() },
 ];
 
 // Stagger new elements so they don't land on top of each other
@@ -81,7 +73,13 @@ export class ComponentPalette {
         header.appendChild(menuBtn);
         this.el.appendChild(header);
 
-        this.el.appendChild(this.buildSection('Components', PALETTE_ITEMS));
+        const componentItems: PaletteItem[] = Object.entries(ShapeRegistry).map(([id, defaults]) => ({
+            label: defaults.displayName ?? id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+            kind: id,
+            create: () => getPreviewFactory(id, defaults.baseShape ?? 'cuboid')(),
+        }));
+
+        this.el.appendChild(this.buildSection('Components', componentItems));
         this.el.appendChild(this.buildSection('Containers', CONTAINER_ITEMS));
     }
 
@@ -133,6 +131,14 @@ export class ComponentPalette {
 
         const shape = item.create();
         const meta: NodeMeta = { name: '', kind: item.kind, vendor: '', model: '', notes: '' };
+
+        // Apply registry defaults if available
+        const defaults = ShapeRegistry[item.kind];
+        if (defaults) {
+            if (defaults.defaultSize) shape.resize(defaults.defaultSize.width, defaults.defaultSize.height);
+            if (defaults.defaultIsometricHeight != null) shape.set('isometricHeight', defaults.defaultIsometricHeight);
+            shape.attr('label/text', defaults.displayName ?? item.label);
+        }
 
         shape.position(x, y);
         shape.set(META_KEY, meta);

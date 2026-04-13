@@ -1,14 +1,9 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './database.svg';
 import { CylinderShape } from '../isometric-shape';
-import { GRID_SIZE } from '../../theme';
+import { ShapeRegistry } from '../shape-registry';
 
-const defaultSize = {
-    width: GRID_SIZE,
-    height: GRID_SIZE
-};
-
-const defaultIsometricHeight = GRID_SIZE;
+const { defaultSize, defaultIsometricHeight } = ShapeRegistry['database'];
 
 @Model({
     attributes: {

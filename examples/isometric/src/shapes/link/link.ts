@@ -11,11 +11,13 @@ export class Link extends shapes.standard.Link {
                 line: {
                     connection: true,
                     stroke: '#333333',
-                    strokeWidth: 2,
+                    strokeWidth: 1,
                     strokeLinejoin: 'round',
                     targetMarker: {
                         'type': 'path',
-                        'd': 'M 3 -4 L -3 0 L 3 4 z'
+                        'd': 'M 3 -4 L -3 0 L 3 4 z',
+                        'fill': 'context-stroke',
+                        'stroke': 'context-stroke'
                     }
                 },
                 wrapper: {

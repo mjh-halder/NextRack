@@ -6,14 +6,22 @@
     left: 0;
     bottom: 0;
     width: 48px;
-    background: var(--cds-background-inverse, #161616);
+    /* cds--g100 is applied to this element so --cds-background resolves to #161616
+       in both light and dark page themes — the rail is always dark (Carbon UI shell pattern) */
+    background: var(--cds-background, #161616);
     display: flex;
     flex-direction: column;
     align-items: center;
     padding-top: var(--cds-spacing-05, 16px);
+    padding-bottom: var(--cds-spacing-03, 8px);
     gap: 2px;
     z-index: 20;
     box-sizing: border-box;
+}
+
+/* Theme toggle — pinned to bottom of rail */
+.nr-rail-item--bottom {
+    margin-top: auto;
 }
 
 /* Icon button in the rail */
@@ -57,7 +65,7 @@
     border-radius: 0 2px 2px 0;
 }
 
-/* Component Designer — fills the editor area when Component Designer is active */
+/* Component Designer — full-viewport overlay, same layout as System Designer */
 
 #component-designer {
     display: none;
@@ -66,144 +74,328 @@
     left: 48px;
     right: 0;
     bottom: 0;
-    background: var(--cds-background, #ffffff);
     z-index: 9;
-    flex-direction: row;
 }
 
-/* Left sidebar: icon picker + shape selector */
-
-#cd-sidebar {
-    width: 220px;
-    flex-shrink: 0;
+/* Palette — mirrors #palette */
+#cd2-palette {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 160px;
+    background: var(--cds-layer-01, #f4f4f4);
     border-right: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    overflow-y: auto;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    z-index: 10;
+}
+
+/* Canvas area — split into two equal panes (2D top, isometric bottom) */
+#cd2-canvas-wrap {
+    position: absolute;
+    top: 0;
+    left: 160px;
+    right: 240px;
+    bottom: 0;
+    overflow: hidden;
     background: var(--cds-background, #ffffff);
     display: flex;
     flex-direction: column;
-    overflow-y: auto;
 }
 
-.cd-section {
-    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
-}
-
-.cd-section-title {
-    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--cds-text-secondary, #525252);
-    background: var(--cds-layer-01, #f4f4f4);
-    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
-    padding: var(--cds-spacing-03, 8px) var(--cds-spacing-05, 16px);
-    margin: 0;
-}
-
-/* Icon picker grid */
-
-#cd-icon-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: var(--cds-spacing-02, 4px);
-    padding: var(--cds-spacing-03, 8px);
-}
-
-.cd-icon-btn {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 3px;
-    padding: var(--cds-spacing-03, 8px) var(--cds-spacing-02, 4px);
-    background: var(--cds-layer-01, #f4f4f4);
-    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
-    cursor: pointer;
-    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
-    font-size: 0.625rem;
-    color: var(--cds-text-secondary, #525252);
-    text-align: center;
-    transition: border-color 0.1s, background 0.1s;
-    line-height: 1.2;
-}
-
-.cd-icon-btn:hover {
-    border-color: var(--cds-border-strong-01, #8d8d8d);
-    background: var(--cds-layer-hover-01, #e8e8e8);
-}
-
-.cd-icon-btn--active {
-    border-color: var(--cds-focus, #0f62fe);
-    background: var(--cds-highlight, #d0e2ff);
-    color: var(--cds-text-primary, #161616);
-}
-
-.cd-icon-btn img {
-    width: 32px;
-    height: 32px;
-    object-fit: contain;
-    display: block;
-}
-
-/* Base shape selector */
-
-#cd-shape-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: var(--cds-spacing-02, 4px);
-    padding: var(--cds-spacing-03, 8px);
-}
-
-.cd-shape-btn {
-    height: 2rem;
-    padding: 0 var(--cds-spacing-03, 8px);
-    background: var(--cds-layer-01, #f4f4f4);
-    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
-    cursor: pointer;
-    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
-    font-size: 0.8125rem;
-    color: var(--cds-text-secondary, #525252);
-    transition: border-color 0.1s, background 0.1s, color 0.1s;
-}
-
-.cd-shape-btn:hover {
-    border-color: var(--cds-border-strong-01, #8d8d8d);
-    background: var(--cds-layer-hover-01, #e8e8e8);
-    color: var(--cds-text-primary, #161616);
-}
-
-.cd-shape-btn--active {
-    border-color: var(--cds-focus, #0f62fe);
-    background: var(--cds-highlight, #d0e2ff);
-    color: var(--cds-text-primary, #161616);
-}
-
-/* Preview area */
-
-#cd-preview-area {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    background: var(--cds-layer-01, #f4f4f4);
-    overflow: hidden;
-}
-
-#cd-preview-wrap {
+/* Each view pane fills half the canvas area */
+.cd2-view-pane {
     flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--cds-spacing-07, 32px);
+    position: relative;
+    overflow: hidden;
 }
 
-#cd-preview-svg {
-    width: 100%;
-    height: 100%;
-    max-width: 480px;
-    max-height: 480px;
-    aspect-ratio: 1;
-    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
-    background: #ffffff;
+.cd2-view-pane + .cd2-view-pane {
+    border-top: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+}
+
+/* Pane label — 2D / Isometric */
+.cd2-pane-label {
+    position: absolute;
+    top: 6px;
+    left: 10px;
+    font-family: var(--cds-label-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-label-01-font-size, 0.75rem);
+    color: var(--cds-text-helper, #6f6f6f);
+    pointer-events: none;
+    z-index: 1;
+    user-select: none;
+}
+
+/* View toggle hidden — dual-view replaces it */
+#cd2-view-toggle-container {
+    display: none;
+}
+
+/* Inspector — full-height right panel */
+#cd2-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 240px;
+    background: var(--cds-background, #ffffff);
+    border-left: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+    color: var(--cds-text-primary, #161616);
+    box-sizing: border-box;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+}
+
+/* Accordion: hide content when collapsed, show when active */
+#cd2-inspector .cds--accordion__content {
+    display: none;
+    padding-inline: var(--cds-spacing-05, 16px);
+    padding-block: var(--cds-spacing-03, 8px) var(--cds-spacing-05, 16px);
+}
+
+#cd2-inspector .cds--accordion__item--active > .cds--accordion__content {
     display: block;
+}
+
+/* Accordion arrow: rotate 90° when section is open */
+#cd2-inspector .cds--accordion__arrow {
+    transition: transform 0.11s cubic-bezier(0.2, 0, 0.38, 0.9);
+}
+
+#cd2-inspector .cds--accordion__item--active > .cds--accordion__heading > .cds--accordion__arrow {
+    transform: rotate(90deg);
+}
+
+/* Icon picker: 3-column grid of icon buttons */
+.nr-sd-icon-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--cds-spacing-02, 4px);
+}
+
+.nr-sd-icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 1;
+    padding: 6px;
+    background: var(--cds-layer-01, #f4f4f4);
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    cursor: pointer;
+    box-sizing: border-box;
+    color: var(--cds-icon-secondary, #525252);
+}
+
+.nr-sd-icon-btn:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+    border-color: var(--cds-border-strong-01, #8d8d8d);
+}
+
+.nr-sd-icon-btn--selected {
+    background: var(--cds-layer-selected-01, #e0e0e0);
+    border-color: var(--cds-interactive, #0f62fe);
+    color: var(--cds-interactive, #0f62fe);
+}
+
+.nr-sd-icon-btn svg {
+    width: 24px;
+    height: 24px;
+    max-width: 100%;
+    max-height: 100%;
+}
+
+/* Dark mode: show icon picker SVGs in white */
+.cds--g100 .nr-sd-icon-btn svg {
+    filter: brightness(0) invert(1);
+}
+
+/* White-mode preview: invert icon picker SVGs */
+/* Icon pagination */
+.nr-sd-icon-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--cds-spacing-03, 8px);
+    padding: var(--cds-spacing-02, 4px) 0;
+}
+
+.nr-sd-icon-page-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--cds-text-secondary, #525252);
+    padding: 2px 4px;
+    border-radius: 2px;
+    display: flex;
+    align-items: center;
+}
+
+.nr-sd-icon-page-btn:hover:not(:disabled) {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+    color: var(--cds-text-primary, #161616);
+}
+
+.nr-sd-icon-page-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.nr-sd-icon-page-label {
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.75rem;
+    color: var(--cds-text-secondary, #525252);
+    min-width: 36px;
+    text-align: center;
+}
+
+/* Icon face selector (Top / Front) */
+.nr-sd-face-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--cds-spacing-02, 4px) var(--cds-spacing-03, 8px);
+}
+
+.nr-sd-face-switcher {
+    display: flex;
+    border: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.nr-sd-face-btn {
+    padding: 3px 10px;
+    background: none;
+    border: none;
+    border-left: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.75rem;
+    color: var(--cds-text-secondary, #525252);
+    cursor: pointer;
+}
+
+.nr-sd-face-btn:first-child { border-left: none; }
+
+.nr-sd-face-btn--active {
+    background: var(--cds-interactive, #0f62fe);
+    color: #ffffff;
+}
+
+/* Icon size slider */
+.nr-sd-slider-row {
+    padding: 8px 8px 4px;
+}
+
+.nr-sd-slider-label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+}
+
+.nr-sd-slider-value {
+    font-size: 11px;
+    color: var(--cds-text-secondary, #525252);
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-variant-numeric: tabular-nums;
+}
+
+.nr-sd-slider {
+    width: 100%;
+    accent-color: var(--cds-interactive, #0f62fe);
+    cursor: pointer;
+}
+
+/* Color picker rows */
+.nr-sd-color-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--cds-spacing-03, 8px);
+    margin-bottom: var(--cds-spacing-03, 8px);
+}
+
+.nr-sd-color-row .cds--label {
+    flex: 1;
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--cds-text-secondary, #525252);
+}
+
+.nr-sd-color-input {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    cursor: pointer;
+    padding: 2px;
+    background: none;
+    flex-shrink: 0;
+}
+
+/* Sticky save footer */
+.nr-btn--danger-ghost {
+    background: transparent;
+    border: 1px solid var(--cds-support-error, #da1e28);
+    color: var(--cds-support-error, #da1e28);
+}
+
+.nr-btn--danger-ghost:hover {
+    background: var(--cds-support-error, #da1e28);
+    color: #ffffff;
+}
+
+.nr-sd-name-section {
+    padding: var(--cds-spacing-04, 12px) var(--cds-spacing-05, 16px) var(--cds-spacing-03, 8px);
+    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    display: flex;
+    flex-direction: column;
+    gap: var(--cds-spacing-02, 4px);
+}
+
+.nr-sd-panel-footer {
+    margin-top: auto;
+    padding: var(--cds-spacing-05, 16px);
+    border-top: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    background: var(--cds-background, #ffffff);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--cds-spacing-03, 8px);
+}
+
+/* Design name label — mirrors #design-name */
+#cd2-design-name {
+    display: none;
+    position: absolute;
+    top: var(--cds-spacing-03, 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+    font-weight: var(--cds-body-compact-01-font-weight, 400);
+    color: var(--cds-text-secondary, #525252);
+    background-color: var(--cds-layer-01, #f4f4f4);
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    padding: var(--cds-spacing-02, 4px) var(--cds-spacing-05, 16px);
+    pointer-events: none;
+    z-index: 5;
 }
 
 /* Design name label — shown after creating a new design.
@@ -238,7 +430,7 @@
     left: 48px;
     bottom: 0;
     width: 160px;
-    background: var(--cds-background, #ffffff);
+    background: var(--cds-layer-01, #f4f4f4);
     border-right: 1px solid var(--cds-border-subtle-00, #e0e0e0);
     overflow-y: auto;
     z-index: 10;
@@ -265,6 +457,61 @@
     color: var(--cds-text-primary, #161616);
     letter-spacing: 0.01em;
     white-space: nowrap;
+}
+
+/* Component list in palette panel */
+.nr-palette-new-btn {
+    display: block;
+    width: 100%;
+    padding: var(--cds-spacing-03, 8px) var(--cds-spacing-05, 16px);
+    background: none;
+    border: none;
+    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    text-align: left;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+    color: var(--cds-interactive, #0f62fe);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.nr-palette-new-btn:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+}
+
+.nr-palette-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.nr-palette-item {
+    display: block;
+    width: 100%;
+    padding: var(--cds-spacing-03, 8px) var(--cds-spacing-05, 16px);
+    background: none;
+    border: none;
+    text-align: left;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
+    color: var(--cds-text-primary, #161616);
+    cursor: pointer;
+    border-left: 3px solid transparent;
+}
+
+
+.nr-palette-item:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+}
+
+.nr-palette-item--selected {
+    background: var(--cds-layer-selected-01, #e0e0e0);
+    border-left-color: var(--cds-interactive, #0f62fe);
+    font-weight: 600;
+}
+
+.nr-palette-item--selected:hover {
+    background: var(--cds-layer-selected-hover-01, #d1d1d1);
 }
 
 /* Override Carbon ghost icon-only button to fit the compact header */
@@ -350,32 +597,28 @@
     inline-size: 100%;
 }
 
-/* Toggle view button — Carbon ghost button style */
-#toggle {
+/* View toggle — system designer: fixed top-right */
+#view-toggle-container {
     position: fixed;
     top: 10px;
     right: 10px;
-    height: 2rem;
-    padding: 0 var(--cds-spacing-04, 12px);
-    background: var(--cds-background, #ffffff);
-    border: 1px solid var(--cds-border-subtle-01, #c6c6c6);
-    color: var(--cds-text-secondary, #525252);
-    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
-    font-size: 0.875rem;
-    font-weight: 400;
-    cursor: pointer;
-    transition: background 0.1s, color 0.1s, border-color 0.1s;
+    z-index: 100;
 }
 
-#toggle:hover {
-    background: var(--cds-layer-hover-01, #e8e8e8);
-    border-color: var(--cds-border-strong-01, #8d8d8d);
-    color: var(--cds-text-primary, #161616);
+/* View toggle — icon-only button sizing override for both placements */
+.nr-view-toggle.cds--content-switcher {
+    width: auto;
 }
 
-#toggle:focus-visible {
-    outline: 2px solid var(--cds-focus, #0f62fe);
-    outline-offset: -2px;
+.nr-view-toggle .cds--content-switcher-btn {
+    width: 2rem;
+    min-width: 0;
+    padding-inline: 0;
+    justify-content: center;
+}
+
+.nr-view-toggle .cds--content-switcher--selected img {
+    filter: invert(1) !important;
 }
 
 #logo {
@@ -388,15 +631,20 @@
 
 #inspector {
     position: fixed;
-    top: 48px;
-    right: 10px;
+    top: 0;
+    right: 0;
+    bottom: 0;
     width: 240px;
     background: var(--cds-background, #ffffff);
-    border: 1px solid var(--cds-border-subtle-00, #e0e0e0);
+    border-left: 1px solid var(--cds-border-subtle-00, #e0e0e0);
     font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
     font-size: var(--cds-body-compact-01-font-size, 0.875rem);
     color: var(--cds-text-primary, #161616);
     box-sizing: border-box;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
 }
 
 #inspector.inspector-hidden {
@@ -516,3 +764,69 @@
     background: var(--cds-support-error, #da1e28);
     color: #ffffff;
 }
+
+/* ── Canvas theme overrides ──────────────────────────────────────────────────
+ *
+ * Shape geometry is defined in SVG files with hardcoded presentation attributes
+ * (fill="#e0e0e0", stroke="#333", etc.). Per the SVG spec, CSS rules outrank
+ * presentation attributes — no !important needed for shapes.
+ *
+ * Links: JointJS renders the visible line stroke via inline style (requires
+ * !important). The link markup also contains an invisible hit-area wrapper path
+ * with stroke="transparent" and stroke-width="10". Because the broad `path`
+ * selector would color and thicken that wrapper, we also reset stroke-width so
+ * both paths are equally thin and the wrapper stays visually inert.
+ *
+ * Color mapping (Carbon Gray scale):
+ *   light face  #e0e0e0 → dark #525252 (Gray 70)  — front face / base
+ *   light face  #c6c6c6 → dark #393939 (Gray 80)  — side face
+ *   light face  #a8a8a8 → dark #6f6f6f (Gray 60)  — top face
+ *   light stroke  #333  → light #8d8d8d (Gray 50)  — shape edges (softer)
+ *   dark  stroke  #333  → dark  #525252 (Gray 70)  — shape edges (muted)
+ *   label fill    #333  → dark  #e0e0e0 (Gray 20)  — text
+ *   label halo    #fff  → dark  #393939 (Gray 80)  — text halo
+ *   link  stroke #333333→ dark  #8d8d8d (Gray 50)  — connections
+ *   grid  stroke #E0E0E0→ dark  #393939 (Gray 80)  — grid lines
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/* Light mode — soften shape edges one step (Gray 60 instead of near-black #333) */
+.cds--white .joint-element [stroke="#333"] { stroke: #6f6f6f; }
+
+/* Dark mode — shape face fills */
+.cds--g100 .joint-element [fill="#e0e0e0"] { fill: #525252; }
+.cds--g100 .joint-element [fill="#c6c6c6"] { fill: #393939; }
+.cds--g100 .joint-element [fill="#a8a8a8"] { fill: #6f6f6f; }
+
+/* Dark mode — shape edge strokes: base fallback */
+.cds--g100 .joint-element [stroke="#333"]  { stroke: #161616; }
+
+/* Dark mode — outer faces */
+.cds--g100 .joint-element [joint-selector="front"],
+.cds--g100 .joint-element [joint-selector="side"],
+.cds--g100 .joint-element [joint-selector="top"],
+.cds--g100 .joint-element [joint-selector="base"],
+.cds--g100 .joint-element [joint-selector="bottomLeft"],
+.cds--g100 .joint-element [joint-selector="bottomRight"],
+.cds--g100 .joint-element [joint-selector="lowerRight"],
+.cds--g100 .joint-element [joint-selector="upperRight"],
+.cds--g100 .joint-element [joint-selector="frontLeft"],
+.cds--g100 .joint-element [joint-selector="frontBottom"],
+.cds--g100 .joint-element [joint-selector="frontRight"] { stroke: #161616; }
+
+/* Dark mode — inner corner facets */
+.cds--g100 .joint-element [joint-selector^="cornerV"] { stroke: #161616; }
+
+/* Dark mode — label text: fill + halo */
+.cds--g100 .joint-element text[fill="#333"]   { fill: #e0e0e0; }
+.cds--g100 .joint-element text[stroke="#fff"] { stroke: #393939; }
+
+/* Dark mode — connections + arrowheads.
+   Strategy: override stroke/fill/width on ALL link paths, then restore fill:none
+   for the two connection paths (wrapper & line) that carry fill="none" as an SVG
+   attribute in JointJS's markup. The arrowhead path has a real fill color set
+   (not "none") so it keeps the #8d8d8d fill and matches the line. */
+.cds--g100 .joint-link path                { stroke: #8d8d8d !important; stroke-width: 1 !important; fill: #8d8d8d !important; }
+.cds--g100 .joint-link path[fill="none"]   { fill: none !important; }
+
+/* Grid lines */
+.cds--g100 .nr-grid-lines { stroke: #2d2d2d; }

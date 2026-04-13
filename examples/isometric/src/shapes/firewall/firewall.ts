@@ -1,14 +1,9 @@
 import { Model, Function } from "@joint/decorators";
 import svg from './firewall.svg';
 import { CuboidShape } from '../isometric-shape';
-import { GRID_SIZE } from '../../theme';
+import { ShapeRegistry } from '../shape-registry';
 
-const defaultSize = {
-    width: GRID_SIZE * 3,
-    height: GRID_SIZE
-};
-
-const defaultIsometricHeight = GRID_SIZE * 2;
+const { defaultSize, defaultIsometricHeight } = ShapeRegistry['firewall'];
 
 @Model({
     attributes: {
@@ -22,12 +17,37 @@ const defaultIsometricHeight = GRID_SIZE * 2;
 export class Firewall extends CuboidShape {
 
     @Function()
-    topXPosition(): number {
-        return this.topX
+    baseCuboidPath(): string {
+        return super.baseCuboidPath();
     }
 
     @Function()
-    topYPosition(): number {
-        return this.topY;
+    topCuboidPath(): string {
+        return super.topCuboidPath();
+    }
+
+    @Function()
+    cuboidFrontPath(): string {
+        return super.cuboidFrontPath();
+    }
+
+    @Function()
+    cuboidSidePath(): string {
+        return super.cuboidSidePath();
+    }
+
+    @Function()
+    cuboidCornerV1Path(): string {
+        return super.cuboidCornerV1Path();
+    }
+
+    @Function()
+    cuboidCornerV2Path(): string {
+        return super.cuboidCornerV2Path();
+    }
+
+    @Function()
+    cuboidCornerV3Path(): string {
+        return super.cuboidCornerV3Path();
     }
 }

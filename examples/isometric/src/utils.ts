@@ -92,7 +92,7 @@ export const sortElements = (graph) => {
     return nodes;
 }
 
-export const drawGrid = (paper: dia.Paper, size: number, step: number, color = '#E0E0E0') => {
+export const drawGrid = (paper: dia.Paper, size: number, step: number, color = '#e8e8e8') => {
     const gridData = [];
     const j = size;
     for (let i = 0; i <= j; i++) {
@@ -102,7 +102,8 @@ export const drawGrid = (paper: dia.Paper, size: number, step: number, color = '
     const gridVEl = V('path').attr({
         'd': gridData.join(' '),
         'fill': 'none',
-        'stroke': color
+        'stroke': color,
+        'class': 'nr-grid-lines'
     });
     gridVEl.appendTo(paper.getLayerNode(dia.Paper.Layers.BACK));
     return gridVEl;
