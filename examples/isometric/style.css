@@ -539,9 +539,10 @@
 }
 
 /* Sticky save footer */
-.nr-btn--danger-ghost {
+.nr-btn--danger-ghost,
+.cds--btn.nr-btn--danger-ghost {
     background: transparent;
-    border: 1px solid var(--cds-support-error, #da1e28);
+    border: 1px solid var(--cds-support-error, #da1e28) !important;
     color: var(--cds-support-error, #da1e28);
 }
 
@@ -570,26 +571,6 @@
 }
 
 /* Design name label — mirrors #design-name */
-#cd2-design-name {
-    display: none;
-    position: absolute;
-    top: var(--cds-spacing-03, 8px);
-    left: 50%;
-    transform: translateX(-50%);
-    max-width: 320px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
-    font-size: var(--cds-body-compact-01-font-size, 0.875rem);
-    font-weight: var(--cds-body-compact-01-font-weight, 400);
-    color: var(--cds-text-secondary, #525252);
-    background-color: var(--cds-layer-01, #f4f4f4);
-    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
-    padding: var(--cds-spacing-02, 4px) var(--cds-spacing-05, 16px);
-    pointer-events: none;
-    z-index: 5;
-}
 
 /* Design name label — shown after creating a new design.
    No exact Carbon component match; styled with Carbon design tokens. */
@@ -1012,11 +993,6 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
     position: relative;
 }
 
-#logo {
-    position: fixed;
-    bottom: 10px;
-    right: 10px;
-}
 
 /* Property Panel — Carbon-inspired enterprise style */
 

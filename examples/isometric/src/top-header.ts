@@ -48,8 +48,9 @@ const MENUS: MenuGroup[] = [
     {
         label: 'Model',
         items: [
-            { label: 'Add Zone', action: 'model-add-zone' }, // placeholder
-            { label: 'Validate', action: 'model-validate' }, // placeholder
+            { label: 'Adjust Grid Size', action: 'model-adjust-grid' },
+            { label: 'Add Zone',         action: 'model-add-zone'    }, // placeholder
+            { label: 'Validate',         action: 'model-validate'    }, // placeholder
         ],
     },
     {

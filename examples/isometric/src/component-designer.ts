@@ -3,7 +3,7 @@ import IsometricShape, { View } from './shapes/isometric-shape';
 import { cellNamespace } from './shapes';
 import { Link } from './shapes/link/link';
 import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFactory } from './shapes/shape-factories';
-import { drawGrid, switchView, transformationMatrix } from './utils';
+import { drawGrid, switchView, transformationMatrix, applyShapeStyle } from './utils';
 import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
@@ -48,7 +48,6 @@ const canvasEl     = document.getElementById('cd2-canvas')                as HTM
 const canvasEl2D   = document.getElementById('cd2-canvas-2d')             as HTMLDivElement;
 const inspectorEl  = document.getElementById('cd2-inspector')             as HTMLDivElement;
 const paletteEl    = document.getElementById('cd2-palette')               as HTMLDivElement;
-const designNameEl = document.getElementById('cd2-design-name')           as HTMLDivElement;
 
 
 
@@ -125,6 +124,9 @@ let selectedIconBgShape: 'circle' | 'square' = 'circle';
 // them without relying on a DOM query that could match unrelated elements.
 let iconBgSwatchRefs: Array<{ btn: HTMLElement; colorBase: string }> = [];
 
+// Direct reference to the single color picker for sync without DOM queries.
+let colorPickerRef: HTMLInputElement | null = null;
+
 // Icon white tint state
 let iconPage = 0;
 const ICON_PAGE_SIZE = 12;
@@ -142,11 +144,7 @@ graph.set('obstacles', { isFree: () => true });
 const paper = new dia.Paper({
     el: canvasEl,
     model: graph,
-    // Single shape: only clamp to positive coordinates, no obstacle logic needed.
-    restrictTranslate: () => (x: number, y: number) => ({
-        x: Math.max(0, x),
-        y: Math.max(0, y),
-    }),
+    interactive: { elementMove: false },
     gridSize: GRID_SIZE,
     async: true,
     autoFreeze: true,
@@ -806,34 +804,57 @@ function buildIconBackgroundContent(container: HTMLElement) {
 }
 
 function buildColorContent(container: HTMLElement) {
-    const COLOR_FIELDS: Array<{ label: string; id: string; key: keyof typeof selectedStyle }> = [
-        { label: 'Top face',   id: 'sd-color-top',    key: 'topColor' },
-        { label: 'Front face', id: 'sd-color-front',  key: 'frontColor' },
-        { label: 'Side face',  id: 'sd-color-side',   key: 'sideColor' },
-        { label: 'Stroke',     id: 'sd-color-stroke', key: 'strokeColor' },
-    ];
+    const row = document.createElement('div');
+    row.className = 'nr-sd-color-row';
 
-    for (const field of COLOR_FIELDS) {
-        const row = document.createElement('div');
-        row.className = 'nr-sd-color-row';
+    const lbl = document.createElement('label');
+    lbl.className = 'cds--label';
+    lbl.setAttribute('for', 'sd-color-base');
+    lbl.textContent = 'Shape Color';
 
-        const lbl = document.createElement('label');
-        lbl.className = 'cds--label';
-        lbl.setAttribute('for', field.id);
-        lbl.textContent = field.label;
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.id = 'sd-color-base';
+    input.className = 'nr-sd-color-input';
+    const current = selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || '#e0e0e0';
+    input.value = current;
+    colorPickerRef = input;
 
-        const input = document.createElement('input');
-        input.type = 'color';
-        input.id = field.id;
-        input.className = 'nr-sd-color-input';
-        input.value = selectedStyle[field.key] || '#e0e0e0';
+    input.addEventListener('input', () => {
+        const val = input.value;
+        selectedStyle.topColor   = val;
+        selectedStyle.frontColor = val;
+        selectedStyle.sideColor  = val;
+        if (currentShape)   applyShapeStyle(currentShape,   selectedStyle);
+        if (currentShape2D) applyShapeStyle(currentShape2D, selectedStyle);
+    });
 
-        input.addEventListener('input', () => { selectedStyle[field.key] = input.value; });
+    row.appendChild(lbl);
+    row.appendChild(input);
+    container.appendChild(row);
 
-        row.appendChild(lbl);
-        row.appendChild(input);
-        container.appendChild(row);
-    }
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'cds--btn cds--btn--ghost cds--btn--sm';
+    clearBtn.style.marginTop = '4px';
+    clearBtn.textContent = 'Clear Color';
+    clearBtn.addEventListener('click', () => {
+        selectedStyle.topColor   = '';
+        selectedStyle.frontColor = '';
+        selectedStyle.sideColor  = '';
+        input.value = '#e0e0e0';
+        if (currentShape) {
+            currentShape.attr('top/fill',   '#a8a8a8');
+            currentShape.attr('front/fill', '#e0e0e0');
+            currentShape.attr('side/fill',  '#c6c6c6');
+        }
+        if (currentShape2D) {
+            currentShape2D.attr('top/fill',   '#a8a8a8');
+            currentShape2D.attr('front/fill', '#e0e0e0');
+            currentShape2D.attr('side/fill',  '#c6c6c6');
+        }
+    });
+    container.appendChild(clearBtn);
 }
 
 function buildInspectorPanel() {
@@ -906,7 +927,15 @@ function buildInspectorPanel() {
     deleteBtn.innerHTML = `${CDS_ICON_TRASH} Delete Shape`;
     deleteBtn.addEventListener('click', () => showDeleteConfirmModal(currentShapeId));
 
+    const duplicateBtn = document.createElement('button');
+    duplicateBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
+    duplicateBtn.type = 'button';
+    duplicateBtn.style.width = '100%';
+    duplicateBtn.textContent = 'Duplicate';
+    duplicateBtn.addEventListener('click', () => showDuplicateShapeModal(currentShapeId));
+
     footer.appendChild(saveBtn);
+    footer.appendChild(duplicateBtn);
     footer.appendChild(deleteBtn);
     inspectorEl.appendChild(footer);
 }
@@ -1024,17 +1053,9 @@ function syncExtrasFromShape(id: string) {
         r.checked = r.value === selectedIconBgShape;
     });
 
-    // Sync color inputs
-    const colorMap: Array<[string, string]> = [
-        ['sd-color-top',    selectedStyle.topColor    || '#e0e0e0'],
-        ['sd-color-front',  selectedStyle.frontColor  || '#e0e0e0'],
-        ['sd-color-side',   selectedStyle.sideColor   || '#e0e0e0'],
-        ['sd-color-stroke', selectedStyle.strokeColor || '#e0e0e0'],
-    ];
-    for (const [elId, value] of colorMap) {
-        const el = inspectorEl.querySelector<HTMLInputElement>(`#${elId}`);
-        if (el) el.value = value;
-    }
+    // Sync single color input
+    const representativeColor = selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || '#e0e0e0';
+    if (colorPickerRef) colorPickerRef.value = representativeColor;
 
     // Apply dimension lock now that selectedBaseShape has been updated.
     updateDimensionLock();
@@ -1145,6 +1166,15 @@ function onSave() {
     document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
 }
 
+function centerShapeOnCanvas(shape: IsometricShape, shape2D: IsometricShape | null) {
+    const gridPx = CD_GRID_COUNT * GRID_SIZE;
+    const { width, height } = shape.size();
+    const posX = (gridPx - width)  / 2;
+    const posY = (gridPx - height) / 2;
+    shape.position(posX, posY);
+    shape2D?.position(posX, posY);
+}
+
 // Keep form in sync when resize or height tools are used directly on the shape.
 graph.on('change:size', (cell: dia.Cell) => {
     if (currentShape && cell.id === currentShape.id) {
@@ -1154,6 +1184,7 @@ graph.on('change:size', (cell: dia.Cell) => {
             const { width, height } = currentShape.size();
             currentShape2D.resize(width, height);
         }
+        centerShapeOnCanvas(currentShape, currentShape2D);
     }
 });
 
@@ -1164,6 +1195,7 @@ graph.on('change:isometricHeight', (cell: dia.Cell) => {
         if (currentShape2D) {
             currentShape2D.set('isometricHeight', currentShape.get('isometricHeight'));
         }
+        centerShapeOnCanvas(currentShape, currentShape2D);
     }
 });
 
@@ -1194,6 +1226,148 @@ function onCreateShape(name: string) {
     buildPalettePanel();
     buildInspectorPanel();
     loadShapeIntoCanvas(id);
+}
+
+function onDuplicateShape(sourceId: string, newName: string) {
+    const newId = nameToId(newName);
+    const source = ShapeRegistry[sourceId];
+    addShape(newId, {
+        defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
+        defaultIsometricHeight: GRID_SIZE * 0.5,
+        ...(source ?? {}),
+        displayName: newName,
+    });
+    saveRegistryToStorage();
+    document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+    currentShapeId = newId;
+    buildPalettePanel();
+    buildInspectorPanel();
+    loadShapeIntoCanvas(newId);
+}
+
+function showDuplicateShapeModal(sourceId: string) {
+    const sourceName = ShapeRegistry[sourceId]?.displayName ?? formatLabel(sourceId);
+
+    const modalEl = document.createElement('div');
+    modalEl.className = 'cds--modal is-visible';
+    modalEl.setAttribute('role', 'dialog');
+    modalEl.setAttribute('aria-modal', 'true');
+    modalEl.setAttribute('aria-labelledby', 'nr-dup-modal-heading');
+
+    const containerEl = document.createElement('div');
+    containerEl.className = 'cds--modal-container cds--modal-container--sm';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'cds--modal-header';
+
+    const headingEl = document.createElement('p');
+    headingEl.className = 'cds--modal-header__heading';
+    headingEl.id = 'nr-dup-modal-heading';
+    headingEl.textContent = 'Duplicate Component';
+
+    const closeBtnWrapper = document.createElement('div');
+    closeBtnWrapper.className = 'cds--modal-close-button';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'cds--modal-close';
+    closeBtn.type = 'button';
+    closeBtn.title = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = CDS_ICON_CLOSE;
+    closeBtn.addEventListener('click', () => modalEl.remove());
+    closeBtnWrapper.appendChild(closeBtn);
+
+    headerEl.appendChild(headingEl);
+    headerEl.appendChild(closeBtnWrapper);
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'cds--modal-content';
+
+    const formItem = document.createElement('div');
+    formItem.className = 'cds--form-item';
+
+    const inputWrapper = document.createElement('div');
+    inputWrapper.className = 'cds--text-input-wrapper';
+
+    const label = document.createElement('label');
+    label.className = 'cds--label';
+    label.setAttribute('for', 'nr-dup-name-input');
+    label.textContent = 'New Name';
+
+    const outerWrapper = document.createElement('div');
+    outerWrapper.className = 'cds--text-input__field-outer-wrapper';
+
+    const fieldWrapper = document.createElement('div');
+    fieldWrapper.className = 'cds--text-input__field-wrapper';
+
+    const nameInput = document.createElement('input');
+    nameInput.id = 'nr-dup-name-input';
+    nameInput.type = 'text';
+    nameInput.className = 'cds--text-input';
+    nameInput.value = `${sourceName} Copy`;
+
+    const errorEl = document.createElement('div');
+    errorEl.className = 'cds--form-requirement';
+    errorEl.style.display = 'none';
+
+    fieldWrapper.appendChild(nameInput);
+    outerWrapper.appendChild(fieldWrapper);
+    inputWrapper.appendChild(label);
+    inputWrapper.appendChild(outerWrapper);
+    inputWrapper.appendChild(errorEl);
+    formItem.appendChild(inputWrapper);
+    bodyEl.appendChild(formItem);
+
+    const footerEl = document.createElement('div');
+    footerEl.className = 'cds--modal-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => modalEl.remove());
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'cds--btn cds--btn--primary';
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Duplicate';
+    confirmBtn.addEventListener('click', () => {
+        const name = nameInput.value.trim();
+        if (name.length < 1) {
+            fieldWrapper.setAttribute('data-invalid', 'true');
+            nameInput.className = 'cds--text-input cds--text-input--invalid';
+            nameInput.setAttribute('aria-invalid', 'true');
+            if (!fieldWrapper.querySelector('.cds--text-input__invalid-icon')) {
+                fieldWrapper.insertAdjacentHTML('beforeend', CDS_ICON_WARNING);
+            }
+            errorEl.textContent = 'Please enter a name.';
+            errorEl.style.display = '';
+            nameInput.focus();
+            return;
+        }
+        modalEl.remove();
+        onDuplicateShape(sourceId, name);
+    });
+
+    nameInput.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter') confirmBtn.click();
+        if (e.key === 'Escape') modalEl.remove();
+    });
+
+    footerEl.appendChild(cancelBtn);
+    footerEl.appendChild(confirmBtn);
+
+    containerEl.appendChild(headerEl);
+    containerEl.appendChild(bodyEl);
+    containerEl.appendChild(footerEl);
+    modalEl.appendChild(containerEl);
+    document.body.appendChild(modalEl);
+
+    modalEl.addEventListener('mousedown', (e: MouseEvent) => {
+        if (e.target === modalEl) modalEl.remove();
+    });
+
+    nameInput.select();
+    nameInput.focus();
 }
 
 function showNewShapeModal() {
@@ -1413,13 +1587,47 @@ function onDeleteShape(id: string) {
         graph2D.clear();
         currentShape = null;
         currentShape2D = null;
-        designNameEl.style.display = 'none';
     } else {
         const next = remaining.includes(currentShapeId) ? currentShapeId : remaining[0];
         currentShapeId = next;
         loadShapeIntoCanvas(next);
     }
     buildPalettePanel();
+}
+
+const CD_ICON_CHEVRON_DOWN = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 11L3 6l.7-.7L8 9.6l4.3-4.3.7.7z"/></svg>`;
+
+function buildCollapsibleSection(title: string, body: HTMLElement, separator: boolean): HTMLElement {
+    const section = document.createElement('div');
+    section.className = 'nr-palette-section' + (separator ? ' nr-palette-section--separated' : '');
+
+    const headerBtn = document.createElement('button');
+    headerBtn.className = 'nr-section-header';
+    headerBtn.type = 'button';
+    headerBtn.setAttribute('aria-expanded', 'true');
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = title;
+
+    const chevronSpan = document.createElement('span');
+    chevronSpan.className = 'nr-section-chevron';
+    chevronSpan.innerHTML = CD_ICON_CHEVRON_DOWN;
+
+    headerBtn.appendChild(labelSpan);
+    headerBtn.appendChild(chevronSpan);
+
+    const bodyWrapper = document.createElement('div');
+    bodyWrapper.className = 'nr-section-body';
+    bodyWrapper.appendChild(body);
+
+    headerBtn.addEventListener('click', () => {
+        const collapsed = section.classList.toggle('nr-palette-section--collapsed');
+        headerBtn.setAttribute('aria-expanded', String(!collapsed));
+    });
+
+    section.appendChild(headerBtn);
+    section.appendChild(bodyWrapper);
+    return section;
 }
 
 function buildPalettePanel() {
@@ -1436,14 +1644,15 @@ function buildPalettePanel() {
     const newBtn = document.createElement('button');
     newBtn.type = 'button';
     newBtn.className = 'nr-palette-new-btn';
-    newBtn.textContent = '+ New Shape';
+    newBtn.textContent = '+ New Component';
     newBtn.addEventListener('click', showNewShapeModal);
     paletteEl.appendChild(newBtn);
 
+    // ── User Defined section ──────────────────────────────────────────────────
     const list = document.createElement('ul');
     list.className = 'nr-palette-list';
     list.setAttribute('role', 'listbox');
-    list.setAttribute('aria-label', 'Components');
+    list.setAttribute('aria-label', 'User Defined Components');
 
     for (const id of Object.keys(ShapeRegistry).filter(id => !BUILT_IN_SHAPE_IDS.has(id))) {
         const li = document.createElement('li');
@@ -1453,11 +1662,11 @@ function buildPalettePanel() {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'nr-palette-item' + (id === currentShapeId ? ' nr-palette-item--selected' : '');
-        btn.textContent = formatLabel(id);
+        btn.textContent = ShapeRegistry[id]?.displayName ?? formatLabel(id);
         btn.dataset.shapeId = id;
 
         btn.addEventListener('click', () => {
-            list.querySelectorAll<HTMLButtonElement>('.nr-palette-item').forEach(b => {
+            paletteEl.querySelectorAll<HTMLButtonElement>('.nr-palette-item').forEach(b => {
                 b.classList.toggle('nr-palette-item--selected', b === btn);
                 b.closest('li')?.setAttribute('aria-selected', String(b === btn));
             });
@@ -1469,7 +1678,17 @@ function buildPalettePanel() {
         list.appendChild(li);
     }
 
-    paletteEl.appendChild(list);
+    paletteEl.appendChild(buildCollapsibleSection('User Defined', list, false));
+
+    // ── Vendor sections (empty placeholders) ─────────────────────────────────
+    const VENDOR_SECTIONS = ['Oracle', 'NetApp'];
+    for (const vendor of VENDOR_SECTIONS) {
+        const emptyList = document.createElement('ul');
+        emptyList.className = 'nr-palette-list';
+        emptyList.setAttribute('role', 'listbox');
+        emptyList.setAttribute('aria-label', `${vendor} Components`);
+        paletteEl.appendChild(buildCollapsibleSection(vendor, emptyList, true));
+    }
 }
 
 // ── Canvas shape loading ───────────────────────────────────────────────────────
@@ -1525,7 +1744,14 @@ function loadShapeIntoCanvas(id: string) {
     if (shapeNameInput) shapeNameInput.value = displayName;
 
     syncFormFromShape(shape);   // sets widthInput / heightInput
-    syncExtrasFromShape(id);    // sets selectedBaseShape, then calls updateDimensionLock
+    syncExtrasFromShape(id);    // sets selectedBaseShape, selectedStyle, then calls updateDimensionLock
+
+    // Apply saved colors to the preview shapes. Must come after syncExtrasFromShape
+    // has populated selectedStyle from the registry.
+    if (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || selectedStyle.strokeColor) {
+        applyShapeStyle(shape,   selectedStyle);
+        applyShapeStyle(shape2D, selectedStyle);
+    }
 
     // Reset icon page and corner radius/chamfer for each new shape load.
     iconPage = 0;
@@ -1540,8 +1766,6 @@ function loadShapeIntoCanvas(id: string) {
     applyChamferSizeToCurrentShape();
     applyIconToCurrentShape();
 
-    designNameEl.textContent = formatLabel(id);
-    designNameEl.style.display = 'block';
 }
 
 // ── Paper element events ───────────────────────────────────────────────────────

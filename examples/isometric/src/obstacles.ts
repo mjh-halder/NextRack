@@ -8,7 +8,8 @@ import { GRID_COUNT, GRID_SIZE } from './theme';
 export default class Obstacles {
 
     step: number = GRID_SIZE;
-    size: number = GRID_COUNT;
+    sizeX: number = GRID_COUNT;
+    sizeY: number = GRID_COUNT;
     grid: string[][] = [];
     graph: dia.Graph;
     listener: mvc.Listener<[]>;
@@ -35,8 +36,8 @@ export default class Obstacles {
 
     protected toggleArea(area: g.Rect, value: string) {
         const { x, y, width, height } = area;
-        for (let i = Math.max(0, x); i < Math.min(x + width, this.size); i++) {
-            for (let j = Math.max(0, y); j < Math.min(y + height, this.size); j++) {
+        for (let i = Math.max(0, x); i < Math.min(x + width, this.sizeX); i++) {
+            for (let j = Math.max(0, y); j < Math.min(y + height, this.sizeY); j++) {
                 this.grid[i][j] = value;
             }
         }
@@ -73,7 +74,7 @@ export default class Obstacles {
     }
 
     protected reset() {
-        this.grid = Array.from({ length: this.size }, () => Array.from({ length: this.size }, () => null));
+        this.grid = Array.from({ length: this.sizeX }, () => Array.from({ length: this.sizeY }, () => null));
     }
 
     // Is the given bounding box free of obstacles?
@@ -84,7 +85,7 @@ export default class Obstacles {
         for (let i = x; i < x + width; i++) {
             for (let j = y; j < y + height; j++) {
                 // check if the cell is out of the grid
-                if (i < 0 || i >= this.size || j < 0 || j >= this.size) return false;
+                if (i < 0 || i >= this.sizeX || j < 0 || j >= this.sizeY) return false;
                 // check if the cell is occupied
                 const value = this.grid[i][j];
                 if (value && value !== key) return false;

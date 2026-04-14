@@ -1,4 +1,4 @@
-import { dia, shapes } from '@joint/core';
+import { dia, shapes, linkTools } from '@joint/core';
 import { TargetArrowHeadTool, RemoveTool } from '../../tools';
 
 export class Link extends shapes.standard.Link {
@@ -30,12 +30,16 @@ export class Link extends shapes.standard.Link {
     }
 
     addTools(paper: dia.Paper) {
-        const targetArrowHeadTools = new TargetArrowHeadTool();
-        const removeTool = new RemoveTool();
-
         this.findView(paper).addTools(new dia.ToolsView({
             name: 'link-tools',
-            tools: [targetArrowHeadTools, removeTool]
+            tools: [
+                // Drag any orthogonal segment to move the bend point
+                new linkTools.Segments(),
+                // Click a segment to add a waypoint; drag to move; double-click to remove
+                new linkTools.Vertices({ snapRadius: 10 }),
+                new TargetArrowHeadTool(),
+                new RemoveTool(),
+            ]
         }));
     }
 }

@@ -83,7 +83,8 @@ const TREE_HIGHLIGHT_COLOR = '#0f62fe';
 let currentView = View.Isometric;
 let currentCell: IsometricShape | Link = null;
 let currentZoom = 1;
-let currentGridCount = GRID_COUNT;
+let currentGridCountX = GRID_COUNT;
+let currentGridCountY = GRID_COUNT;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let gridVEl: any = null;
 let gridVisible = true;
@@ -119,7 +120,7 @@ const paper = new dia.Paper({
                 : isometricEl.position();
         }
     },
-    gridSize: GRID_SIZE,
+    gridSize: GRID_SIZE / 2,
     async: true,
     autoFreeze: true,
     defaultConnectionPoint: {
@@ -137,8 +138,8 @@ const paper = new dia.Paper({
         name: 'manhattan',
         args: {
             step: GRID_SIZE / 2,
-            startDirections: ['top'],
-            endDirections: ['bottom'],
+            startDirections: ['top', 'bottom', 'left', 'right'],
+            endDirections:   ['top', 'bottom', 'left', 'right'],
             // Use the existing obstacle detection to determine if the point is an obstacle
             // By default, the router would need to build its own obstacles map
             isPointObstacle: (point: g.Point) => {
@@ -278,21 +279,22 @@ paper.on('cell:mousewheel', (_cellView: dia.CellView, evt: dia.Event, x: number,
 new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     currentView = view === 'isometric' ? View.Isometric : View.TwoDimensional;
     currentZoom = 1; // reset zoom on view switch — matrices are incompatible across views
-    switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCount);
+    switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
 });
 
-switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCount);
+switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
 
 // ---- New Design ----
 
 // Compute the scroll position that centers the grid in the usable viewport area
 // (viewport width minus sidebar). Must be called after switchView() sets the matrix.
-function centerGridInViewport(gridCount: number) {
+function centerGridInViewport(gridCountX: number, gridCountY: number) {
     const mx = paper.matrix();
-    const N = gridCount * GRID_SIZE;
+    const W = gridCountX * GRID_SIZE;
+    const H = gridCountY * GRID_SIZE;
     // Transform the four grid corners through the current paper matrix
     const corners = [
-        { x: 0, y: 0 }, { x: N, y: 0 }, { x: 0, y: N }, { x: N, y: N },
+        { x: 0, y: 0 }, { x: W, y: 0 }, { x: 0, y: H }, { x: W, y: H },
     ].map(p => ({
         sx: mx.a * p.x + mx.c * p.y + mx.e,
         sy: mx.b * p.x + mx.d * p.y + mx.f,
@@ -312,11 +314,13 @@ function applyNewDesign(name: string, gridCount: number) {
     paper.removeTools();
     currentCell = null;
     currentZoom = 1;
-    currentGridCount = gridCount;
+    currentGridCountX = gridCount;
+    currentGridCountY = gridCount;
     panel.hide();
 
     // Resize obstacle grid before clearing so removal events use the correct size
-    obstacles.size = gridCount;
+    obstacles.sizeX = gridCount;
+    obstacles.sizeY = gridCount;
     graph.clear();
     // Rebuild the obstacle grid at the new size (graph is empty so this just resets it)
     obstacles.update();
@@ -330,8 +334,8 @@ function applyNewDesign(name: string, gridCount: number) {
     );
 
     // Set view matrix first, then scroll to center the grid in the usable area
-    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCount);
-    centerGridInViewport(currentGridCount);
+    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+    centerGridInViewport(currentGridCountX, currentGridCountY);
 
     designNameEl.textContent = name;
     designNameEl.style.display = 'block';
@@ -524,6 +528,145 @@ function showToast(message: string) {
     setTimeout(() => n.remove(), 3000);
 }
 
+// ---- Adjust Grid Size ----
+
+function applyGridResize(newX: number, newY: number) {
+    currentGridCountX = newX;
+    currentGridCountY = newY;
+    obstacles.sizeX = newX;
+    obstacles.sizeY = newY;
+    obstacles.update();
+
+    if (gridVEl) gridVEl.remove();
+    gridVEl = drawGrid(paper, newX, GRID_SIZE, '#e8e8e8', newY);
+
+    paper.setDimensions(
+        SIDEBAR_INSET + 2 * GRID_SIZE * newX * SCALE * ISOMETRIC_SCALE + CANVAS_H_PAD,
+        GRID_SIZE * newY * SCALE + CANVAS_V_PAD
+    );
+
+    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+    centerGridInViewport(currentGridCountX, currentGridCountY);
+}
+
+function showAdjustGridModal() {
+    const modalEl = document.createElement('div');
+    modalEl.className = 'cds--modal is-visible';
+    modalEl.setAttribute('role', 'dialog');
+    modalEl.setAttribute('aria-modal', 'true');
+    modalEl.setAttribute('aria-labelledby', 'nr-grid-modal-heading');
+
+    const containerEl = document.createElement('div');
+    containerEl.className = 'cds--modal-container cds--modal-container--sm';
+
+    // Header
+    const headerEl = document.createElement('div');
+    headerEl.className = 'cds--modal-header';
+
+    const headingEl = document.createElement('p');
+    headingEl.className = 'cds--modal-header__heading';
+    headingEl.id = 'nr-grid-modal-heading';
+    headingEl.textContent = 'Adjust Grid Size';
+
+    const closeBtnWrapper = document.createElement('div');
+    closeBtnWrapper.className = 'cds--modal-close-button';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'cds--modal-close';
+    closeBtn.type = 'button';
+    closeBtn.title = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = CDS_ICON_CLOSE;
+    closeBtn.addEventListener('click', () => modalEl.remove());
+    closeBtnWrapper.appendChild(closeBtn);
+
+    headerEl.appendChild(headingEl);
+    headerEl.appendChild(closeBtnWrapper);
+
+    // Body — two number inputs side by side
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'cds--modal-content';
+    bodyEl.style.display = 'flex';
+    bodyEl.style.gap = '1rem';
+
+    function makeNumberField(id: string, label: string, value: number): { wrapper: HTMLElement; input: HTMLInputElement } {
+        const formItem = document.createElement('div');
+        formItem.className = 'cds--form-item';
+        formItem.style.flex = '1';
+
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'cds--text-input-wrapper';
+
+        const lbl = document.createElement('label');
+        lbl.className = 'cds--label';
+        lbl.setAttribute('for', id);
+        lbl.textContent = label;
+
+        const outerWrapper = document.createElement('div');
+        outerWrapper.className = 'cds--text-input__field-outer-wrapper';
+
+        const fieldWrapper = document.createElement('div');
+        fieldWrapper.className = 'cds--text-input__field-wrapper';
+
+        const input = document.createElement('input');
+        input.id = id;
+        input.type = 'number';
+        input.className = 'cds--text-input';
+        input.min = '5';
+        input.max = '500';
+        input.value = String(value);
+
+        fieldWrapper.appendChild(input);
+        outerWrapper.appendChild(fieldWrapper);
+        inputWrapper.appendChild(lbl);
+        inputWrapper.appendChild(outerWrapper);
+        formItem.appendChild(inputWrapper);
+
+        return { wrapper: formItem, input };
+    }
+
+    const { wrapper: xWrapper, input: xInput } = makeNumberField('nr-grid-x', 'Width (columns)', currentGridCountX);
+    const { wrapper: yWrapper, input: yInput } = makeNumberField('nr-grid-y', 'Height (rows)', currentGridCountY);
+    bodyEl.appendChild(xWrapper);
+    bodyEl.appendChild(yWrapper);
+
+    // Footer
+    const footerEl = document.createElement('div');
+    footerEl.className = 'cds--modal-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => modalEl.remove());
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'cds--btn cds--btn--primary';
+    saveBtn.type = 'button';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', () => {
+        const newX = Math.max(5, Math.min(500, parseInt(xInput.value, 10) || currentGridCountX));
+        const newY = Math.max(5, Math.min(500, parseInt(yInput.value, 10) || currentGridCountY));
+        modalEl.remove();
+        applyGridResize(newX, newY);
+    });
+
+    footerEl.appendChild(cancelBtn);
+    footerEl.appendChild(saveBtn);
+
+    containerEl.appendChild(headerEl);
+    containerEl.appendChild(bodyEl);
+    containerEl.appendChild(footerEl);
+    modalEl.appendChild(containerEl);
+    document.body.appendChild(modalEl);
+
+    modalEl.addEventListener('mousedown', (e: MouseEvent) => {
+        if (e.target === modalEl) modalEl.remove();
+    });
+
+    xInput.focus();
+    xInput.select();
+}
+
 // ---- Menu Popup ----
 
 function showMenuPopup(anchor: HTMLElement) {
@@ -550,7 +693,7 @@ function showMenuPopup(anchor: HTMLElement) {
                 paper.removeTools();
                 currentCell = null;
                 panel.hide();
-                switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCount);
+                switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
             });
         }},
     ];
@@ -753,7 +896,7 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
                 paper.removeTools();
                 currentCell = null;
                 panel.hide();
-                switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCount);
+                switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
             });
             break;
         case 'edit-delete':
@@ -767,11 +910,14 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             break;
         case 'view-fit':
             currentZoom = 1;
-            switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCount);
+            switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
             break;
         case 'view-toggle-grid':
             gridVisible = !gridVisible;
             if (gridVEl) gridVEl.node.style.display = gridVisible ? '' : 'none';
+            break;
+        case 'model-adjust-grid':
+            showAdjustGridModal();
             break;
         case 'admin-set-default':
             saveDefaultDesign(graph);

@@ -93,12 +93,13 @@ export const sortElements = (graph) => {
     return nodes;
 }
 
-export const drawGrid = (paper: dia.Paper, size: number, step: number, color = '#e8e8e8') => {
+export const drawGrid = (paper: dia.Paper, sizeX: number, step: number, color = '#e8e8e8', sizeY = sizeX) => {
     const gridData = [];
-    const j = size;
-    for (let i = 0; i <= j; i++) {
-        gridData.push(`M 0,${i * step} ${j * step},${i * step}`);
-        gridData.push(`M ${i * step}, 0 ${i * step},${j * step}`);
+    for (let i = 0; i <= sizeY; i++) {
+        gridData.push(`M 0,${i * step} ${sizeX * step},${i * step}`);
+    }
+    for (let i = 0; i <= sizeX; i++) {
+        gridData.push(`M ${i * step},0 ${i * step},${sizeY * step}`);
     }
     const gridVEl = V('path').attr({
         'd': gridData.join(' '),
@@ -140,27 +141,26 @@ export function raiseToFront(viewEl: Element, selector: string): void {
  * so this is safe to call on any IsometricShape subclass.
  */
 export function applyShapeStyle(shape: dia.Element, style: ShapeStyle): void {
-    const attrs: Record<string, unknown> = {};
-
+    // Use the two-argument string form for every attr so JointJS parses '/' as
+    // a path separator. The object form attr({key: val}) does a plain merge and
+    // does NOT split '/' — literal key 'top/fill' would match no element.
     if (style.topColor) {
-        attrs['top/fill'] = style.topColor;
+        shape.attr('top/fill', style.topColor);
     }
     if (style.frontColor) {
-        attrs['front/fill']    = style.frontColor;
-        attrs['cornerV3/fill'] = style.frontColor;
+        shape.attr('front/fill',    style.frontColor);
+        shape.attr('cornerV3/fill', style.frontColor);
     }
     if (style.sideColor) {
-        attrs['side/fill']    = style.sideColor;
-        attrs['cornerV1/fill'] = style.sideColor;
-        attrs['cornerV2/fill'] = style.sideColor;
+        shape.attr('side/fill',    style.sideColor);
+        shape.attr('cornerV1/fill', style.sideColor);
+        shape.attr('cornerV2/fill', style.sideColor);
     }
     if (style.strokeColor) {
         for (const sel of ['top', 'front', 'side', 'base', 'cornerV1', 'cornerV2', 'cornerV3']) {
-            attrs[`${sel}/stroke`] = style.strokeColor;
+            shape.attr(`${sel}/stroke`, style.strokeColor);
         }
     }
-
-    if (Object.keys(attrs).length > 0) shape.attr(attrs);
 }
 
 /**
