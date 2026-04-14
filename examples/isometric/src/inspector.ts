@@ -1,5 +1,6 @@
 import { dia } from '@joint/core';
 import IsometricShape from './shapes/isometric-shape';
+import { ShapeRegistry } from './shapes/shape-registry';
 
 // --- Node metadata ---
 
@@ -46,6 +47,7 @@ const LINK_FIELDS: { key: keyof LinkMeta; label: string; placeholder: string }[]
 export interface PanelActions {
     onDelete: () => void;
     onDuplicate: () => void;
+    onDuplicateZone: (frame: dia.Element) => void;
 }
 
 export class PropertyPanel {
@@ -54,13 +56,20 @@ export class PropertyPanel {
     private titleEl: HTMLElement;
 
     private nodeSection: HTMLElement;
+    private zoneSection: HTMLElement;
     private linkSection: HTMLElement;
     private duplicateBtn: HTMLButtonElement;
+    private duplicateZoneBtn: HTMLButtonElement;
+    private deleteBtn: HTMLButtonElement;
 
     private currentNode: IsometricShape | null = null;
     private currentLink: dia.Link | null = null;
+    private currentZone: dia.Element | null = null;
 
     private nodeInputs = {} as Record<keyof NodeMeta, HTMLInputElement | HTMLTextAreaElement>;
+    private nodeLabelHiddenEl!: HTMLInputElement;
+    private zoneNameInput!: HTMLInputElement;
+    private zoneLabelHiddenEl!: HTMLInputElement;
     private linkInputs = {} as Record<keyof LinkMeta, HTMLInputElement>;
 
     constructor(el: HTMLElement, private actions: PanelActions) {
@@ -74,7 +83,7 @@ export class PropertyPanel {
         this.titleEl.className = 'inspector-title';
         this.el.appendChild(this.titleEl);
 
-        // Node fields
+        // ---- Node section ----
         this.nodeSection = document.createElement('div');
         this.nodeSection.className = 'inspector-section';
         for (const field of NODE_FIELDS) {
@@ -82,12 +91,31 @@ export class PropertyPanel {
                 `node-${field.key}`, field.label, field.label, field.multiline
             );
             this.nodeInputs[field.key] = input as HTMLInputElement;
-            input.addEventListener('input', () => this.saveNode());
             this.nodeSection.appendChild(row);
         }
+        const { row: nodeLabelRow, input: nodeLabelInput } = this.buildCheckboxRow(
+            'node-label-hidden', 'Hide label'
+        );
+        this.nodeLabelHiddenEl = nodeLabelInput;
+        this.nodeSection.appendChild(nodeLabelRow);
         this.el.appendChild(this.nodeSection);
 
-        // Link fields
+        // ---- Zone section ----
+        this.zoneSection = document.createElement('div');
+        this.zoneSection.className = 'inspector-section';
+        const { row: zoneNameRow, input: zoneNameInput } = this.buildRow(
+            'zone-name', 'Zone Name', 'Zone Name'
+        );
+        this.zoneNameInput = zoneNameInput as HTMLInputElement;
+        this.zoneSection.appendChild(zoneNameRow);
+        const { row: zoneLabelRow, input: zoneLabelInput } = this.buildCheckboxRow(
+            'zone-label-hidden', 'Hide label'
+        );
+        this.zoneLabelHiddenEl = zoneLabelInput;
+        this.zoneSection.appendChild(zoneLabelRow);
+        this.el.appendChild(this.zoneSection);
+
+        // ---- Link section ----
         this.linkSection = document.createElement('div');
         this.linkSection.className = 'inspector-section';
         for (const field of LINK_FIELDS) {
@@ -95,28 +123,45 @@ export class PropertyPanel {
                 `link-${field.key}`, field.label, field.placeholder
             );
             this.linkInputs[field.key] = input as HTMLInputElement;
-            input.addEventListener('input', () => this.saveLink());
             this.linkSection.appendChild(row);
         }
         this.el.appendChild(this.linkSection);
 
-        // Action buttons
-        const actions = document.createElement('div');
-        actions.className = 'inspector-actions';
+        // Save button
+        const saveBar = document.createElement('div');
+        saveBar.className = 'inspector-save-bar';
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'inspector-action-btn inspector-btn-primary';
+        saveBtn.textContent = 'Save';
+        saveBtn.addEventListener('click', () => this.save());
+        saveBar.appendChild(saveBtn);
+        this.el.appendChild(saveBar);
+
+        // Secondary action buttons
+        const actionsEl = document.createElement('div');
+        actionsEl.className = 'inspector-actions';
 
         this.duplicateBtn = document.createElement('button');
         this.duplicateBtn.className = 'inspector-action-btn inspector-btn-secondary';
         this.duplicateBtn.textContent = 'Duplicate';
         this.duplicateBtn.addEventListener('click', () => this.actions.onDuplicate());
-        actions.appendChild(this.duplicateBtn);
+        actionsEl.appendChild(this.duplicateBtn);
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.className = 'inspector-action-btn inspector-btn-danger';
-        deleteBtn.textContent = 'Delete';
-        deleteBtn.addEventListener('click', () => this.actions.onDelete());
-        actions.appendChild(deleteBtn);
+        this.duplicateZoneBtn = document.createElement('button');
+        this.duplicateZoneBtn.className = 'inspector-action-btn inspector-btn-secondary';
+        this.duplicateZoneBtn.textContent = 'Duplicate Zone';
+        this.duplicateZoneBtn.addEventListener('click', () => {
+            if (this.currentZone) this.actions.onDuplicateZone(this.currentZone);
+        });
+        actionsEl.appendChild(this.duplicateZoneBtn);
 
-        this.el.appendChild(actions);
+        this.deleteBtn = document.createElement('button');
+        this.deleteBtn.className = 'inspector-action-btn inspector-btn-danger';
+        this.deleteBtn.textContent = 'Delete';
+        this.deleteBtn.addEventListener('click', () => this.actions.onDelete());
+        actionsEl.appendChild(this.deleteBtn);
+
+        this.el.appendChild(actionsEl);
     }
 
     private buildRow(id: string, labelText: string, placeholder: string, multiline = false) {
@@ -143,6 +188,41 @@ export class PropertyPanel {
         return { row, input };
     }
 
+    private buildCheckboxRow(id: string, labelText: string): { row: HTMLElement; input: HTMLInputElement } {
+        const row = document.createElement('div');
+        row.className = 'inspector-row';
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'cds--form-item cds--checkbox-wrapper';
+
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.id = `inspector-${id}`;
+        input.className = 'cds--checkbox';
+        input.name = id;
+
+        const label = document.createElement('label');
+        label.htmlFor = `inspector-${id}`;
+        label.className = 'cds--checkbox-label';
+
+        const span = document.createElement('span');
+        span.className = 'cds--checkbox-label-text';
+        span.textContent = labelText;
+
+        label.appendChild(span);
+        wrapper.appendChild(input);
+        wrapper.appendChild(label);
+        row.appendChild(wrapper);
+
+        return { row, input };
+    }
+
+    private save() {
+        if (this.currentNode) this.saveNode();
+        else if (this.currentZone) this.saveZone();
+        else if (this.currentLink) this.saveLink();
+    }
+
     private saveNode() {
         if (!this.currentNode) return;
         const meta: NodeMeta = {
@@ -153,6 +233,19 @@ export class PropertyPanel {
             notes:  (this.nodeInputs.notes as HTMLTextAreaElement).value,
         };
         this.currentNode.set(META_KEY, meta);
+        const displayLabel = meta.name.trim()
+            || ShapeRegistry[meta.kind]?.displayName
+            || meta.kind;
+        this.currentNode.attr('label/text', displayLabel);
+        // null removes the display attr, restoring default visibility
+        this.currentNode.attr('label/display', this.nodeLabelHiddenEl.checked ? 'none' : null);
+    }
+
+    private saveZone() {
+        if (!this.currentZone) return;
+        const name = this.zoneNameInput.value.trim();
+        this.currentZone.attr('label/text', name || 'Zone');
+        this.currentZone.attr('label/display', this.zoneLabelHiddenEl.checked ? 'none' : null);
     }
 
     private saveLink() {
@@ -169,34 +262,60 @@ export class PropertyPanel {
     show(cell: IsometricShape) {
         this.currentNode = cell;
         this.currentLink = null;
+        this.currentZone = null;
         const meta: NodeMeta = cell.get(META_KEY) ?? { ...EMPTY_NODE_META };
         for (const field of NODE_FIELDS) {
             this.nodeInputs[field.key].value = meta[field.key];
         }
+        this.nodeLabelHiddenEl.checked = cell.attr('label/display') === 'none';
         this.titleEl.textContent = 'Node Properties';
         this.nodeSection.style.display = '';
+        this.zoneSection.style.display = 'none';
         this.linkSection.style.display = 'none';
         this.duplicateBtn.style.display = '';
+        this.duplicateZoneBtn.style.display = 'none';
+        this.deleteBtn.style.display = '';
+        this.el.classList.remove('inspector-hidden');
+    }
+
+    showZone(frame: dia.Element) {
+        this.currentZone = frame;
+        this.currentNode = null;
+        this.currentLink = null;
+        this.zoneNameInput.value = (frame.attr('label/text') as string | undefined) ?? '';
+        this.zoneLabelHiddenEl.checked = frame.attr('label/display') === 'none';
+        this.titleEl.textContent = 'Zone Properties';
+        this.nodeSection.style.display = 'none';
+        this.zoneSection.style.display = '';
+        this.linkSection.style.display = 'none';
+        this.duplicateBtn.style.display = 'none';
+        this.duplicateZoneBtn.style.display = '';
+        this.deleteBtn.style.display = 'none';
         this.el.classList.remove('inspector-hidden');
     }
 
     showLink(link: dia.Link) {
         this.currentLink = link;
         this.currentNode = null;
+        this.currentZone = null;
         const meta: LinkMeta = link.get(LINK_META_KEY) ?? { ...EMPTY_LINK_META };
         for (const field of LINK_FIELDS) {
             this.linkInputs[field.key].value = meta[field.key];
         }
         this.titleEl.textContent = 'Connection';
         this.nodeSection.style.display = 'none';
+        this.zoneSection.style.display = 'none';
         this.linkSection.style.display = '';
         this.duplicateBtn.style.display = 'none';
+        this.duplicateZoneBtn.style.display = 'none';
+        this.deleteBtn.style.display = 'none';
         this.el.classList.remove('inspector-hidden');
     }
 
     hide() {
         this.currentNode = null;
         this.currentLink = null;
+        this.currentZone = null;
         this.el.classList.add('inspector-hidden');
     }
 }

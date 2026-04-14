@@ -8,7 +8,7 @@ import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM 
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
 const CD_GRID_COUNT = 10;
-import { ShapeRegistry, updateShapeDefaults, deleteShape, addShape } from './shapes/shape-registry';
+import { ShapeRegistry, BUILT_IN_SHAPE_IDS, updateShapeDefaults, deleteShape, addShape, saveRegistryToStorage } from './shapes/shape-registry';
 import { BaseShape } from './shapes/shape-definition';
 import { PRIMARY_COLORS } from './colors';
 import cubeIconSvg from '../assets/cube-icon.svg';
@@ -98,13 +98,13 @@ function formatLabel(id: string): string {
 const SIDEBAR_INSET = 0;
 let currentShape: IsometricShape | null = null;
 let currentShape2D: IsometricShape | null = null;
-let currentShapeId = 'firewall';
+let currentShapeId: string = Object.keys(ShapeRegistry).find(id => !BUILT_IN_SHAPE_IDS.has(id)) || '';
 let currentZoom  = 1;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let gridVEl: any = null;
 
 // Non-dimension template state (form factor, icon, style)
-let selectedBaseShape: BaseShape = BASE_SHAPE_BY_ID['firewall'] as BaseShape;
+let selectedBaseShape: BaseShape = (BASE_SHAPE_BY_ID[currentShapeId] || 'cuboid') as BaseShape;
 let selectedIcon: string | null = null;
 let selectedIconFace: 'top' | 'front' = 'top';
 let selectedIconSize = 1; // grid units; 1 GU = GRID_SIZE px
@@ -119,8 +119,11 @@ let selectedChamferSize = 0; // pixels
 // Icon background state (not persisted to registry)
 const selectedIconBgEnabled = true;
 let selectedIconBgColor = PRIMARY_COLORS[0].base; // Grey 70 by default
-let selectedIconBgSize = 1.5;        // grid units
 let selectedIconBgShape: 'circle' | 'square' = 'circle';
+
+// Direct references to the swatch buttons so syncExtrasFromShape can update
+// them without relying on a DOM query that could match unrelated elements.
+let iconBgSwatchRefs: Array<{ btn: HTMLElement; colorBase: string }> = [];
 
 // Icon white tint state
 let iconPage = 0;
@@ -130,9 +133,6 @@ const ICON_PAGE_SIZE = 12;
  * Pre-processes an SVG string so it renders fully white when used as a data URI.
  * Inserts a CSS filter block on the root <svg> element.
  */
-function tintSvgWhite(svg: string): string {
-    return svg.replace(/(<svg\b[^>]*>)/, '$1<style>:root{filter:brightness(0)invert(1)}</style>');
-}
 
 const graph = new dia.Graph({}, { cellNamespace });
 // The size tool reads graph.get('obstacles').isFree() to check for collisions.
@@ -440,7 +440,14 @@ function buildCompositeIconSvg(iconSvg: string, bgColor: string, bgShape: 'circl
         ? `<circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}" fill="${bgColor}"/>`
         : `<rect width="${S}" height="${S}" rx="6" fill="${bgColor}"/>`;
     const iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg)}`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${bgEl}<image href="${iconHref}" x="${pad}" y="${pad}" width="${iconInner}" height="${iconInner}"/></svg>`;
+    // White-tint is applied via an SVG <filter> on the <image> element rather than
+    // via a CSS :root rule inside the icon SVG. A CSS :root rule in a nested
+    // data-URI SVG can be misscoped to the composite SVG's root by the browser
+    // when the parent element transitions from display:none to visible, causing
+    // the background colour to be incorrectly overridden.
+    // The feColorMatrix below maps every non-transparent pixel to white (R=G=B=1)
+    // while preserving the original alpha channel.
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}"><defs><filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter></defs>${bgEl}<image href="${iconHref}" x="${pad}" y="${pad}" width="${iconInner}" height="${iconInner}" filter="url(#nr-white)"/></svg>`;
 }
 
 /**
@@ -470,9 +477,8 @@ function applyIconToCurrentShape() {
         currentShape2D?.attr(noIconAttrs);
         return;
     }
-    const iconSvg = tintSvgWhite(icon.svg);
-    const svgSource = buildCompositeIconSvg(iconSvg, selectedIconBgColor, selectedIconBgShape);
-    const iconPx = selectedIconBgSize * GRID_SIZE;
+    const svgSource = buildCompositeIconSvg(icon.svg, selectedIconBgColor, selectedIconBgShape);
+    const iconPx = selectedIconSize * GRID_SIZE;
     const { width: w, height: h } = currentShape.size();
     const iH = currentShape.isometricHeight;
     const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgSource)}`;
@@ -683,12 +689,16 @@ function buildIconBackgroundContent(container: HTMLElement) {
     const swatchGrid = document.createElement('div');
     swatchGrid.className = 'nr-sd-icon-grid';
 
+    // Reset refs so syncExtrasFromShape always has fresh references.
+    iconBgSwatchRefs = [];
+
     for (const color of PRIMARY_COLORS) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'nr-sd-icon-btn' + (selectedIconBgColor === color.base ? ' nr-sd-icon-btn--selected' : '');
         btn.setAttribute('title', color.label);
         btn.setAttribute('aria-label', color.label);
+        iconBgSwatchRefs.push({ btn, colorBase: color.base });
 
         const swatch = document.createElement('span');
         swatch.style.cssText = `display:block;width:20px;height:20px;border-radius:50%;background:${color.base};transition:background 0.1s;`;
@@ -721,7 +731,7 @@ function buildIconBackgroundContent(container: HTMLElement) {
     const sliderValueEl = document.createElement('span');
     sliderValueEl.className = 'nr-sd-slider-value';
     sliderValueEl.id = 'sd-icon-bg-size-value';
-    sliderValueEl.textContent = `${selectedIconBgSize.toFixed(1)} cells`;
+    sliderValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
     labelRow.appendChild(sliderLbl);
     labelRow.appendChild(sliderValueEl);
 
@@ -732,11 +742,16 @@ function buildIconBackgroundContent(container: HTMLElement) {
     slider.min = '0.5';
     slider.max = '4';
     slider.step = '0.1';
-    slider.value = String(selectedIconBgSize);
+    slider.value = String(selectedIconSize);
 
     slider.addEventListener('input', () => {
-        selectedIconBgSize = parseFloat(slider.value);
-        sliderValueEl.textContent = `${selectedIconBgSize.toFixed(1)} cells`;
+        selectedIconSize = parseFloat(slider.value);
+        sliderValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
+        // Keep the Icon-section size slider in sync
+        const iconSizeSlider = document.querySelector<HTMLInputElement>('#sd-icon-size');
+        const iconSizeValue  = document.querySelector<HTMLElement>('#sd-icon-size-value');
+        if (iconSizeSlider) iconSizeSlider.value = String(selectedIconSize);
+        if (iconSizeValue)  iconSizeValue.textContent = `${selectedIconSize.toFixed(1)} cells`;
         applyIconToCurrentShape();
     });
 
@@ -832,6 +847,15 @@ function buildInspectorPanel() {
     header.appendChild(title);
     inspectorEl.appendChild(header);
 
+    // No user-defined shape selected — show empty state and stop here.
+    if (!currentShapeId) {
+        const empty = document.createElement('p');
+        empty.className = 'nr-inspector-empty';
+        empty.textContent = 'Create a component to get started.';
+        inspectorEl.appendChild(empty);
+        return;
+    }
+
     // Name field
     const nameSection = document.createElement('div');
     nameSection.className = 'nr-sd-name-section';
@@ -880,7 +904,7 @@ function buildInspectorPanel() {
     deleteBtn.type = 'button';
     deleteBtn.style.width = '100%';
     deleteBtn.innerHTML = `${CDS_ICON_TRASH} Delete Shape`;
-    deleteBtn.addEventListener('click', () => onDeleteShape(currentShapeId));
+    deleteBtn.addEventListener('click', () => showDeleteConfirmModal(currentShapeId));
 
     footer.appendChild(saveBtn);
     footer.appendChild(deleteBtn);
@@ -954,10 +978,12 @@ function syncFormFromShape(shape: IsometricShape) {
 function syncExtrasFromShape(id: string) {
     const defaults = ShapeRegistry[id];
 
-    selectedBaseShape = (defaults?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid') as BaseShape;
-    selectedIconFace  = defaults?.iconFace ?? 'top';
-    selectedIcon      = defaults?.icon ?? null;
-    selectedIconSize  = defaults?.iconSize ?? 1;
+    selectedBaseShape   = (defaults?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid') as BaseShape;
+    selectedIconFace    = defaults?.iconFace   ?? 'top';
+    selectedIcon        = defaults?.icon       ?? null;
+    selectedIconSize    = defaults?.iconSize   ?? 1;
+    selectedIconBgColor = defaults?.iconBgColor ?? PRIMARY_COLORS[0].base;
+    selectedIconBgShape = (defaults?.iconBgShape ?? 'circle') as 'circle' | 'square';
     selectedStyle     = {
         topColor:    defaults?.style?.topColor    ?? '',
         sideColor:   defaults?.style?.sideColor   ?? '',
@@ -978,11 +1004,25 @@ function syncExtrasFromShape(id: string) {
         btn.classList.toggle('nr-sd-icon-btn--selected', match);
     });
 
-    // Sync icon size slider
+    // Sync both size sliders (Icon section + Icon Background section share selectedIconSize)
     const sizeSlider = inspectorEl.querySelector<HTMLInputElement>('#sd-icon-size');
     const sizeValueEl = inspectorEl.querySelector<HTMLElement>('#sd-icon-size-value');
     if (sizeSlider) sizeSlider.value = String(selectedIconSize);
     if (sizeValueEl) sizeValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
+    const bgSizeSlider = inspectorEl.querySelector<HTMLInputElement>('#sd-icon-bg-size');
+    const bgSizeValueEl = inspectorEl.querySelector<HTMLElement>('#sd-icon-bg-size-value');
+    if (bgSizeSlider) bgSizeSlider.value = String(selectedIconSize);
+    if (bgSizeValueEl) bgSizeValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
+
+    // Sync icon background color swatches using direct refs (avoids false DOM matches).
+    for (const { btn, colorBase } of iconBgSwatchRefs) {
+        btn.classList.toggle('nr-sd-icon-btn--selected', colorBase === selectedIconBgColor);
+    }
+
+    // Sync icon background shape radio
+    inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-icon-bg-shape"]').forEach(r => {
+        r.checked = r.value === selectedIconBgShape;
+    });
 
     // Sync color inputs
     const colorMap: Array<[string, string]> = [
@@ -1071,6 +1111,18 @@ function onSave() {
     const heightGU = parseFloat(heightInput.value);
     const depthGU  = parseFloat(depthInput.value);
     if (isNaN(widthGU) || isNaN(heightGU) || isNaN(depthGU)) return;
+
+    // Pre-compute the composite icon data URI so the system designer can apply
+    // the icon to instances without needing its own icon-building logic.
+    let iconHref: string | undefined;
+    if (selectedIcon) {
+        const iconEntry = AVAILABLE_ICONS.find(i => i.id === selectedIcon);
+        if (iconEntry) {
+            const svg = buildCompositeIconSvg(iconEntry.svg, selectedIconBgColor, selectedIconBgShape);
+            iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+        }
+    }
+
     updateShapeDefaults(currentShapeId, {
         displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
         defaultSize: { width: widthGU * GRID_SIZE, height: heightGU * GRID_SIZE },
@@ -1079,6 +1131,9 @@ function onSave() {
         iconFace: selectedIconFace,
         icon: selectedIcon ?? undefined,
         iconSize: selectedIconSize,
+        iconBgColor: selectedIconBgColor,
+        iconBgShape: selectedIconBgShape,
+        iconHref,
         style: {
             topColor:    selectedStyle.topColor    || undefined,
             frontColor:  selectedStyle.frontColor  || undefined,
@@ -1086,6 +1141,8 @@ function onSave() {
             strokeColor: selectedStyle.strokeColor || undefined,
         },
     });
+    saveRegistryToStorage();
+    document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
 }
 
 // Keep form in sync when resize or height tools are used directly on the shape.
@@ -1129,8 +1186,10 @@ function onCreateShape(name: string) {
     addShape(id, {
         displayName: name,
         defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
-        defaultIsometricHeight: GRID_SIZE * 2,
+        defaultIsometricHeight: GRID_SIZE * 0.5,
     });
+    saveRegistryToStorage();
+    document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
     currentShapeId = id;
     buildPalettePanel();
     buildInspectorPanel();
@@ -1259,9 +1318,95 @@ function showNewShapeModal() {
     nameInput.focus();
 }
 
+function showDeleteConfirmModal(id: string) {
+    const displayName = ShapeRegistry[id]?.displayName ?? id;
+
+    const modalEl = document.createElement('div');
+    modalEl.className = 'cds--modal is-visible';
+    modalEl.setAttribute('role', 'dialog');
+    modalEl.setAttribute('aria-modal', 'true');
+    modalEl.setAttribute('aria-labelledby', 'nr-del-heading');
+
+    const containerEl = document.createElement('div');
+    containerEl.className = 'cds--modal-container cds--modal-container--sm';
+
+    // Header
+    const headerEl = document.createElement('div');
+    headerEl.className = 'cds--modal-header';
+
+    const headingEl = document.createElement('p');
+    headingEl.className = 'cds--modal-header__heading';
+    headingEl.id = 'nr-del-heading';
+    headingEl.textContent = 'Delete Component';
+
+    const closeBtnWrapper = document.createElement('div');
+    closeBtnWrapper.className = 'cds--modal-close-button';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'cds--modal-close';
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = CDS_ICON_CLOSE;
+    closeBtn.addEventListener('click', () => modalEl.remove());
+    closeBtnWrapper.appendChild(closeBtn);
+
+    headerEl.appendChild(headingEl);
+    headerEl.appendChild(closeBtnWrapper);
+
+    // Body
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'cds--modal-content';
+
+    const msg = document.createElement('p');
+    msg.style.cssText = 'font-size:0.875rem;line-height:1.5;margin:0;';
+    msg.innerHTML = `Delete <strong>${displayName}</strong>?<br><br>This component will be permanently removed from the registry. This action cannot be undone.`;
+    bodyEl.appendChild(msg);
+
+    // Footer
+    const footerEl = document.createElement('div');
+    footerEl.className = 'cds--modal-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => modalEl.remove());
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'cds--btn cds--btn--danger';
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Delete';
+    confirmBtn.addEventListener('click', () => {
+        modalEl.remove();
+        onDeleteShape(id);
+    });
+
+    footerEl.appendChild(cancelBtn);
+    footerEl.appendChild(confirmBtn);
+
+    containerEl.appendChild(headerEl);
+    containerEl.appendChild(bodyEl);
+    containerEl.appendChild(footerEl);
+    modalEl.appendChild(containerEl);
+    document.body.appendChild(modalEl);
+
+    // Close on backdrop click
+    modalEl.addEventListener('mousedown', (e: MouseEvent) => {
+        if (e.target === modalEl) modalEl.remove();
+    });
+
+    // Keyboard: Escape closes, Enter confirms
+    modalEl.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Escape') modalEl.remove();
+    });
+
+    cancelBtn.focus();
+}
+
 function onDeleteShape(id: string) {
     deleteShape(id);
-    const remaining = Object.keys(ShapeRegistry);
+    saveRegistryToStorage();
+    document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+    const remaining = Object.keys(ShapeRegistry).filter(id => !BUILT_IN_SHAPE_IDS.has(id));
     if (remaining.length === 0) {
         paper.removeTools();
         graph.clear();
@@ -1284,7 +1429,7 @@ function buildPalettePanel() {
     header.className = 'nr-panel-header';
     const title = document.createElement('span');
     title.className = 'nr-panel-title';
-    title.textContent = 'Shape';
+    title.textContent = 'Component Designer';
     header.appendChild(title);
     paletteEl.appendChild(header);
 
@@ -1300,7 +1445,7 @@ function buildPalettePanel() {
     list.setAttribute('role', 'listbox');
     list.setAttribute('aria-label', 'Components');
 
-    for (const id of Object.keys(ShapeRegistry)) {
+    for (const id of Object.keys(ShapeRegistry).filter(id => !BUILT_IN_SHAPE_IDS.has(id))) {
         const li = document.createElement('li');
         li.setAttribute('role', 'option');
         li.setAttribute('aria-selected', String(id === currentShapeId));
@@ -1341,29 +1486,35 @@ function loadShapeIntoCanvas(id: string) {
     const factory = getPreviewFactory(id, savedBaseShape);
     if (!factory) return;
 
-    // Designer always starts at 2 GU per axis so every shape opens at a clean baseline.
-    // "Save Defaults" persists the user's chosen dimensions back to the registry.
-    const BASE_GU = 2 * GRID_SIZE;
-    const minDepth = savedBaseShape === 'pyramid' ? BASE_GU : BASE_GU;
+    // Load saved dimensions from registry; fall back to 2×2×2 GU for new shapes.
+    const FALLBACK_GU = 2 * GRID_SIZE;
+    const savedDefaults = ShapeRegistry[id];
+    const initWidth  = savedDefaults?.defaultSize?.width              ?? FALLBACK_GU;
+    const initHeight = savedDefaults?.defaultSize?.height             ?? FALLBACK_GU;
+    const initDepth  = savedDefaults?.defaultIsometricHeight          ?? FALLBACK_GU;
+
+    // Centre the shape on the 10×10 GU canvas regardless of its size.
+    const gridPx = CD_GRID_COUNT * GRID_SIZE;
+    const posX = (gridPx - initWidth)  / 2;
+    const posY = (gridPx - initHeight) / 2;
 
     const shape = factory();
-    shape.resize(BASE_GU, BASE_GU);
-    shape.set('isometricHeight',        minDepth);
-    shape.set('defaultIsometricHeight', ShapeRegistry[id]?.defaultIsometricHeight ?? minDepth);
-    shape.set('defaultSize',            ShapeRegistry[id]?.defaultSize ?? { width: BASE_GU, height: BASE_GU });
-    // Centre the 2×2 GU shape on the 10×10 GU grid: (5 GU - 1 GU) × GRID_SIZE.
-    shape.position(GRID_SIZE * 4, GRID_SIZE * 4);
+    shape.resize(initWidth, initHeight);
+    shape.set('isometricHeight',        initDepth);
+    shape.set('defaultIsometricHeight', initDepth);
+    shape.set('defaultSize',            { width: initWidth, height: initHeight });
+    shape.position(posX, posY);
     shape.toggleView(View.Isometric);
     graph.addCell(shape);
     shape.addTools(paper, View.Isometric);
     currentShape = shape;
 
     const shape2D = factory();
-    shape2D.resize(BASE_GU, BASE_GU);
-    shape2D.set('isometricHeight',        minDepth);
-    shape2D.set('defaultIsometricHeight', ShapeRegistry[id]?.defaultIsometricHeight ?? minDepth);
-    shape2D.set('defaultSize',            ShapeRegistry[id]?.defaultSize ?? { width: BASE_GU, height: BASE_GU });
-    shape2D.position(GRID_SIZE * 4, GRID_SIZE * 4);
+    shape2D.resize(initWidth, initHeight);
+    shape2D.set('isometricHeight',        initDepth);
+    shape2D.set('defaultIsometricHeight', initDepth);
+    shape2D.set('defaultSize',            { width: initWidth, height: initHeight });
+    shape2D.position(posX, posY);
     shape2D.toggleView(View.TwoDimensional);
     graph2D.addCell(shape2D);
     currentShape2D = shape2D;
@@ -1414,4 +1565,4 @@ export const panel = {
 
 buildInspectorPanel();
 buildPalettePanel();
-loadShapeIntoCanvas(currentShapeId);
+if (currentShapeId) loadShapeIntoCanvas(currentShapeId);

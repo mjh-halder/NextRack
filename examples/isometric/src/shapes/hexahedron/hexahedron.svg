@@ -1,0 +1,68 @@
+<g
+    magnet-selector="base"
+    highlighter-selector="base"
+>
+    <!-- Base rectangle — 2D footprint and hit area -->
+    <rect @selector="base" @group-selector="common"
+        width="calc(w)"
+        height="calc(h)"
+        fill="#e0e0e0"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <!-- ISO: front face (bottom band) -->
+    <path @selector="front" @group-selector="iso"
+        fill="#e0e0e0"
+        stroke="#333"
+        stroke-linejoin="round"
+        :d="M 0 calc(h) L calc(w) calc(h) L calc(w - {{isometricHeight}}) calc(h - {{isometricHeight}}) L -{{isometricHeight}} calc(h - {{isometricHeight}}) Z"
+    />
+
+    <!-- ISO: side face (right face) -->
+    <path @selector="side" @group-selector="iso"
+        fill="#c6c6c6"
+        stroke="#333"
+        stroke-linejoin="round"
+        :d="M calc(w) calc(h) L calc(w) 0 L calc(w - {{isometricHeight}}) -{{isometricHeight}} L calc(w - {{isometricHeight}}) calc(h - {{isometricHeight}}) Z"
+    />
+
+    <!-- ISO: top face shifted by (-iH, -iH) -->
+    <rect @selector="top" @group-selector="iso"
+        width="calc(w)"
+        height="calc(h)"
+        fill="#a8a8a8"
+        stroke="#333"
+        stroke-linejoin="round"
+        :x="{{topXPosition([isometricHeight])}}"
+        :y="{{topYPosition([isometricHeight])}}"
+    />
+
+    <!-- ISO: icon image on the top face; position/size set via attr() -->
+    <image @selector="topIcon" @group-selector="iso"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
+    <!-- 2D: icon image centered in the shape bounding box; position/size set via attr() -->
+    <image @selector="topIcon2D" @group-selector="2d"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
+    <text @selector="label" @group-selector="common"
+        text-anchor="left"
+        text-vertical-anchor="middle"
+        font-family="sans-serif"
+        font-size="11"
+        fill="#333"
+        stroke="#fff"
+        stroke-width="3"
+        paint-order="stroke"
+        y="calc(h + 10)"
+        x="calc(w + 10)"
+        text="Hexahedron"
+    />
+</g>

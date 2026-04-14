@@ -1,0 +1,50 @@
+<g
+    magnet-selector="base"
+    highlighter-selector="base"
+>
+    <!-- Transparent hit area, always present in both views -->
+    <rect @selector="base" @group-selector="common"
+        width="calc(w)"
+        height="calc(h)"
+        fill="transparent"
+        stroke="none"
+    />
+
+    <!-- 2D view: diamond representing the pyramid footprint from above -->
+    <polygon @group-selector="2d"
+        :points="{{baseDiamondPoints([size])}}"
+        fill="#e0e0e0"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <!-- ISO: front (bottom-facing) triangular face -->
+    <polygon @selector="front" @group-selector="iso"
+        :points="{{frontFacePoints([size, isometricHeight])}}"
+        fill="#e0e0e0"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <!-- ISO: side (right-facing) triangular face -->
+    <polygon @selector="side" @group-selector="iso"
+        :points="{{sideFacePoints([size, isometricHeight])}}"
+        fill="#c6c6c6"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <text @selector="label" @group-selector="common"
+        text-anchor="left"
+        text-vertical-anchor="middle"
+        font-family="sans-serif"
+        font-size="11"
+        fill="#333"
+        stroke="#fff"
+        stroke-width="3"
+        paint-order="stroke"
+        y="calc(h + 10)"
+        x="calc(w + 10)"
+        text="Pyramid"
+    />
+</g>

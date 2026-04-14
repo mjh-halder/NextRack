@@ -2,7 +2,7 @@ import { Model } from '@joint/decorators';
 import { dia, elementTools } from '@joint/core';
 import svg from './frame.svg';
 import IsometricShape, { View } from '../isometric-shape';
-import { FrameSizeControl } from '../../tools';
+import { FrameCornerControl } from '../../tools';
 import { GRID_SIZE } from '../../theme';
 
 const defaultSize = {
@@ -27,7 +27,10 @@ export class Frame extends IsometricShape {
         const toolView = new dia.ToolsView({
             name: 'controls',
             tools: [
-                new FrameSizeControl(),
+                new FrameCornerControl({ corner: 'bottom-right' }),
+                new FrameCornerControl({ corner: 'bottom-left' }),
+                new FrameCornerControl({ corner: 'top-right' }),
+                new FrameCornerControl({ corner: 'top-left' }),
                 new elementTools.Remove({
                     x: '100%',
                     y: 0,

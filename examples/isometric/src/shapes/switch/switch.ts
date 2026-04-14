@@ -3,7 +3,9 @@ import svg from './switch.svg';
 import { ProportionalCuboidShape } from '../isometric-shape';
 import { ShapeRegistry } from '../shape-registry';
 
-const { defaultSize, defaultIsometricHeight } = ShapeRegistry['switch'];
+const _switchEntry = ShapeRegistry['switch'];
+if (!_switchEntry) throw new Error('[nextrack] Built-in registry entry "switch" is missing at startup — check module initialization order');
+const { defaultSize, defaultIsometricHeight } = _switchEntry;
 
 @Model({
     attributes: {

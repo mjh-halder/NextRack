@@ -3,7 +3,9 @@ import svg from './router.svg';
 import { CylinderShape } from '../isometric-shape';
 import { ShapeRegistry } from '../shape-registry';
 
-const { defaultSize, defaultIsometricHeight } = ShapeRegistry['router'];
+const _routerEntry = ShapeRegistry['router'];
+if (!_routerEntry) throw new Error('[nextrack] Built-in registry entry "router" is missing at startup — check module initialization order');
+const { defaultSize, defaultIsometricHeight } = _routerEntry;
 
 @Model({
     attributes: {

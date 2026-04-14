@@ -3,7 +3,9 @@ import svg from './database.svg';
 import { CylinderShape } from '../isometric-shape';
 import { ShapeRegistry } from '../shape-registry';
 
-const { defaultSize, defaultIsometricHeight } = ShapeRegistry['database'];
+const _databaseEntry = ShapeRegistry['database'];
+if (!_databaseEntry) throw new Error('[nextrack] Built-in registry entry "database" is missing at startup — check module initialization order');
+const { defaultSize, defaultIsometricHeight } = _databaseEntry;
 
 @Model({
     attributes: {

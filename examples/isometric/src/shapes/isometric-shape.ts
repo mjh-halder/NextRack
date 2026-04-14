@@ -57,11 +57,22 @@ export default class IsometricShape extends dia.Element<IsometricElementAttribut
         this.set('isometricHeight', this.get('defaultIsometricHeight'));
     }
 
-    addTools(paper: dia.Paper, view: View) {
+    /**
+     * Attaches interaction tools to this shape's view.
+     *
+     * @param paper  - The paper the shape is rendered on.
+     * @param view   - Current view (isometric hides the height tool in 2D mode).
+     * @param include - Optional whitelist of tool keys to show. When omitted all
+     *                  tools are shown (component designer behaviour). Pass
+     *                  `['connect']` in the system designer to suppress the
+     *                  resize and height-drag handles.
+     */
+    addTools(paper: dia.Paper, view: View, include?: ToolKeys[]) {
 
         const tools = [];
         for (const [key, tool] of Object.entries(this.tools)) {
             if (view === View.TwoDimensional && key === ISOMETRIC_HEIGHT_KEY) continue;
+            if (include && !include.includes(key as ToolKeys)) continue;
             tool.name = key;
             tools.push(tool);
         }

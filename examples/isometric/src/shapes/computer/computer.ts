@@ -3,7 +3,9 @@ import svg from './computer.svg';
 import { CuboidShape } from '../isometric-shape';
 import { ShapeRegistry } from '../shape-registry';
 
-const { defaultSize, defaultIsometricHeight } = ShapeRegistry['computer'];
+const _computerEntry = ShapeRegistry['computer'];
+if (!_computerEntry) throw new Error('[nextrack] Built-in registry entry "computer" is missing at startup — check module initialization order');
+const { defaultSize, defaultIsometricHeight } = _computerEntry;
 
 @Model({
     attributes: {

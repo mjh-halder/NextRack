@@ -3,6 +3,7 @@ import '@carbon/styles/css/styles.css';
 
 import { panel, canvasEl, paletteEl, viewToggleContainerEl, designNameEl } from './system-designer';
 import { panel as cdPanel } from './component-designer';
+import { initTopHeader } from './top-header';
 
 // ---- Theme toggle (light: cds--white / dark: cds--g100) ----
 
@@ -70,3 +71,10 @@ function setAppView(view: AppView) {
 
 navGridBtn.addEventListener('click',   () => setAppView('grid'));
 navShapesBtn.addEventListener('click', () => setAppView('shapes'));
+
+// ---- Top header ----
+
+initTopHeader(
+    document.getElementById('top-header') as HTMLDivElement,
+    designNameEl,
+);

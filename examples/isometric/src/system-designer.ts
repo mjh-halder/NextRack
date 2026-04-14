@@ -1,12 +1,13 @@
-import { g, dia, V } from '@joint/core';
+import { g, dia, V, highlighters } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View } from './shapes/isometric-shape';
 import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, Frame, cellNamespace } from './shapes';
-import { sortElements, drawGrid, switchView } from './utils';
+import { sortElements, drawGrid, switchView, applyRegistryDefaults } from './utils';
 import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
-import { PropertyPanel } from './inspector';
+import { PropertyPanel, META_KEY } from './inspector';
+import { ShapeRegistry } from './shapes/shape-registry';
 import { ComponentPalette } from './palette';
-import { saveGraph, loadGraph } from './persistence';
+import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './persistence';
 import { ViewToggle } from './view-toggle';
 
 // Inline Carbon SVG icons (16 × 16) used in the menu components
@@ -34,20 +35,50 @@ function duplicateSelected() {
     clone.toggleView(currentView);
     graph.addCell(clone);
     paper.removeTools();
-    clone.addTools(paper, currentView);
+    clone.addTools(paper, currentView, ['connect']);
     panel.show(clone);
     currentCell = clone;
+    if (currentView === View.Isometric) sortElements(graph);
+}
+
+function duplicateZone(frame: Frame): void {
+    const offset = GRID_SIZE * 4;
+    const clonedFrame = frame.clone() as Frame;
+    const { x, y } = frame.position();
+    clonedFrame.position(x + offset, y + offset);
+
+    const embeddedElements = frame.getEmbeddedCells()
+        .filter(c => c instanceof IsometricShape && !c.get('isFrame')) as IsometricShape[];
+
+    const clonedChildren = embeddedElements.map(child => {
+        const clone = child.clone() as IsometricShape;
+        const { x: cx, y: cy } = child.position();
+        clone.position(cx + offset, cy + offset);
+        clone.toggleView(currentView);
+        return clone;
+    });
+
+    graph.addCells([clonedFrame, ...clonedChildren]);
+    clonedFrame.toggleView(currentView);
+    for (const child of clonedChildren) {
+        clonedFrame.embed(child);
+    }
     if (currentView === View.Isometric) sortElements(graph);
 }
 
 export const panel = new PropertyPanel(inspectorEl, {
     onDelete: deleteSelected,
     onDuplicate: duplicateSelected,
+    onDuplicateZone: (frame) => duplicateZone(frame as Frame),
 });
 
-// Left inset = nav rail (48px) + palette width (160px) + breathing room (20px).
+// Left inset = nav rail (48px) + palette width (208px) + breathing room (20px).
 // Content is shifted right by this amount so it starts clear of the sidebars.
-const SIDEBAR_INSET = 228;
+const SIDEBAR_INSET = 276;
+
+// Carbon --cds-interactive blue, used as the tree-selection highlight on shapes
+const TREE_HIGHLIGHT_ID = 'tree-selection';
+const TREE_HIGHLIGHT_COLOR = '#0f62fe';
 
 let currentView = View.Isometric;
 let currentCell: IsometricShape | Link = null;
@@ -55,6 +86,9 @@ let currentZoom = 1;
 let currentGridCount = GRID_COUNT;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let gridVEl: any = null;
+let gridVisible = true;
+let treeHighlightedCell: IsometricShape | null = null;
+let currentFrame: Frame | null = null;
 
 const graph = new dia.Graph({}, { cellNamespace });
 
@@ -146,27 +180,8 @@ paper.setDimensions(
     GRID_SIZE * GRID_COUNT * SCALE + CANVAS_V_PAD
 );
 
-// Generate example graph
-
-const c1 = new Computer().position(40, 140).attr('label/text', 'Computer 1');
-const c2 = new Computer().position(180, 140).attr('label/text', 'Computer 2');
-const db1 = new Database().position(100, 20);
-const ad1 = new ActiveDirectory().position(100, 260);
-const admin = new User().position(100, 460).attr('label/text', 'Admin');
-const user = new User().position(280, 460);
-const firewall = new Firewall().position(260, 380);
-const switchEl = new Switch().position(400, 160);
-const router = new Router().position(400, 100);
-
-const l1 = new Link().source(ad1).target(c1);
-const l2 = l1.clone().target(c2);
-const l3 = new Link().source(c1).target(db1);
-const l4 = l3.clone().source(c2);
-const l5 = new Link().source(user).target(firewall);
-const l6 = new Link().source(firewall).target(ad1);
-const l7 = new Link().source(admin).target(ad1);
-
-graph.resetCells([c1, c2, db1, ad1, l1, l2, l3, l4, admin, l5, firewall, l6, user, l7, switchEl, router]);
+// Load default design if one has been saved, otherwise start with an empty canvas.
+loadDefaultDesign(graph);
 
 // Clean up selection when a cell is removed by any means (tool, keyboard, inspector)
 
@@ -174,6 +189,14 @@ graph.on('remove', (cell: dia.Cell) => {
     if (currentCell && currentCell.id === cell.id) {
         currentCell = null;
         panel.hide();
+    }
+    if (currentFrame && currentFrame.id === cell.id) {
+        currentFrame = null;
+        panel.hide();
+    }
+    if (treeHighlightedCell && treeHighlightedCell.id === cell.id) {
+        treeHighlightedCell = null;
+        palette.setTreeSelection(null);
     }
 });
 
@@ -218,6 +241,25 @@ function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
         V.createSVGMatrix()
             .translate(sx, sy)
             .scale(factor)
+            .translate(-sx, -sy)
+            .multiply(mx)
+    );
+}
+
+// Zoom anchored to the centre of the usable viewport (header + sidebar excluded)
+function applyMenuZoom(factor: number) {
+    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * factor));
+    if (newZoom === currentZoom) return;
+    const zoomFactor = newZoom / currentZoom;
+    currentZoom = newZoom;
+    const mx = paper.matrix();
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
+    const sx = SIDEBAR_INSET + (window.innerWidth  - SIDEBAR_INSET) / 2;
+    const sy = headerH               + (window.innerHeight - headerH)       / 2;
+    paper.matrix(
+        V.createSVGMatrix()
+            .translate(sx, sy)
+            .scale(zoomFactor)
             .translate(-sx, -sy)
             .multiply(mx)
     );
@@ -470,6 +512,18 @@ function showNewDesignModal() {
     nameInput.focus();
 }
 
+// ---- Toast ----
+
+function showToast(message: string) {
+    const n = document.createElement('div');
+    n.className = 'cds--inline-notification cds--inline-notification--success';
+    n.setAttribute('role', 'status');
+    n.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:9000;min-width:260px;max-width:400px;';
+    n.innerHTML = `<div class="cds--inline-notification__details"><p class="cds--inline-notification__title">${message}</p></div>`;
+    document.body.appendChild(n);
+    setTimeout(() => n.remove(), 3000);
+}
+
 // ---- Menu Popup ----
 
 function showMenuPopup(anchor: HTMLElement) {
@@ -526,20 +580,85 @@ function showMenuPopup(anchor: HTMLElement) {
     document.addEventListener('mousedown', dismissOnOutsideClick, true);
 }
 
-new ComponentPalette(paletteEl, graph, () => currentView, (shape) => {
+// Apply or remove the Carbon-blue edge highlight that syncs tree ↔ canvas selection.
+function setTreeHighlight(cell: IsometricShape | null) {
+    if (treeHighlightedCell) {
+        const prevView = paper.findViewByModel(treeHighlightedCell);
+        if (prevView) highlighters.mask.remove(prevView, TREE_HIGHLIGHT_ID);
+    }
+    treeHighlightedCell = cell;
+    if (cell) {
+        const cellView = paper.findViewByModel(cell);
+        if (cellView) {
+            highlighters.mask.add(cellView, 'base', TREE_HIGHLIGHT_ID, {
+                layer: dia.Paper.Layers.BACK,
+                attrs: { stroke: TREE_HIGHLIGHT_COLOR, 'stroke-width': 3 }
+            });
+        }
+    }
+    palette.setTreeSelection(cell ? String(cell.id) : null);
+}
+
+const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape) => {
     paper.removeTools();
-    shape.addTools(paper, currentView);
+    shape.addTools(paper, currentView, ['connect']);
     if (shape.get('isFrame')) {
         currentCell = null;
         panel.hide();
     } else {
         currentCell = shape;
         panel.show(shape);
+        setTreeHighlight(shape);
     }
     if (currentView === View.Isometric) {
         sortElements(graph);
     }
-}, showMenuPopup);
+}, showMenuPopup, (cellId: string) => {
+    // Tree item clicked — select the element on the canvas
+    const cell = graph.getCell(cellId);
+    if (!cell || !(cell instanceof IsometricShape) || cell.get('isFrame')) return;
+    paper.removeTools();
+    cell.addTools(paper, currentView, ['connect']);
+    currentCell = cell;
+    panel.show(cell);
+    setTreeHighlight(cell);
+});
+
+// Zone assignment helpers
+
+/**
+ * Returns the topmost Frame whose bounding box contains the element's center.
+ * Within the same z-level (all frames default to z:-1), the most recently
+ * inserted cell in the graph wins — matching the visual stacking order.
+ */
+function findTopmostContainingFrame(element: IsometricShape): Frame | null {
+    const center = element.getBBox().center();
+    const cells = graph.getCells();
+    const containing = graph.getElements()
+        .filter(e => e.get('isFrame') && e.getBBox().containsPoint(center)) as Frame[];
+    if (containing.length === 0) return null;
+    containing.sort((a, b) => {
+        const za = (a.get('z') as number) ?? 0;
+        const zb = (b.get('z') as number) ?? 0;
+        if (za !== zb) return zb - za;                        // higher z wins
+        return cells.indexOf(b) - cells.indexOf(a);           // later insertion wins
+    });
+    return containing[0];
+}
+
+/**
+ * Called after an element is dropped. Embeds it into the topmost containing
+ * frame, or unembeds it if it was moved out of its current zone.
+ * Uses JointJS native embedding so the relationship persists in save/load
+ * and children translate automatically when their parent zone moves.
+ */
+function updateZoneAssignment(element: IsometricShape): void {
+    const newZone = findTopmostContainingFrame(element);
+    const currentParent = element.getParentCell() as Frame | null;
+    if (currentParent?.id === newZone?.id) return;
+    if (currentParent) currentParent.unembed(element);
+    if (newZone) newZone.embed(element);
+}
 
 // Show/Hide tools on cell pointer events
 
@@ -548,29 +667,37 @@ paper.on('link:pointerup', (linkView: dia.LinkView) => {
     paper.removeTools();
     link.addTools(paper);
     currentCell = link;
+    currentFrame = null;
     panel.showLink(link);
+    setTreeHighlight(null);
 });
 
 paper.on('element:pointerup', (elementView: dia.ElementView) => {
     const model = elementView.model;
     paper.removeTools();
     if (model.get('isFrame')) {
-        // Frames show resize/remove tools but do not open the inspector.
         (model as Frame).addTools(paper, currentView);
         currentCell = null;
-        panel.hide();
+        currentFrame = model as Frame;
+        panel.showZone(model);
+        setTreeHighlight(null);
         return;
     }
     const shape = model as IsometricShape;
-    shape.addTools(paper, currentView);
+    updateZoneAssignment(shape);
+    shape.addTools(paper, currentView, ['connect']);
     currentCell = shape;
+    currentFrame = null;
     panel.show(shape);
+    setTreeHighlight(shape);
 });
 
 paper.on('blank:pointerdown', () => {
     paper.removeTools();
     currentCell = null;
+    currentFrame = null;
     panel.hide();
+    setTreeHighlight(null);
 });
 
 // Setup scrolling
@@ -591,4 +718,64 @@ paper.on('blank:pointermove', (evt) => {
 
 paper.on('blank:pointerup', () => {
     paper.el.style.cursor = 'grab';
+});
+
+// When the component designer saves defaults, update all matching instances
+// already placed on this canvas. applyRegistryDefaults() is the single
+// function that propagates every registry field — dimensions, label, colors,
+// and icon — to each instance, keeping the system designer in sync.
+document.addEventListener('nextrack:registry-changed', () => {
+    graph.getElements().forEach(cell => {
+        if (cell.get('isFrame')) return; // frames are user-controlled containers
+        const meta = cell.get(META_KEY);
+        if (!meta?.kind) return;
+        const defaults = ShapeRegistry[meta.kind];
+        if (!defaults) return;
+        applyRegistryDefaults(cell, defaults, paper);
+        if (currentView === View.Isometric) sortElements(graph);
+    });
+});
+
+// Header menu actions — connected to existing system-designer functions.
+// Unconnected actions (zoom, grid, validate, …) are dispatched but ignored here;
+// they will be wired as those features are implemented.
+document.addEventListener('nextrack:header-action', (e: Event) => {
+    const { action } = (e as CustomEvent<{ action: string }>).detail;
+    switch (action) {
+        case 'file-new':
+            showNewDesignModal();
+            break;
+        case 'file-save':
+            saveGraph(graph);
+            break;
+        case 'file-open':
+            loadGraph(graph, () => {
+                paper.removeTools();
+                currentCell = null;
+                panel.hide();
+                switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCount);
+            });
+            break;
+        case 'edit-delete':
+            deleteSelected();
+            break;
+        case 'view-zoom-in':
+            applyMenuZoom(1.25);
+            break;
+        case 'view-zoom-out':
+            applyMenuZoom(1 / 1.25);
+            break;
+        case 'view-fit':
+            currentZoom = 1;
+            switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCount);
+            break;
+        case 'view-toggle-grid':
+            gridVisible = !gridVisible;
+            if (gridVEl) gridVEl.node.style.display = gridVisible ? '' : 'none';
+            break;
+        case 'admin-set-default':
+            saveDefaultDesign(graph);
+            showToast('Default design saved.');
+            break;
+    }
 });

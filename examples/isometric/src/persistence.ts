@@ -1,6 +1,7 @@
 import { dia } from '@joint/core';
 
 const FILE_NAME = 'nextrack-diagram.json';
+const DEFAULT_DESIGN_KEY = 'nextrack-default-design-v1';
 
 export function saveGraph(graph: dia.Graph): void {
     // graph.toJSON() includes all graph-level Backbone attributes (e.g. the
@@ -16,6 +17,33 @@ export function saveGraph(graph: dia.Graph): void {
     a.download = FILE_NAME;
     a.click();
     URL.revokeObjectURL(url);
+}
+
+/** Persist the current graph as the startup default in localStorage. */
+export function saveDefaultDesign(graph: dia.Graph): void {
+    try {
+        const data = { cells: graph.getCells().map(cell => cell.toJSON()) };
+        localStorage.setItem(DEFAULT_DESIGN_KEY, JSON.stringify(data));
+    } catch (e) {
+        console.error('[nextrack] Failed to save default design:', e);
+    }
+}
+
+/**
+ * Load the default design from localStorage into the graph.
+ * Returns true if a default was found and loaded, false otherwise.
+ */
+export function loadDefaultDesign(graph: dia.Graph): boolean {
+    try {
+        const raw = localStorage.getItem(DEFAULT_DESIGN_KEY);
+        if (!raw) return false;
+        const json = JSON.parse(raw);
+        graph.fromJSON(json);
+        return true;
+    } catch (e) {
+        console.error('[nextrack] Failed to load default design:', e);
+        return false;
+    }
 }
 
 export function loadGraph(

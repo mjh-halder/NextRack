@@ -3,7 +3,9 @@ import svg from './firewall.svg';
 import { CuboidShape } from '../isometric-shape';
 import { ShapeRegistry } from '../shape-registry';
 
-const { defaultSize, defaultIsometricHeight } = ShapeRegistry['firewall'];
+const _firewallEntry = ShapeRegistry['firewall'];
+if (!_firewallEntry) throw new Error('[nextrack] Built-in registry entry "firewall" is missing at startup — check module initialization order');
+const { defaultSize, defaultIsometricHeight } = _firewallEntry;
 
 @Model({
     attributes: {
