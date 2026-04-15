@@ -10,20 +10,26 @@ import { applyRegistryDefaults } from './utils';
 import { carbonIconToString, CarbonIcon } from './icons';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import CaretRight16 from '@carbon/icons/es/caret--right/16.js';
+import Area16 from '@carbon/icons/es/area/16.js';
+import { getIconById } from './icon-catalog';
 
 const ICON_CHEVRON_DOWN = carbonIconToString(ChevronDown16 as CarbonIcon);
 // Tree toggle — filled right-pointing triangle.
 // CSS rotates it 90° clockwise when aria-expanded="true" so it points downward.
 const ICON_TREE_TOGGLE = carbonIconToString(CaretRight16 as CarbonIcon);
+// Carbon "Area" icon used for zones in the element tree.
+const ICON_TREE_ZONE = carbonIconToString(Area16 as CarbonIcon);
 
 interface PaletteItem {
     label: string;
     kind: string;
     create: () => IsometricShape;
+    /** Optional raw SVG markup rendered as a leading icon. */
+    iconSvg?: string;
 }
 
 const CONTAINER_ITEMS: PaletteItem[] = [
-    { label: 'Zone', kind: 'zone', create: () => new Frame() },
+    { label: 'Zone', kind: 'zone', create: () => new Frame(), iconSvg: ICON_TREE_ZONE },
 ];
 
 // Stagger new elements so they don't land on top of each other
@@ -249,7 +255,10 @@ export class ComponentPalette {
             || (cell.attr('label/text') as string | undefined)
             || meta?.kind
             || 'Element';
-        const iconHref = meta?.kind ? ShapeRegistry[meta.kind]?.iconHref : undefined;
+        // Tree shows the raw catalog icon (no composite background) for a
+        // cleaner, Carbon-style list appearance.
+        const iconId = meta?.kind ? ShapeRegistry[meta.kind]?.icon : undefined;
+        const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
 
         const li = document.createElement('li');
         li.className = 'nr-tree-element';
@@ -258,13 +267,12 @@ export class ComponentPalette {
         const row = document.createElement('div');
         row.className = 'nr-tree-row';
 
-        if (iconHref) {
-            const iconImg = document.createElement('img');
-            iconImg.src = iconHref;
-            iconImg.className = 'nr-tree-icon';
-            iconImg.alt = '';
-            iconImg.setAttribute('aria-hidden', 'true');
-            row.appendChild(iconImg);
+        if (iconSvg) {
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'nr-tree-icon';
+            iconSpan.innerHTML = iconSvg;
+            iconSpan.setAttribute('aria-hidden', 'true');
+            row.appendChild(iconSpan);
         }
 
         const labelSpan = document.createElement('span');
@@ -286,6 +294,7 @@ export class ComponentPalette {
             label: defaults.displayName ?? id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
             kind: id,
             create: () => getPreviewFactory(id, defaults.baseShape ?? 'cuboid')(),
+            iconSvg: defaults.icon ? getIconById(defaults.icon)?.svg : undefined,
         }));
 
         this.listEl.appendChild(this.buildSection('Components', componentItems, false));
@@ -301,7 +310,20 @@ export class ComponentPalette {
             const btn = document.createElement('button');
             btn.className = 'nr-palette-item';
             btn.type = 'button';
-            btn.textContent = item.label;
+
+            if (item.iconSvg) {
+                const iconSpan = document.createElement('span');
+                iconSpan.className = 'nr-palette-item-icon';
+                iconSpan.innerHTML = item.iconSvg;
+                iconSpan.setAttribute('aria-hidden', 'true');
+                btn.appendChild(iconSpan);
+            }
+
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'nr-palette-item-label';
+            labelSpan.textContent = item.label;
+            btn.appendChild(labelSpan);
+
             btn.addEventListener('click', () => this.addToGraph(item));
             li.appendChild(btn);
             list.appendChild(li);

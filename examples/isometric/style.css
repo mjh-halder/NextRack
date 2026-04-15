@@ -1070,7 +1070,9 @@
 }
 
 .nr-palette-item {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     width: 100%;
     padding: 6px var(--cds-spacing-05, 16px);
     background: none;
@@ -1081,6 +1083,40 @@
     color: var(--cds-text-primary, #161616);
     cursor: pointer;
     border-left: 3px solid transparent;
+}
+
+.nr-palette-item-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--cds-icon-primary, #161616);
+}
+
+.nr-palette-item-icon svg,
+.nr-palette-item-icon img {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.cds--g100 .nr-palette-item-icon {
+    color: var(--cds-icon-primary, #f4f4f4);
+}
+
+.cds--g100 .nr-palette-item-icon svg,
+.cds--g100 .nr-palette-item-icon img {
+    filter: brightness(0) invert(1);
+}
+
+.nr-palette-item-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 
@@ -1168,10 +1204,34 @@
     display: none;
 }
 
-/* Element Tree body: fixed max height, scrollable */
+/* Element Tree body: fixed max height, always-visible minimal scrollbar so
+   the user sees there's more content to scroll. */
 .nr-section-body--tree {
     max-height: 35vh;
-    overflow-y: auto;
+    overflow-y: scroll;
+    scrollbar-width: thin;
+    scrollbar-color: var(--cds-border-subtle-01, #c6c6c6) transparent;
+}
+
+.nr-section-body--tree::-webkit-scrollbar {
+    width: 4px;
+}
+
+.nr-section-body--tree::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.nr-section-body--tree::-webkit-scrollbar-thumb {
+    background: var(--cds-border-subtle-01, #c6c6c6);
+    border-radius: 0;
+}
+
+.cds--g100 .nr-section-body--tree {
+    scrollbar-color: var(--cds-border-subtle-01, #525252) transparent;
+}
+
+.cds--g100 .nr-section-body--tree::-webkit-scrollbar-thumb {
+    background: var(--cds-border-subtle-01, #525252);
 }
 
 /* Scrollable container for Components + Zoning */
@@ -1224,12 +1284,12 @@
 
 /* Level-1 indent: children inside a zone */
 .nr-tree-children .nr-tree-row {
-    padding-inline-start: 24px; /* 8px base + 16px toggle */
+    padding-inline-start: 26px; /* 8px base + 16px toggle + 2px extra nesting hint */
 }
 
 /* Level-2 indent: children inside a nested zone */
 .nr-tree-children .nr-tree-children .nr-tree-row {
-    padding-inline-start: 40px;
+    padding-inline-start: 42px;
 }
 
 /* Selected element: blue left border + tinted background */
@@ -1255,12 +1315,32 @@
     transform: rotate(90deg);
 }
 
-/* Icon image */
+/* Tree icon — raw SVG, no background. */
 .nr-tree-icon {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     flex-shrink: 0;
-    border-radius: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--cds-icon-primary, #161616);
+}
+
+.nr-tree-icon svg,
+.nr-tree-icon img {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Dark mode: invert mono icons so they remain visible on dark backgrounds. */
+.cds--g100 .nr-tree-icon {
+    color: var(--cds-icon-primary, #f4f4f4);
+}
+
+.cds--g100 .nr-tree-icon svg,
+.cds--g100 .nr-tree-icon img {
+    filter: brightness(0) invert(1);
 }
 
 /* Label text */

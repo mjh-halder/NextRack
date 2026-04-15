@@ -3079,8 +3079,21 @@ function buildPalettePanel() {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'nr-palette-item' + (id === currentShapeId ? ' nr-palette-item--selected' : '');
-        btn.textContent = ShapeRegistry[id]?.displayName ?? formatLabel(id);
         btn.dataset.shapeId = id;
+
+        const iconId  = ShapeRegistry[id]?.icon;
+        const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
+        if (iconSvg) {
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'nr-palette-item-icon';
+            iconSpan.innerHTML = iconSvg;
+            iconSpan.setAttribute('aria-hidden', 'true');
+            btn.appendChild(iconSpan);
+        }
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'nr-palette-item-label';
+        labelSpan.textContent = ShapeRegistry[id]?.displayName ?? formatLabel(id);
+        btn.appendChild(labelSpan);
 
         btn.addEventListener('click', () => {
             paletteEl.querySelectorAll<HTMLButtonElement>('.nr-palette-item').forEach(b => {
