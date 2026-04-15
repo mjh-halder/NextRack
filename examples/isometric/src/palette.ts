@@ -1,11 +1,12 @@
 import { dia } from '@joint/core';
 import IsometricShape, { View } from './shapes/isometric-shape';
 import { Frame } from './shapes';
+import { ComplexComponent } from './shapes/complex-component';
 import { META_KEY, NodeMeta } from './inspector';
 import { GRID_SIZE } from './theme';
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
 import { getPreviewFactory } from './shapes/shape-factories';
-import { applyRegistryDefaults, createComplexLayers } from './utils';
+import { applyRegistryDefaults } from './utils';
 import { carbonIconToString, CarbonIcon } from './icons';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import CaretRight16 from '@carbon/icons/es/caret--right/16.js';
@@ -167,9 +168,12 @@ export class ComponentPalette {
             e => e.get('isFrame') && !e.getParentCell()?.get('isFrame')
         ) as Frame[];
 
-        // Root-level non-frame elements: not embedded inside any frame
+        // Root-level non-frame elements: not embedded inside any frame, and
+        // not the internal child layers of a complex component.
         const rootElements = allElements.filter(
-            e => !e.get('isFrame') && !e.getParentCell()?.get('isFrame')
+            e => !e.get('isFrame')
+                && e.get('componentRole') !== 'child'
+                && !e.getParentCell()?.get('isFrame')
         );
 
         for (const frame of rootFrames) {
@@ -192,7 +196,9 @@ export class ComponentPalette {
         const zoneLabel = (frame.attr('label/text') as string | undefined)?.trim() || 'Zone';
         const embeds = frame.getEmbeddedCells();
         const childFrames = embeds.filter(e => e.get('isFrame')) as Frame[];
-        const childElements = embeds.filter(e => !e.get('isFrame') && !e.isLink()) as dia.Element[];
+        const childElements = embeds.filter(
+            e => !e.get('isFrame') && !e.isLink() && e.get('componentRole') !== 'child'
+        ) as dia.Element[];
 
         const li = document.createElement('li');
         li.className = 'nr-tree-zone';
@@ -315,26 +321,43 @@ export class ComponentPalette {
         const view = this.getView();
         const meta: NodeMeta = { name: '', kind: item.kind, vendor: '', model: '', notes: '' };
 
-        // Complex shape: reproduce the component-designer stack — every layer is its own
-        // shape; Layer 0 is the base (carries meta/label/icon), layers 1+ embed into it.
+        // Complex shape: one cell (ComplexComponent) that renders all layers
+        // internally. One bbox, one z, one drag target — no embedding, no
+        // sibling-layer painter ambiguity.
         if (defaults?.complexShape && defaults.layers?.length) {
-            const shapes = createComplexLayers(defaults.layers, x, y, view);
-            const base = shapes[0];
-            base.set(META_KEY, meta);
-            applyRegistryDefaults(base, defaults);
-            // Only Layer 0 carries the label; keep the others unlabelled.
-            for (let i = 1; i < shapes.length; i++) {
-                shapes[i].attr('label/text', '');
+            const baseLayer = defaults.layers[0];
+            const cc = new ComplexComponent();
+            cc.resize(baseLayer.width, baseLayer.height);
+            cc.set('isometricHeight',        baseLayer.depth);
+            cc.set('defaultIsometricHeight', baseLayer.depth);
+            cc.set('defaultSize',            { width: baseLayer.width, height: baseLayer.height });
+            // Copy the layer definitions into the cell — deep-clone so edits to
+            // the registry later don't mutate placed instances.
+            cc.set('layers', defaults.layers.map(l => ({ ...l, style: { ...l.style } })));
+
+            cc.position(x, y);
+            cc.set(META_KEY, meta);
+
+            // Label — standard attr pipeline.
+            const displayLabel = defaults.displayName && !meta.name.trim()
+                ? defaults.displayName : '';
+            if (displayLabel) cc.attr('label/text', displayLabel);
+
+            // Icon — stored as model attrs; the view renders it imperatively on
+            // Layer 0 using the actual layer geometry (respects offsetX/offsetY/
+            // baseElevation), which avoids the "floats next to the shape" issue
+            // that the generic applyRegistryDefaults formula causes for layers
+            // with non-zero offsets.
+            if (defaults.iconHref) {
+                cc.set('iconHref', defaults.iconHref);
+                cc.set('iconSize', (defaults.iconSize ?? 1) * GRID_SIZE);
+                cc.set('iconFace', defaults.iconFace ?? 'top');
+                cc.set('iconLayerIndex', defaults.iconLayerIndex ?? 0);
             }
-            // Add in reverse so Layer 0 paints on top (painter's algorithm in SVG).
-            for (let i = shapes.length - 1; i >= 0; i--) {
-                this.graph.addCell(shapes[i]);
-            }
-            // Embed additional layers so they move with the base on drag.
-            for (let i = 1; i < shapes.length; i++) {
-                base.embed(shapes[i]);
-            }
-            this.onCreated(base);
+
+            cc.toggleView(view);
+            this.graph.addCell(cc);
+            this.onCreated(cc);
             return;
         }
 

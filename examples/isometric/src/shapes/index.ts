@@ -15,6 +15,7 @@ import { Hexagonal } from './hexagonal/hexagonal'
 import { Octagon } from './octagon/octagon'
 import { Hexahedron } from './hexahedron/hexahedron'
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape'
+import { ComplexComponent, ComplexComponentView } from './complex-component'
 
 export const cellNamespace = {
     ...shapes,
@@ -33,6 +34,12 @@ export const cellNamespace = {
     Octagon,
     Hexahedron,
     SvgPolygonShape,
+    // Typed as `nextrack.ComplexComponent`; JointJS resolves the matching view
+    // at `nextrack.ComplexComponentView` in cellViewNamespace.
+    nextrack: {
+        ComplexComponent,
+        ComplexComponentView,
+    },
 }
 
 export {
@@ -51,4 +58,6 @@ export {
     Octagon,
     Hexahedron,
     SvgPolygonShape,
+    ComplexComponent,
+    ComplexComponentView,
 }

@@ -13,37 +13,14 @@ const CD_GRID_COUNT = 10;
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS, updateShapeDefaults, deleteShape, addShape, saveRegistryToStorage, ShapeLayer } from './shapes/shape-registry';
 import { BaseShape } from './shapes/shape-definition';
 import { PRIMARY_COLORS } from './colors';
-import cubeIconSvg from '../assets/cube-icon.svg';
-import routerIconSvg from '../assets/router-icon.svg';
-import switchIconSvg from '../assets/switch-icon.svg';
-import k8sControlNodeIconSvg from '../assets/kubernetesControlNode-logo.svg';
-import k8sWorkerNodeIconSvg from '../assets/kubernetesWorkerNode-logo.svg';
-import virtualInstanceIconSvg from '../assets/virtualinstance-logo.svg';
-import serverDnsSvg from '../assets/server--dns.svg';
-import pipelinesSvg from '../assets/pipelines.svg';
-import boxSvg from '../assets/box.svg';
-import securitySvg from '../assets/security (1).svg';
-import mediaLibrarySvg from '../assets/media--library--filled.svg';
-import licenseSvg from '../assets/license.svg';
-import apiSvg from '../assets/API--1.svg';
-import sapSvg from '../assets/SAP.svg';
-import vmwareSvg from '../assets/logo--vmware.svg';
-import ansibleSvg from '../assets/logo--red-hat-ansible.svg';
-import reactSvg from '../assets/logo--react.svg';
-import pythonSvg from '../assets/logo--python.svg';
-import openshiftSvg from '../assets/logo--openshift.svg';
-import kubernetesSvg from '../assets/logo--kubernetes.svg';
-import gitSvg from '../assets/logo--git.svg';
-import virtualMachineSvg from '../assets/virtual-machine.svg';
-import databaseSvg from '../assets/data--base.svg';
-import objectStorageSvg from '../assets/object-storage.svg';
-import bareMetalServerSvg from '../assets/ibm-cloud--bare-metal-server.svg';
-import tuningSvg from '../assets/tuning.svg';
-import aiAgentSvg from '../assets/ai-agent-invocation.svg';
-import cubeSvg from '../assets/cube.svg';
-import k8sControlPlaneSvg from '../assets/kubernetes--control-plane-node.svg';
-import instanceVirtualSvg from '../assets/instance--virtual.svg';
-import k8sWorkerNodeSvg from '../assets/kubernetes--worker-node.svg';
+import { carbonIconToString, CarbonIcon } from './icons';
+import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
+import Copy16 from '@carbon/icons/es/copy/16.js';
+import ChevronUp16 from '@carbon/icons/es/chevron--up/16.js';
+import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
+import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
+import { getIconById } from './icon-catalog';
+import { getVisibleIcons } from './icon-config';
 
 // DOM elements
 const canvasEl     = document.getElementById('cd2-canvas')                as HTMLDivElement;
@@ -55,44 +32,9 @@ const canvasWrapEl = document.getElementById('cd2-canvas-wrap')           as HTM
 
 
 
-const AVAILABLE_ICONS = [
-    // Generic
-    { id: 'cube',                  label: 'Cube',                  svg: cubeIconSvg },
-    { id: 'cube-alt',              label: 'Cube (alt)',            svg: cubeSvg },
-    { id: 'box',                   label: 'Box',                   svg: boxSvg },
-    { id: 'license',               label: 'License',               svg: licenseSvg },
-    { id: 'tuning',                label: 'Tuning',                svg: tuningSvg },
-    { id: 'media-library',         label: 'Media Library',         svg: mediaLibrarySvg },
-    { id: 'pipelines',             label: 'Pipelines',             svg: pipelinesSvg },
-    { id: 'ai-agent',              label: 'AI Agent',              svg: aiAgentSvg },
-    // Network & Security
-    { id: 'router',                label: 'Router',                svg: routerIconSvg },
-    { id: 'switch',                label: 'Switch',                svg: switchIconSvg },
-    { id: 'server-dns',            label: 'DNS Server',            svg: serverDnsSvg },
-    { id: 'security',              label: 'Security',              svg: securitySvg },
-    { id: 'api',                   label: 'API',                   svg: apiSvg },
-    // Compute & Storage
-    { id: 'virtual-machine',       label: 'Virtual Machine',       svg: virtualMachineSvg },
-    { id: 'instance-virtual',      label: 'Instance',              svg: instanceVirtualSvg },
-    { id: 'virtual-instance',      label: 'Virtual Instance',      svg: virtualInstanceIconSvg },
-    { id: 'bare-metal-server',     label: 'Bare Metal Server',     svg: bareMetalServerSvg },
-    { id: 'database',              label: 'Database',              svg: databaseSvg },
-    { id: 'object-storage',        label: 'Object Storage',        svg: objectStorageSvg },
-    // Kubernetes
-    { id: 'k8s-control-node',      label: 'K8s Control Node',     svg: k8sControlNodeIconSvg },
-    { id: 'k8s-control-plane',     label: 'K8s Control Plane',    svg: k8sControlPlaneSvg },
-    { id: 'k8s-worker-node',       label: 'K8s Worker Node',      svg: k8sWorkerNodeIconSvg },
-    { id: 'k8s-worker-node-alt',   label: 'K8s Worker (alt)',     svg: k8sWorkerNodeSvg },
-    { id: 'kubernetes',            label: 'Kubernetes',            svg: kubernetesSvg },
-    { id: 'openshift',             label: 'OpenShift',             svg: openshiftSvg },
-    // Platforms & Tools
-    { id: 'vmware',                label: 'VMware',                svg: vmwareSvg },
-    { id: 'ansible',               label: 'Ansible',               svg: ansibleSvg },
-    { id: 'python',                label: 'Python',                svg: pythonSvg },
-    { id: 'react',                 label: 'React',                 svg: reactSvg },
-    { id: 'git',                   label: 'Git',                   svg: gitSvg },
-    { id: 'sap',                   label: 'SAP',                   svg: sapSvg },
-];
+// Icon catalog lives in ./icon-catalog (single source of truth).
+// The set of icons offered in the picker is further filtered by the admin
+// configuration below — see buildIconContent().
 
 function formatLabel(id: string): string {
     return id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -162,6 +104,21 @@ let iconBgCornerRadiusInputRef: HTMLInputElement | null = null;
 // Adaptive icon (no-bg + complex shape only): icon color follows app theme
 let selectedIconAdaptive = false;
 let iconAdaptiveToggleRowEl: HTMLElement | null = null;
+
+// Complex-shape only: which layer carries the icon in the designer preview.
+// Defaults to the main layer; user can pick another via a dropdown in the
+// Icon section when more than one layer exists.
+let iconLayerIndex = 0;
+
+// Cached handle to the Icon accordion's content element so we can rebuild
+// it when layers are added/removed/renamed (the accordion itself is built
+// once per inspector — without this the layer dropdown never appears for
+// shapes whose layer count changes after the inspector is constructed).
+let iconAccordionContentEl: HTMLElement | null = null;
+
+// Icon picker search term — module-scoped so re-renders of the icon
+// section preserve what the user typed.
+let iconSearchTerm = '';
 
 // Direct reference to the single color picker for sync without DOM queries.
 let colorPickerRef: HTMLInputElement | null = null;
@@ -285,15 +242,17 @@ let depthValueEl:  HTMLElement;
 let cornerRadiusInput:  HTMLInputElement;
 let cornerRadiusValueEl: HTMLElement;
 let cornerRadiusRowEl:  HTMLElement;
+let modifiersSvgInfoEl: HTMLElement | null = null;
 let chamferSizeInput:   HTMLInputElement;
 let chamferSizeValueEl: HTMLElement;
 let chamferRowEl:       HTMLElement;
 let iconFaceRowEl:      HTMLElement;
 
-const CDS_ICON_TRASH = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M11 4V3a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v1H1v1h1l.9 9a1 1 0 0 0 1 .9h8.1a1 1 0 0 0 1-.9L14 5h1V4zm-5-1h4v1H6zm6 10H4L3.1 5h9.8z"/></svg>`;
-const CDS_ICON_ARROW_UP   = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M8 3L3.5 7.5l.7.7L7.5 4.9V13h1V4.9l3.3 3.3.7-.7z"/></svg>`;
-const CDS_ICON_ARROW_DOWN = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M8 13l4.5-4.5-.7-.7-3.3 3.3V3H7.5v8.1L4.2 7.8l-.7.7z"/></svg>`;
-const CDS_ICON_COPY       = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M12 4h-1V1H4L1 4v9h4v2h7v-2h1V4zm-8 8H2V4.5L4.5 2H11v2H5L4 5.1V12zm8 2H5V5h7v9z"/></svg>`;
+const CDS_ICON_TRASH      = carbonIconToString(TrashCan16 as CarbonIcon);
+const CDS_ICON_COPY       = carbonIconToString(Copy16 as CarbonIcon);
+const CDS_ICON_CHEVRON_UP   = carbonIconToString(ChevronUp16 as CarbonIcon);
+const CDS_ICON_CHEVRON_DOWN = carbonIconToString(ChevronDown16 as CarbonIcon);
+const CDS_ICON_OVERFLOW     = carbonIconToString(OverflowMenuVertical16 as CarbonIcon);
 
 const CDS_ACCORDION_ARROW = `<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" class="cds--accordion__arrow"><path d="M11 8L6 13 5.3 12.3 9.6 8 5.3 3.7 6 3z"></path></svg>`;
 
@@ -414,6 +373,15 @@ function buildDimensionsContent(container: HTMLElement) {
 }
 
 function buildModifiersContent(container: HTMLElement) {
+    // Info text — shown only when the current layer uses a custom SVG footprint.
+    // updateDimensionLock() toggles its visibility alongside the sliders.
+    const svgInfo = document.createElement('p');
+    svgInfo.className = 'cds--form__helper-text nr-sd-modifiers-info';
+    svgInfo.textContent = 'Modifiers are not supported if SVG Footprint is used.';
+    svgInfo.style.display = 'none';
+    modifiersSvgInfoEl = svgInfo;
+    container.appendChild(svgInfo);
+
     // Corner radius — only for cuboid shapes.
     const crRow = document.createElement('div');
     cornerRadiusRowEl = crRow;
@@ -460,10 +428,22 @@ function buildPositionContent(container: HTMLElement) {
         onOffsetChange, container);
 }
 
+// Compact 2D preview thumbnails for the form-factor picker.
+// Match the "selectable tile" interaction used by the icon background colour picker
+// (same nr-sd-swatch-* classes). All preview outlines use currentColor so they
+// adapt to light/dark mode.
+const FORM_FACTOR_PREVIEWS_SVG: Record<string, string> = {
+    cuboid:    `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>`,
+    cylinder:  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12a7 2.5 0 0 0 14 0V6"/></svg>`,
+    pyramid:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="12,4 20,20 4,20"/></svg>`,
+    hexagonal: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,4 16,4 20,12 16,20 8,20 4,12"/></svg>`,
+    octagon:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,4 16,4 20,8 20,16 16,20 8,20 4,16 4,8"/></svg>`,
+};
+
 function buildFormFactorContent(container: HTMLElement) {
     // proportional-cuboid is not listed here: it is a resize behavior (aspect-ratio lock),
     // not a distinct geometry. Hexagonal and Octagon use it internally.
-    const options = [
+    const options: { value: BaseShape; label: string }[] = [
         { value: 'cuboid',      label: 'Cube' },
         { value: 'cylinder',    label: 'Cylinder' },
         { value: 'pyramid',     label: 'Pyramid' },
@@ -471,40 +451,64 @@ function buildFormFactorContent(container: HTMLElement) {
         { value: 'octagon',     label: 'Octagon' },
     ];
 
-    const fieldset = document.createElement('fieldset');
-    fieldset.className = 'cds--radio-button-group cds--radio-button-group--vertical';
-    fieldset.style.border = 'none';
-    fieldset.style.padding = '0';
-    fieldset.style.margin = '0';
+    const tileRow = document.createElement('div');
+    tileRow.className = 'nr-sd-swatch-row nr-sd-formfactor-row';
+
+    const tiles: Array<{ btn: HTMLButtonElement; value: BaseShape }> = [];
+
+    const setSelected = (value: BaseShape) => {
+        for (const { btn, value: v } of tiles) {
+            btn.classList.toggle('nr-sd-swatch-btn--selected', v === value);
+            btn.setAttribute('aria-pressed', String(v === value));
+        }
+    };
 
     for (const opt of options) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'cds--radio-button-wrapper';
-
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-sd-swatch-btn nr-sd-formfactor-tile';
+        btn.setAttribute('title', opt.label);
+        btn.setAttribute('aria-label', opt.label);
+        btn.setAttribute('aria-pressed', String(opt.value === selectedBaseShape));
+        if (opt.value === selectedBaseShape) btn.classList.add('nr-sd-swatch-btn--selected');
+        btn.innerHTML = FORM_FACTOR_PREVIEWS_SVG[opt.value] ?? '';
+        // Keep the hidden radio input so existing sync logic that queries
+        // `input[name="sd-form-factor"]` continues to find a checked option.
         const input = document.createElement('input');
         input.type = 'radio';
-        input.className = 'cds--radio-button';
         input.name = 'sd-form-factor';
-        input.id = `sd-ff-${opt.value}`;
         input.value = opt.value;
-        if (opt.value === selectedBaseShape) input.checked = true;
+        input.hidden = true;
+        input.checked = opt.value === selectedBaseShape;
+        btn.appendChild(input);
 
-        const lbl = document.createElement('label');
-        lbl.className = 'cds--radio-button__label';
-        lbl.setAttribute('for', `sd-ff-${opt.value}`);
-        lbl.innerHTML = `<span class="cds--radio-button__appearance"></span><span class="cds--radio-button__label-text">${opt.label}</span>`;
-
-        input.addEventListener('change', () => {
-            selectedBaseShape = opt.value as BaseShape;
+        btn.addEventListener('click', () => {
+            selectedBaseShape = opt.value;
+            setSelected(opt.value);
+            // Mirror into hidden radios so any code reading them stays in sync.
+            tileRow.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
+                r.checked = r.value === opt.value;
+            });
             applyFormFactorToCanvas();
-        });;
+        });
 
-        wrapper.appendChild(input);
-        wrapper.appendChild(lbl);
-        fieldset.appendChild(wrapper);
+        tiles.push({ btn, value: opt.value });
+        tileRow.appendChild(btn);
     }
 
-    container.appendChild(fieldset);
+    container.appendChild(tileRow);
+}
+
+// Mirror the currently selected radio input into the preview-tile classes.
+// Called after any place that updates `input[name="sd-form-factor"]` to keep
+// the visual selection in sync with the underlying value.
+function syncFormFactorTiles() {
+    inspectorEl.querySelectorAll<HTMLButtonElement>('.nr-sd-formfactor-tile').forEach(btn => {
+        const input = btn.querySelector<HTMLInputElement>('input[name="sd-form-factor"]');
+        const selected = !!input?.checked;
+        btn.classList.toggle('nr-sd-swatch-btn--selected', selected);
+        btn.setAttribute('aria-pressed', String(selected));
+    });
 }
 
 const NO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><line x1="6" y1="16" x2="26" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
@@ -550,12 +554,29 @@ function raiseToFront(viewEl: Element, selector: string): void {
 }
 
 function applyIconToCurrentShape() {
-    // In complex shape mode, the icon is a component-level attribute placed on Layer 1.
-    const iconShape   = isComplexShape ? (layerShapes[0]   ?? null) : currentShape;
-    const iconShape2D = isComplexShape ? (layerShapes2D[0] ?? null) : currentShape2D;
+    // In complex shape mode the icon is rendered on a user-chosen layer
+    // (defaults to the main layer). Clamp the index in case layers were
+    // removed since it was last set, and wipe the icon from every other
+    // layer so moving the target never leaves a stale copy behind.
+    const clampedIdx = isComplexShape
+        ? Math.min(Math.max(0, iconLayerIndex), Math.max(0, layerShapes.length - 1))
+        : 0;
+    if (isComplexShape) {
+        const noIconAttrs = {
+            topIcon:   { href: '', width: 0, height: 0 },
+            topIcon2D: { href: '', width: 0, height: 0 },
+        };
+        for (let i = 0; i < layerShapes.length; i++) {
+            if (i === clampedIdx) continue;
+            layerShapes[i]?.attr(noIconAttrs);
+            layerShapes2D[i]?.attr(noIconAttrs);
+        }
+    }
+    const iconShape   = isComplexShape ? (layerShapes[clampedIdx]   ?? null) : currentShape;
+    const iconShape2D = isComplexShape ? (layerShapes2D[clampedIdx] ?? null) : currentShape2D;
     if (!iconShape) return;
 
-    const icon = AVAILABLE_ICONS.find(i => i.id === selectedIcon);
+    const icon = selectedIcon ? getIconById(selectedIcon) : undefined;
     if (!icon) {
         // Zero size hides the image without touching display — group selectors
         // (iso / 2d) must remain the sole controllers of element visibility.
@@ -604,13 +625,19 @@ function applyIconToCurrentShape() {
         // centered within [0..w] × [0..iH].
         const localX = (w - iconPx) / 2;
         const localY = (iH - iconPx) / 2;
+        // The projection matrix inverts the y-axis, so the icon content is
+        // rendered upside down on the face. Rotate 180° around the icon's
+        // own centre (applied BEFORE the projection matrix in SVG transform
+        // order) to compensate.
+        const cx = localX + iconPx / 2;
+        const cy = localY + iconPx / 2;
         topIconAttrs = {
             href,
             x: localX,
             y: localY,
             width:  iconPx,
             height: iconPx,
-            transform: `matrix(1,0,-1,-1,0,${h})`,
+            transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`,
         };
     } else {
         // Top face: standard positioning in model space, no extra transform.
@@ -644,6 +671,14 @@ function applyIconToCurrentShape() {
     }
 }
 
+// Re-render the Icon accordion content in place. Called when the layer set
+// changes so the "Apply icon to layer" dropdown stays in sync.
+function refreshIconAccordionContent(): void {
+    if (!iconAccordionContentEl) return;
+    iconAccordionContentEl.innerHTML = '';
+    buildIconContent(iconAccordionContentEl);
+}
+
 function updateAdaptiveToggleVisibility() {
     const show = isComplexShape && !selectedIconBgEnabled;
     if (iconAdaptiveToggleRowEl) iconAdaptiveToggleRowEl.style.display = show ? '' : 'none';
@@ -660,41 +695,128 @@ function updateAdaptiveToggleVisibility() {
 }
 
 function buildIconContent(container: HTMLElement) {
-    // All slots: null = "no icon", then each icon entry
-    const allIcons: Array<{ id: string | null; label: string; svg: string }> = [
-        { id: null, label: 'No icon', svg: NO_ICON_SVG },
-        ...AVAILABLE_ICONS.map(ic => ({ id: ic.id, label: ic.label, svg: ic.svg })),
-    ];
+    // Cache the container so layer-count changes can trigger a rebuild
+    // (see refreshIconAccordionContent). Without this the layer dropdown
+    // below only reflects the layer set at inspector-construction time.
+    iconAccordionContentEl = container;
+
+    // Filter the catalog to the icons marked visible for this picker context.
+    // Complex Shape mode uses its own visibility flag so admins can tailor the
+    // two contexts independently.
+    const visible = getVisibleIcons(isComplexShape ? 'complexShape' : 'componentEditor');
+
+    // Layer target dropdown — only meaningful when editing a complex shape
+    // with more than one layer. Clamp first so the preselected <option>
+    // always matches a real layer.
+    if (isComplexShape && layers.length > 1) {
+        if (iconLayerIndex < 0 || iconLayerIndex >= layers.length) iconLayerIndex = 0;
+
+        const formItem = document.createElement('div');
+        formItem.className = 'cds--form-item';
+
+        const selectWrapper = document.createElement('div');
+        selectWrapper.className = 'cds--select';
+
+        const label = document.createElement('label');
+        label.className = 'cds--label';
+        label.setAttribute('for', 'cd-icon-layer-select');
+        label.textContent = 'Apply icon to layer';
+
+        const inputWrapper = document.createElement('div');
+        inputWrapper.className = 'cds--select-input-wrapper';
+
+        const select = document.createElement('select');
+        select.id = 'cd-icon-layer-select';
+        select.className = 'cds--select-input';
+
+        for (let i = 0; i < layers.length; i++) {
+            const opt = document.createElement('option');
+            opt.value = String(i);
+            opt.textContent = layers[i].name || `Layer ${i + 1}`;
+            opt.className = 'cds--select-option';
+            if (i === iconLayerIndex) opt.selected = true;
+            select.appendChild(opt);
+        }
+
+        select.addEventListener('change', () => {
+            const next = parseInt(select.value, 10);
+            if (Number.isNaN(next)) return;
+            iconLayerIndex = next;
+            applyIconToCurrentShape();
+        });
+
+        inputWrapper.appendChild(select);
+        inputWrapper.insertAdjacentHTML(
+            'beforeend',
+            `<svg class="cds--select__arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 11L3 6l.7-.7L8 9.6l4.3-4.3.7.7z"/></svg>`
+        );
+        selectWrapper.appendChild(label);
+        selectWrapper.appendChild(inputWrapper);
+        formItem.appendChild(selectWrapper);
+        container.appendChild(formItem);
+    }
+
+    // Search input — filters the grid by label (substring, case-insensitive).
+    // "No icon" is always offered so the user can clear a selection regardless
+    // of the filter.
+    const searchRow = document.createElement('div');
+    searchRow.className = 'nr-sd-icon-search';
+    const searchInput = document.createElement('input');
+    searchInput.type = 'search';
+    searchInput.className = 'nr-sd-icon-search-input';
+    searchInput.placeholder = 'Search icons';
+    searchInput.value = iconSearchTerm;
+    searchInput.setAttribute('aria-label', 'Search icons');
+    searchRow.appendChild(searchInput);
+    container.appendChild(searchRow);
 
     const scrollWrap = document.createElement('div');
     scrollWrap.className = 'nr-sd-icon-scroll';
 
     const grid = document.createElement('div');
     grid.className = 'nr-sd-icon-grid';
-
-    for (const icon of allIcons) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'nr-sd-icon-btn';
-        btn.setAttribute('title', icon.label);
-        btn.setAttribute('aria-label', icon.label);
-        btn.setAttribute('data-icon-id', icon.id ?? '');
-        const isSelected = icon.id === null ? selectedIcon === null : selectedIcon === icon.id;
-        if (isSelected) btn.classList.add('nr-sd-icon-btn--selected');
-        btn.innerHTML = icon.svg;
-
-        btn.addEventListener('click', () => {
-            selectedIcon = icon.id;
-            grid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
-                b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
-            );
-            applyIconToCurrentShape();
-        });
-
-        grid.appendChild(btn);
-    }
-
     scrollWrap.appendChild(grid);
+
+    const renderGrid = () => {
+        grid.innerHTML = '';
+        const term = iconSearchTerm.trim().toLowerCase();
+        const filtered = term
+            ? visible.filter(ic => ic.label.toLowerCase().includes(term))
+            : visible;
+        const allIcons: Array<{ id: string | null; label: string; svg: string }> = [
+            { id: null, label: 'No icon', svg: NO_ICON_SVG },
+            ...filtered.map(ic => ({ id: ic.id, label: ic.label, svg: ic.svg })),
+        ];
+        for (const icon of allIcons) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'nr-sd-icon-btn';
+            btn.setAttribute('title', icon.label);
+            btn.setAttribute('aria-label', icon.label);
+            btn.setAttribute('data-icon-id', icon.id ?? '');
+            const isSelected = icon.id === null ? selectedIcon === null : selectedIcon === icon.id;
+            if (isSelected) btn.classList.add('nr-sd-icon-btn--selected');
+            btn.innerHTML = icon.svg;
+
+            btn.addEventListener('click', () => {
+                selectedIcon = icon.id;
+                grid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
+                    b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
+                );
+                applyIconToCurrentShape();
+            });
+
+            grid.appendChild(btn);
+        }
+    };
+
+    searchInput.addEventListener('input', () => {
+        iconSearchTerm = searchInput.value;
+        renderGrid();
+    });
+
+    renderGrid();
+
     container.appendChild(scrollWrap);
 
     // Adaptive icon toggle — only in complex shape + no-bg mode
@@ -1117,7 +1239,7 @@ function buildInspectorPanel() {
     header.className = 'nr-panel-header';
     const title = document.createElement('span');
     title.className = 'nr-panel-title';
-    title.textContent = 'Shape Template';
+    title.textContent = 'Component Configuration';
     header.appendChild(title);
     inspectorEl.appendChild(header);
 
@@ -1219,21 +1341,21 @@ function buildInspectorPanel() {
     saveBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
     saveBtn.type = 'button';
     saveBtn.style.width = '100%';
-    saveBtn.textContent = 'Save Defaults';
+    saveBtn.textContent = 'Save Component';
     saveBtn.addEventListener('click', onSave);
 
     const duplicateBtn = document.createElement('button');
     duplicateBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
     duplicateBtn.type = 'button';
     duplicateBtn.style.width = '100%';
-    duplicateBtn.textContent = 'Duplicate';
+    duplicateBtn.textContent = 'Duplicate Component';
     duplicateBtn.addEventListener('click', () => showDuplicateShapeModal(currentShapeId));
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'cds--btn cds--btn--sm nr-btn--danger-ghost';
     deleteBtn.type = 'button';
     deleteBtn.style.width = '100%';
-    deleteBtn.innerHTML = `${CDS_ICON_TRASH} Delete Shape`;
+    deleteBtn.textContent = 'Delete Component';
     deleteBtn.addEventListener('click', () => showDeleteConfirmModal(currentShapeId));
 
     footer.appendChild(saveBtn);
@@ -1314,6 +1436,8 @@ function updateDimensionLock() {
     if (cornerRadiusRowEl) cornerRadiusRowEl.style.display = showEdgeControls ? '' : 'none';
     if (chamferRowEl)      chamferRowEl.style.display      = showEdgeControls ? '' : 'none';
     if (iconFaceRowEl)     iconFaceRowEl.style.display     = showEdgeControls ? '' : 'none';
+    // Info text appears only when the SVG-footprint path has actively hidden the sliders.
+    if (modifiersSvgInfoEl) modifiersSvgInfoEl.style.display = hasSvgLayer ? '' : 'none';
 }
 
 // Update dimension sliders and value displays from the shape's current state.
@@ -1341,6 +1465,7 @@ function syncExtrasFromShape(id: string) {
     selectedIconFace    = defaults?.iconFace   ?? 'top';
     selectedIcon        = defaults?.icon       ?? null;
     selectedIconSize    = defaults?.iconSize   ?? 1;
+    iconLayerIndex      = defaults?.iconLayerIndex ?? 0;
     selectedIconBgEnabled  = true; // reset to enabled on shape switch
     selectedIconAdaptive   = false;
     selectedIconBgColor = defaults?.iconBgColor ?? PRIMARY_COLORS[0].base;
@@ -1357,6 +1482,7 @@ function syncExtrasFromShape(id: string) {
     inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
         r.checked = r.value === selectedBaseShape;
     });
+    syncFormFactorTiles();
 
     // Sync icon selection — no-icon button has data-icon-id="" which maps to selectedIcon===null
     inspectorEl.querySelectorAll<HTMLElement>('.nr-sd-icon-btn').forEach(btn => {
@@ -1494,6 +1620,12 @@ function onFieldChange() {
         s?.set('isometricHeight', layer.depth);
         s2D?.resize(layer.width, layer.height);
         s2D?.set('isometricHeight', layer.depth);
+        // Compensate for top-left-anchored resize: keep composite centred.
+        recenterCompositeShape();
+        // Icon coords are derived from layer[0]'s w/h/iH; if those just
+        // changed, recompute. Safe to call unconditionally — if a non-icon
+        // layer was resized, layer[0]'s size is unchanged and this is a no-op.
+        applyIconToCurrentShape();
         return;
     }
     if (!currentShape) return;
@@ -1517,7 +1649,7 @@ function onSave() {
     // Pre-compute icon URI (shared by both simple and complex paths)
     let iconHref: string | undefined;
     if (selectedIcon) {
-        const iconEntry = AVAILABLE_ICONS.find(i => i.id === selectedIcon);
+        const iconEntry = getIconById(selectedIcon);
         if (iconEntry) {
             const svg = buildCompositeIconSvg(iconEntry.svg, selectedIconBgEnabled ? selectedIconBgColor : null, selectedIconBgShape, true, selectedIconBgRadius);
             iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
@@ -1540,6 +1672,7 @@ function onSave() {
             iconBgShape: selectedIconBgShape,
             iconBgRadius: selectedIconBgRadius,
             iconHref,
+            iconLayerIndex,
             style: {
                 topColor:    selectedStyle.topColor    || undefined,
                 frontColor:  selectedStyle.frontColor  || undefined,
@@ -1594,6 +1727,53 @@ function centerShapeOnCanvas(shape: IsometricShape, shape2D: IsometricShape | nu
     shape2D?.position(posX, posY);
 }
 
+// Complex-shape anchor: Layer 0 (main) is pinned to the ground.
+//
+// Every layer's absolute position is computed against a fixed reference
+// (bx,by). Per-layer resize, offset and elevation all shift that layer's
+// centre — the previous implementation kept the composite bbox centred,
+// which also moved Layer 0 whenever other layers got elevation/offsets.
+//
+// The user wants the main layer anchored at the ground regardless of what
+// the other layers do. So we now translate all layers by the delta needed
+// to place Layer 0's *ground* centre (i.e. canvas centre plus L0's own
+// offsets, but ignoring its baseElevation) at the canvas centre. Other
+// layers' relative positions (including their elevation) are preserved.
+function recenterCompositeShape() {
+    if (!isComplexShape) return;
+    if (layerShapes.length === 0 || layers.length === 0) return;
+
+    const gridPx  = CD_GRID_COUNT * GRID_SIZE;
+    const centerX = gridPx / 2;
+    const centerY = gridPx / 2;
+    const L0      = layers[0];
+
+    // Ground target = where Layer 0 would sit without any elevation.
+    // L0's own offsets are intentionally respected so users can still
+    // nudge the main horizontally/vertically if they need to.
+    const targetX = centerX + L0.offsetX;
+    const targetY = centerY + L0.offsetY;
+
+    const translate = (shapes: IsometricShape[]) => {
+        if (shapes.length === 0) return;
+        const anchor    = shapes[0];
+        const { x, y }  = anchor.position();
+        const { width: w, height: h } = anchor.size();
+        const anchorCX  = x + w / 2;
+        const anchorCY  = y + h / 2;
+        const dx = targetX - anchorCX;
+        const dy = targetY - anchorCY;
+        if (dx === 0 && dy === 0) return;
+        for (const s of shapes) {
+            const p = s.position();
+            s.position(p.x + dx, p.y + dy);
+        }
+    };
+
+    translate(layerShapes);
+    translate(layerShapes2D);
+}
+
 // Keep form in sync when resize or height tools are used directly on the shape.
 graph.on('change:size', (cell: dia.Cell) => {
     if (isComplexShape) return; // layer shapes have no resize tools
@@ -1642,24 +1822,35 @@ function syncSvgFootprintSection() {
     if (!layer) return;
 
     if (isLayerSvg(layer)) {
-        // ── SVG is loaded: show filename and Remove button ────────────────
+        // ── SVG is loaded: show filename + preview and an icon-only remove button ──
         const row = document.createElement('div');
         row.className = 'nr-svgfp-row';
 
-        const fileLabel = document.createElement('span');
-        fileLabel.className = 'nr-svgfp-filename';
-        fileLabel.title = layer.svgFootprintName ?? 'custom.svg';
-        fileLabel.textContent = layer.svgFootprintName ?? 'custom.svg';
+        const fileName = document.createElement('span');
+        fileName.className = 'nr-svgfp-filename nr-svgfp-filename--body';
+        fileName.title = layer.svgFootprintName ?? 'custom.svg';
+        fileName.textContent = layer.svgFootprintName ?? 'custom.svg';
 
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
-        removeBtn.className = 'cds--btn cds--btn--ghost cds--btn--sm nr-btn--danger-ghost';
-        removeBtn.textContent = 'Remove';
+        removeBtn.className = 'nr-svgfp-remove-btn';
+        removeBtn.title = 'Remove SVG footprint';
+        removeBtn.setAttribute('aria-label', 'Remove SVG footprint');
+        removeBtn.innerHTML = CDS_ICON_TRASH;
         removeBtn.addEventListener('click', onRemoveSvgFootprint);
 
-        row.appendChild(fileLabel);
+        row.appendChild(fileName);
         row.appendChild(removeBtn);
         svgFootprintAccordionContent.appendChild(row);
+
+        // Live preview — render the raw uploaded SVG so the user can confirm the outline.
+        if (layer.svgFootprint) {
+            const preview = document.createElement('div');
+            preview.className = 'nr-svgfp-preview';
+            preview.setAttribute('aria-label', 'SVG footprint preview');
+            preview.innerHTML = layer.svgFootprint;
+            svgFootprintAccordionContent.appendChild(preview);
+        }
     } else {
         // ── No SVG loaded: label left, compact upload button right ────────
         const uploadRow = document.createElement('div');
@@ -1829,17 +2020,17 @@ function renderLayersOnCanvas() {
         layerShapes2D.push(shape2D);
     }
 
-    // Add to graphs in reverse list order so that SVG painter's algorithm
-    // renders Layer 0 (top of the panel) on top of all lower layers.
-    // Last cell added = last SVG element = painted on top.
-    for (let idx = layerShapes.length - 1; idx >= 0; idx--) {
+    // Add cells in FORWARD order so SVG painter's algorithm puts Layer 0
+    // (the main/base layer) at the bottom of the stack, with additional
+    // layers painting above it. First cell added = painted first = behind.
+    for (let idx = 0; idx < layerShapes.length; idx++) {
         graph.addCell(layerShapes[idx]);
         const s = layers[idx];
         if (s.style.topColor || s.style.frontColor || s.style.sideColor || s.style.strokeColor) {
             applyShapeStyle(layerShapes[idx], s.style);
         }
     }
-    for (let idx = layerShapes2D.length - 1; idx >= 0; idx--) {
+    for (let idx = 0; idx < layerShapes2D.length; idx++) {
         graph2D.addCell(layerShapes2D[idx]);
         const s = layers[idx];
         if (s.style.topColor || s.style.frontColor || s.style.sideColor || s.style.strokeColor) {
@@ -1853,6 +2044,9 @@ function renderLayersOnCanvas() {
 
     // Reapply icon to Layer 1 (component-level attribute) after canvas rebuild.
     applyIconToCurrentShape();
+
+    // Realign the composite bbox to the canvas centre.
+    recenterCompositeShape();
 }
 
 function buildLayersPanel() {
@@ -1879,30 +2073,44 @@ function buildLayersPanel() {
         return btn;
     };
 
-    for (let i = 0; i < layers.length; i++) {
+    // Render layers top-to-bottom with the MAIN (index 0) at the bottom of the list,
+    // mirroring the paint order: main = bottommost visual, extra layers stacked above.
+    for (let i = layers.length - 1; i >= 0; i--) {
         const layer = layers[i];
+        const isMain = i === 0;
         const li = document.createElement('li');
-        li.className = 'nr-layer-item' + (i === selectedLayerIndex ? ' nr-layer-item--selected' : '');
+        li.className = 'nr-layer-item' + (i === selectedLayerIndex ? ' nr-layer-item--selected' : '') + (isMain ? ' nr-layer-item--main' : '');
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'nr-layer-item-name';
         nameSpan.textContent = layer.name;
-
-        const upBtn   = makeLayerAction(CDS_ICON_ARROW_UP,   `Move ${layer.name} up`,   () => onMoveLayerUp(i));
-        const downBtn = makeLayerAction(CDS_ICON_ARROW_DOWN, `Move ${layer.name} down`, () => onMoveLayerDown(i));
-        const dupBtn  = makeLayerAction(CDS_ICON_COPY,       `Duplicate ${layer.name}`, () => onDuplicateLayer(i));
-        const delBtn  = makeLayerAction(CDS_ICON_TRASH,      `Delete ${layer.name}`,    () => onDeleteLayer(i));
-        delBtn.classList.add('nr-layer-item-action--delete');
-
-        // Disable sort buttons at the boundaries
-        upBtn.disabled   = i === 0;
-        downBtn.disabled = i === layers.length - 1;
-
         li.appendChild(nameSpan);
-        li.appendChild(upBtn);
-        li.appendChild(downBtn);
-        li.appendChild(dupBtn);
-        li.appendChild(delBtn);
+
+        if (isMain) {
+            const tag = document.createElement('span');
+            tag.className = 'cds--tag cds--tag--blue nr-layer-main-tag';
+            tag.textContent = 'Main';
+            tag.title = 'Main layer — owns the component name and label position';
+            li.appendChild(tag);
+        } else {
+            // Chevron up/down are only shown on additional layers. Main layer stays
+            // anchored at index 0 — nothing can move above/below it.
+            // Array index 0 = bottom of list visually; index 1 is just above it.
+            // "Move up" in the UI (visually higher) = increase array index.
+            const upBtn   = makeLayerAction(CDS_ICON_CHEVRON_UP,   `Move ${layer.name} up`,   () => onMoveLayerUp(i));
+            const downBtn = makeLayerAction(CDS_ICON_CHEVRON_DOWN, `Move ${layer.name} down`, () => onMoveLayerDown(i));
+            upBtn.disabled   = i >= layers.length - 1; // already at the top
+            downBtn.disabled = i <= 1;                 // just above main — can't go lower
+            li.appendChild(upBtn);
+            li.appendChild(downBtn);
+        }
+
+        // Overflow menu — Rename / Duplicate / Delete. Delete is disabled on main.
+        const menuBtn = makeLayerAction(CDS_ICON_OVERFLOW, `Actions for ${layer.name}`, () => {
+            showLayerOverflowMenu(menuBtn, i);
+        });
+        menuBtn.classList.add('nr-layer-item-action--menu');
+        li.appendChild(menuBtn);
 
         li.addEventListener('click', () => {
             selectedLayerIndex = i;
@@ -1923,6 +2131,154 @@ function buildLayersPanel() {
     addBtn.textContent = '+ Add Layer';
     addBtn.addEventListener('click', onAddLayer);
     layerPanelEl.appendChild(addBtn);
+}
+
+// Per-layer overflow popup: Rename / Duplicate / Delete.
+// Uses the Carbon overflow-menu-options classes (already pulled in by @carbon/styles).
+function showLayerOverflowMenu(anchor: HTMLElement, index: number) {
+    const existing = document.querySelector('.nr-layer-overflow-popup');
+    if (existing) { existing.remove(); return; }
+
+    const layer = layers[index];
+    if (!layer) return;
+    const isMain = index === 0;
+
+    const popup = document.createElement('div');
+    popup.className = 'cds--overflow-menu-options cds--overflow-menu-options--open nr-layer-overflow-popup';
+    popup.setAttribute('role', 'menu');
+    const rect = anchor.getBoundingClientRect();
+    popup.style.cssText = `position:fixed;top:${rect.bottom + 4}px;left:${rect.right - 160}px;z-index:6000;min-width:160px;`;
+
+    const list = document.createElement('ul');
+    list.className = 'cds--overflow-menu-options__content';
+
+    const items: Array<{ label: string; onClick: () => void; disabled?: boolean }> = [
+        { label: 'Rename layer',    onClick: () => { popup.remove(); showRenameLayerModal(index); } },
+        { label: 'Duplicate layer', onClick: () => { popup.remove(); onDuplicateLayer(index); } },
+        { label: 'Delete layer',    onClick: () => { popup.remove(); onDeleteLayer(index); }, disabled: isMain || layers.length <= 1 },
+    ];
+
+    for (const item of items) {
+        const li = document.createElement('li');
+        li.className = 'cds--overflow-menu-options__option' + (item.disabled ? ' cds--overflow-menu-options__option--disabled' : '');
+        const btn = document.createElement('button');
+        btn.className = 'cds--overflow-menu-options__btn';
+        btn.type = 'button';
+        btn.setAttribute('role', 'menuitem');
+        btn.disabled = !!item.disabled;
+        btn.textContent = item.label;
+        if (!item.disabled) btn.addEventListener('click', item.onClick);
+        li.appendChild(btn);
+        list.appendChild(li);
+    }
+
+    popup.appendChild(list);
+    document.body.appendChild(popup);
+
+    const dismiss = (e: MouseEvent) => {
+        if (!popup.contains(e.target as Node) && e.target !== anchor) {
+            popup.remove();
+            document.removeEventListener('mousedown', dismiss, true);
+        }
+    };
+    document.addEventListener('mousedown', dismiss, true);
+}
+
+// Small modal for renaming a layer — mirrors the Duplicate Component modal pattern.
+function showRenameLayerModal(index: number) {
+    const layer = layers[index];
+    if (!layer) return;
+
+    const modalEl = document.createElement('div');
+    modalEl.className = 'cds--modal is-visible';
+    modalEl.setAttribute('role', 'dialog');
+    modalEl.setAttribute('aria-modal', 'true');
+    modalEl.setAttribute('aria-labelledby', 'nr-rename-layer-heading');
+
+    const containerEl = document.createElement('div');
+    containerEl.className = 'cds--modal-container cds--modal-container--sm';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'cds--modal-header';
+    const headingEl = document.createElement('p');
+    headingEl.className = 'cds--modal-header__heading';
+    headingEl.id = 'nr-rename-layer-heading';
+    headingEl.textContent = 'Rename layer';
+    const closeBtnWrapper = document.createElement('div');
+    closeBtnWrapper.className = 'cds--modal-close-button';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'cds--modal-close';
+    closeBtn.type = 'button';
+    closeBtn.title = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = CDS_ICON_CLOSE;
+    closeBtn.addEventListener('click', () => modalEl.remove());
+    closeBtnWrapper.appendChild(closeBtn);
+    headerEl.appendChild(headingEl);
+    headerEl.appendChild(closeBtnWrapper);
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'cds--modal-content';
+    const formItem = document.createElement('div');
+    formItem.className = 'cds--form-item';
+    const inputWrapper = document.createElement('div');
+    inputWrapper.className = 'cds--text-input-wrapper';
+    const label = document.createElement('label');
+    label.className = 'cds--label';
+    label.setAttribute('for', 'nr-rename-layer-input');
+    label.textContent = 'Layer name';
+    const fieldOuter = document.createElement('div');
+    fieldOuter.className = 'cds--text-input__field-outer-wrapper';
+    const fieldWrapper = document.createElement('div');
+    fieldWrapper.className = 'cds--text-input__field-wrapper';
+    const nameInput = document.createElement('input');
+    nameInput.id = 'nr-rename-layer-input';
+    nameInput.type = 'text';
+    nameInput.className = 'cds--text-input';
+    nameInput.value = layer.name;
+    fieldWrapper.appendChild(nameInput);
+    fieldOuter.appendChild(fieldWrapper);
+    inputWrapper.appendChild(label);
+    inputWrapper.appendChild(fieldOuter);
+    formItem.appendChild(inputWrapper);
+    bodyEl.appendChild(formItem);
+
+    const footerEl = document.createElement('div');
+    footerEl.className = 'cds--modal-footer';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => modalEl.remove());
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'cds--btn cds--btn--primary';
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Rename';
+    confirmBtn.addEventListener('click', () => {
+        const name = nameInput.value.trim();
+        if (!name) { nameInput.focus(); return; }
+        layer.name = name;
+        modalEl.remove();
+        buildLayersPanel();
+        refreshIconAccordionContent();
+    });
+    nameInput.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter')  confirmBtn.click();
+        if (e.key === 'Escape') modalEl.remove();
+    });
+    footerEl.appendChild(cancelBtn);
+    footerEl.appendChild(confirmBtn);
+
+    containerEl.appendChild(headerEl);
+    containerEl.appendChild(bodyEl);
+    containerEl.appendChild(footerEl);
+    modalEl.appendChild(containerEl);
+    document.body.appendChild(modalEl);
+    modalEl.addEventListener('mousedown', (e: MouseEvent) => {
+        if (e.target === modalEl) modalEl.remove();
+    });
+    nameInput.select();
+    nameInput.focus();
 }
 
 function syncInspectorToLayer(index: number) {
@@ -1953,6 +2309,7 @@ function syncInspectorToLayer(index: number) {
     inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
         r.checked = r.value === layer.baseShape;
     });
+    syncFormFactorTiles();
 
     // Sync color picker
     selectedStyle = {
@@ -2004,6 +2361,8 @@ function onOffsetChange() {
         bx - layer.width  / 2 + layer.offsetX,
         by - layer.height / 2 + layer.offsetY
     );
+    // Keep the composite centred regardless of per-layer offset/elevation.
+    recenterCompositeShape();
 }
 
 function onAddLayer() {
@@ -2025,35 +2384,48 @@ function onAddLayer() {
     renderLayersOnCanvas();
     buildLayersPanel();
     syncInspectorToLayer(selectedLayerIndex);
+    refreshIconAccordionContent();
 }
 
 function onDeleteLayer(index: number) {
     if (layers.length <= 1) return; // always keep at least one layer
+    if (index === 0) return;        // main layer cannot be deleted
     layers.splice(index, 1);
     if (selectedLayerIndex >= layers.length) selectedLayerIndex = layers.length - 1;
+    if (iconLayerIndex    >= layers.length) iconLayerIndex    = 0;
     renderLayersOnCanvas();
     buildLayersPanel();
     syncInspectorToLayer(selectedLayerIndex);
+    refreshIconAccordionContent();
 }
 
+// "Up" in the list UI = higher array index = paints higher in the stack.
+// Main layer (index 0) is anchored; neighbouring index 1 cannot swap with it.
 function onMoveLayerUp(index: number) {
-    if (index <= 0) return;
-    [layers[index - 1], layers[index]] = [layers[index], layers[index - 1]];
-    if (selectedLayerIndex === index) selectedLayerIndex = index - 1;
-    else if (selectedLayerIndex === index - 1) selectedLayerIndex = index;
-    renderLayersOnCanvas();
-    buildLayersPanel();
-    syncInspectorToLayer(selectedLayerIndex);
-}
-
-function onMoveLayerDown(index: number) {
+    if (index < 1) return;                 // main is immovable
     if (index >= layers.length - 1) return;
     [layers[index], layers[index + 1]] = [layers[index + 1], layers[index]];
     if (selectedLayerIndex === index) selectedLayerIndex = index + 1;
     else if (selectedLayerIndex === index + 1) selectedLayerIndex = index;
+    if (iconLayerIndex === index) iconLayerIndex = index + 1;
+    else if (iconLayerIndex === index + 1) iconLayerIndex = index;
     renderLayersOnCanvas();
     buildLayersPanel();
     syncInspectorToLayer(selectedLayerIndex);
+    refreshIconAccordionContent();
+}
+
+function onMoveLayerDown(index: number) {
+    if (index <= 1) return;                // index 1 is just above main — no further down
+    [layers[index], layers[index - 1]] = [layers[index - 1], layers[index]];
+    if (selectedLayerIndex === index) selectedLayerIndex = index - 1;
+    else if (selectedLayerIndex === index - 1) selectedLayerIndex = index;
+    if (iconLayerIndex === index) iconLayerIndex = index - 1;
+    else if (iconLayerIndex === index - 1) iconLayerIndex = index;
+    renderLayersOnCanvas();
+    buildLayersPanel();
+    syncInspectorToLayer(selectedLayerIndex);
+    refreshIconAccordionContent();
 }
 
 function onDuplicateLayer(index: number) {
@@ -2069,6 +2441,7 @@ function onDuplicateLayer(index: number) {
     renderLayersOnCanvas();
     buildLayersPanel();
     syncInspectorToLayer(selectedLayerIndex);
+    refreshIconAccordionContent();
 }
 
 /**
@@ -2231,12 +2604,16 @@ function onComplexShapeToggle(enabled: boolean) {
         inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
             r.checked = r.value === selectedBaseShape;
         });
+        syncFormFactorTiles();
         updateDimensionLock();
 
         applyIconToCurrentShape();
         svgParseError = '';
         syncSvgFootprintSection(); // hides the section now that isComplexShape is false
     }
+    // Complex toggle changes the layer count visible to the user; refresh
+    // the icon section so the "Apply icon to layer" dropdown appears/hides.
+    refreshIconAccordionContent();
 }
 
 // ── Shape selector (palette panel) ────────────────────────────────────────────
@@ -2850,6 +3227,9 @@ function loadShapeIntoCanvas(id: string) {
 
         applyIconToCurrentShape();
     }
+
+    // Refresh the icon section's layer dropdown to match the loaded shape.
+    refreshIconAccordionContent();
 }
 
 // ── Paper element events ───────────────────────────────────────────────────────

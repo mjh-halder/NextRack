@@ -60,8 +60,14 @@ export const sortElements = (graph) => {
     const elements = graph.getElements();
     // Frames always stay at z = -1 (behind everything); exclude them from the
     // isometric topological sort so their z is never overwritten.
+    //
+    // Complex-component child layers overlap each other fully (same footprint),
+    // which creates mutual "behind" edges the DFS then breaks arbitrarily —
+    // producing Z-order flicker on every drag step. We exclude them from the
+    // sort and re-anchor their z to the base's below so within-component paint
+    // order is decided by DOM (= creation) order instead.
     const nodes: Node[] = elements
-        .filter(el => !el.get('isFrame'))
+        .filter(el => !el.get('isFrame') && el.get('componentRole') !== 'child')
         .map(el => ({
             el: el,
             behind: [],
@@ -91,6 +97,17 @@ export const sortElements = (graph) => {
     }
 
     topologicalSort(nodes);
+
+    // Anchor each component's child layers to the base's z. Same-z siblings
+    // paint in DOM order — Layer 0 was the last added to the graph so it stays
+    // on top; layers N..1 below it keep their creation order underneath.
+    for (const el of elements) {
+        if (el.get('componentRole') !== 'child') continue;
+        const parent = el.getParentCell();
+        if (parent && !parent.isLink() && (parent as dia.Element).get('componentRole') === 'base') {
+            el.set('z', parent.get('z'));
+        }
+    }
 
     return nodes;
 }
@@ -220,13 +237,19 @@ export function applyRegistryDefaults(
 
         let topIconAttrs: Record<string, unknown>;
         if (defaults.iconFace === 'front') {
+            const localX = (w - iconPx) / 2;
+            const localY = (iH - iconPx) / 2;
+            // Counter-rotate the icon content so it reads right-side up on
+            // the front face — the projection matrix below flips the y-axis.
+            const cx = localX + iconPx / 2;
+            const cy = localY + iconPx / 2;
             topIconAttrs = {
                 href:      defaults.iconHref,
-                x:         (w - iconPx) / 2,
-                y:         (iH - iconPx) / 2,
+                x:         localX,
+                y:         localY,
                 width:     iconPx,
                 height:    iconPx,
-                transform: `matrix(1,0,-1,-1,0,${h})`,
+                transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`,
             };
         } else {
             topIconAttrs = {

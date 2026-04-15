@@ -9,6 +9,11 @@ import { ShapeRegistry } from './shapes/shape-registry';
 import { ComponentPalette } from './palette';
 import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './persistence';
 import { ViewToggle } from './view-toggle';
+import { carbonIconToString, CarbonIcon } from './icons';
+import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
+import Copy16 from '@carbon/icons/es/copy/16.js';
+import BringToFront16 from '@carbon/icons/es/bring-to-front/16.js';
+import SendToBack16 from '@carbon/icons/es/send-to-back/16.js';
 
 // Inline Carbon SVG icons (16 × 16) used in the menu components
 const CDS_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 4.7l-.7-.7L8 7.3 4.7 4l-.7.7L7.3 8 4 11.3l.7.7L8 8.7l3.3 3.3.7-.7L8.7 8z"/></svg>`;
@@ -23,17 +28,41 @@ export const designNameEl = document.getElementById('design-name') as HTMLDivEle
 
 function deleteSelected() {
     if (!currentCell) return;
+    // For a complex component, the base's embedded "child" layers are internal
+    // geometry — they must be removed alongside the base.
+    if (!(currentCell instanceof Link) && currentCell.get('componentRole') === 'base') {
+        const children = currentCell.getEmbeddedCells()
+            .filter(c => c.get('componentRole') === 'child');
+        for (const c of children) c.remove();
+    }
     currentCell.remove();
     // currentCell and panel are cleaned up by the graph 'remove' listener below
 }
 
 function duplicateSelected() {
     if (!currentCell || currentCell instanceof Link) return;
+    const offset = GRID_SIZE * 2;
     const clone = currentCell.clone() as IsometricShape;
     const { x, y } = currentCell.position();
-    clone.position(x + GRID_SIZE * 2, y + GRID_SIZE * 2);
+    clone.position(x + offset, y + offset);
     clone.toggleView(currentView);
-    graph.addCell(clone);
+
+    // Complex component: clone each internal layer, preserve the same offsets,
+    // re-embed them into the cloned base.
+    const childLayers = currentCell.get('componentRole') === 'base'
+        ? currentCell.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[]
+        : [];
+    const clonedChildren = childLayers.map(child => {
+        const cc = child.clone() as IsometricShape;
+        const { x: cx, y: cy } = child.position();
+        cc.position(cx + offset, cy + offset);
+        cc.toggleView(currentView);
+        return cc;
+    });
+
+    graph.addCells([clone, ...clonedChildren]);
+    for (const cc of clonedChildren) clone.embed(cc);
+
     paper.removeTools();
     clone.addTools(paper, currentView, ['connect']);
     panel.show(clone);
@@ -97,9 +126,30 @@ const graph = new dia.Graph({}, { cellNamespace });
 const obstacles = new Obstacles(graph);
 graph.set('obstacles', obstacles);
 
+// A complex component's non-base layers ("child" role) are part of the
+// component's geometry — they must not be independently draggable, selectable,
+// or exposable to the link tool. Any click on them resolves to the base layer.
+function resolveComponentBase(cell: dia.Element): dia.Element {
+    if (cell.get('componentRole') === 'child') {
+        const parent = cell.getParentCell();
+        if (parent && !parent.isLink() && (parent as dia.Element).get('componentRole') === 'base') {
+            return parent as dia.Element;
+        }
+    }
+    return cell;
+}
+
 const paper = new dia.Paper({
     el: canvasEl,
     model: graph,
+    interactive: (cellView) => {
+        if (cellView.model.get('componentRole') === 'child') {
+            // Child layers forward clicks (handled in element:pointerup) but
+            // cannot be dragged, resized, or link-started independently.
+            return false;
+        }
+        return true;
+    },
     // Prevent the elements from being dragged outside of the paper
     // and from being dropped on top of other elements
     restrictTranslate: (elementView) => {
@@ -790,7 +840,8 @@ paper.on('element:pointerup', (elementView: dia.ElementView) => {
         setTreeHighlight(null);
         return;
     }
-    const shape = model as IsometricShape;
+    // Click on a complex component's internal layer → act on the base instead.
+    const shape = resolveComponentBase(model) as IsometricShape;
     updateZoneAssignment(shape);
     shape.addTools(paper, currentView, ['connect']);
     currentCell = shape;
@@ -806,6 +857,170 @@ paper.on('blank:pointerdown', () => {
     panel.hide();
     setTreeHighlight(null);
 });
+
+// ── Context menu ──────────────────────────────────────────────────────────────
+// Right-click on an element opens a floating menu. Selection is reused from
+// the pointerup handlers above so the panel/tools state stays consistent.
+//
+// Kill the browser's native context menu everywhere. Target-based filtering
+// missed overlays rendered outside the canvas subtree. Registered on window
+// AND document in capture phase so nothing inner can sneak past before the
+// default is cancelled; also mirrored on the oncontextmenu handler as a
+// belt-and-braces fallback for any edge case where a listener is cleared.
+const suppressContextMenu = (evt: Event): boolean => {
+    evt.preventDefault();
+    return false;
+};
+window.addEventListener('contextmenu',   suppressContextMenu, true);
+document.addEventListener('contextmenu', suppressContextMenu, true);
+window.oncontextmenu   = suppressContextMenu;
+document.oncontextmenu = suppressContextMenu;
+
+const CTX_ICON_DELETE    = carbonIconToString(TrashCan16     as CarbonIcon);
+const CTX_ICON_DUPLICATE = carbonIconToString(Copy16         as CarbonIcon);
+const CTX_ICON_FRONT     = carbonIconToString(BringToFront16 as CarbonIcon);
+const CTX_ICON_BACK      = carbonIconToString(SendToBack16   as CarbonIcon);
+
+interface CtxAction {
+    label: string;
+    icon:  string;
+    run:   () => void;
+}
+
+let ctxMenuEl: HTMLDivElement | null = null;
+
+function hideContextMenu(): void {
+    if (!ctxMenuEl) return;
+    ctxMenuEl.remove();
+    ctxMenuEl = null;
+}
+
+function showContextMenu(clientX: number, clientY: number, actions: CtxAction[]): void {
+    hideContextMenu();
+    if (actions.length === 0) return;
+
+    const menu = document.createElement('div');
+    menu.className = 'nr-ctx-menu';
+    menu.setAttribute('role', 'menu');
+
+    for (const a of actions) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-ctx-menu__item';
+        btn.setAttribute('role', 'menuitem');
+
+        const icon = document.createElement('span');
+        icon.className = 'nr-ctx-menu__icon';
+        icon.innerHTML = a.icon;
+
+        const label = document.createElement('span');
+        label.className = 'nr-ctx-menu__label';
+        label.textContent = a.label;
+
+        btn.appendChild(icon);
+        btn.appendChild(label);
+        btn.addEventListener('click', () => { hideContextMenu(); a.run(); });
+        menu.appendChild(btn);
+    }
+
+    // Position before insertion is fine — position: fixed uses viewport coords.
+    menu.style.left = clientX + 'px';
+    menu.style.top  = clientY + 'px';
+    document.body.appendChild(menu);
+
+    // After layout, nudge back into viewport if the menu overflows the edge.
+    const rect = menu.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    if (rect.right  > vw) menu.style.left = Math.max(0, vw - rect.width  - 4) + 'px';
+    if (rect.bottom > vh) menu.style.top  = Math.max(0, vh - rect.height - 4) + 'px';
+
+    ctxMenuEl = menu;
+}
+
+function buildActionsForCurrentSelection(): CtxAction[] {
+    const actions: CtxAction[] = [];
+    if (currentFrame) {
+        // Zone-specific actions (rendering order) listed first so geometry-
+        // affecting actions like Delete stay at the bottom.
+        const frame = currentFrame;
+        actions.push(
+            { label: 'Move to Front', icon: CTX_ICON_FRONT,     run: () => frame.toFront() },
+            { label: 'Move to Back',  icon: CTX_ICON_BACK,      run: () => frame.toBack()  },
+            { label: 'Duplicate',     icon: CTX_ICON_DUPLICATE, run: () => duplicateZone(frame) },
+            { label: 'Delete',        icon: CTX_ICON_DELETE,    run: () => { frame.remove(); } },
+        );
+    } else if (currentCell && !(currentCell instanceof Link)) {
+        actions.push(
+            { label: 'Duplicate', icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
+            { label: 'Delete',    icon: CTX_ICON_DELETE,    run: deleteSelected    },
+        );
+    } else if (currentCell instanceof Link) {
+        actions.push(
+            { label: 'Delete', icon: CTX_ICON_DELETE, run: deleteSelected },
+        );
+    }
+    return actions;
+}
+
+// Select on right-click (mirrors pointerup selection) so the menu always
+// targets the element the user clicked, even if nothing was selected yet.
+paper.on('element:contextmenu', (elementView: dia.ElementView, evt: dia.Event) => {
+    evt.preventDefault();
+    const model = elementView.model;
+    paper.removeTools();
+    if (model.get('isFrame')) {
+        updateZoneAssignment(model as Frame);
+        (model as Frame).addTools(paper, currentView);
+        currentCell = null;
+        currentFrame = model as Frame;
+        panel.showZone(model);
+        setTreeHighlight(null);
+    } else {
+        const shape = resolveComponentBase(model) as IsometricShape;
+        updateZoneAssignment(shape);
+        shape.addTools(paper, currentView, ['connect']);
+        currentCell = shape;
+        currentFrame = null;
+        panel.show(shape);
+        setTreeHighlight(shape);
+    }
+    showContextMenu(evt.clientX, evt.clientY, buildActionsForCurrentSelection());
+});
+
+paper.on('link:contextmenu', (linkView: dia.LinkView, evt: dia.Event) => {
+    evt.preventDefault();
+    const link = linkView.model as Link;
+    paper.removeTools();
+    link.addTools(paper);
+    currentCell = link;
+    currentFrame = null;
+    panel.showLink(link);
+    setTreeHighlight(null);
+    showContextMenu(evt.clientX, evt.clientY, buildActionsForCurrentSelection());
+});
+
+paper.on('blank:contextmenu', (evt: dia.Event) => {
+    evt.preventDefault();
+    hideContextMenu();
+});
+
+// Dismiss on outside click, scroll, resize, Esc.
+// Skip button=2 so a right-click that just opened the menu (via JointJS'
+// paper mousedown handler, which fires before this document-level listener)
+// doesn't immediately close it. Right-click dismissal is handled explicitly
+// by blank:contextmenu.
+document.addEventListener('mousedown', (evt: MouseEvent) => {
+    if (!ctxMenuEl) return;
+    if (evt.button === 2) return;
+    if (evt.target instanceof Node && ctxMenuEl.contains(evt.target)) return;
+    hideContextMenu();
+});
+document.addEventListener('keydown', (evt: KeyboardEvent) => {
+    if (evt.key === 'Escape') hideContextMenu();
+});
+window.addEventListener('scroll', hideContextMenu, true);
+window.addEventListener('resize', hideContextMenu);
 
 // Setup scrolling
 

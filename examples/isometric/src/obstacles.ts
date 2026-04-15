@@ -44,17 +44,17 @@ export default class Obstacles {
     }
 
     protected addCell(cell: dia.Cell) {
-        if (cell.isLink() || cell.get('isFrame')) return;
+        if (cell.isLink() || cell.get('isFrame') || cell.get('componentRole') === 'child') return;
         this.toggleArea(this.getCellArea(cell.getBBox()), cell.cid);
     }
 
     protected removeCell(cell: dia.Cell) {
-        if (cell.isLink() || cell.get('isFrame')) return;
+        if (cell.isLink() || cell.get('isFrame') || cell.get('componentRole') === 'child') return;
         this.toggleArea(this.getCellArea(cell.getBBox()), null);
     }
 
     protected updateCellPosition(cell: dia.Cell) {
-        if (cell.isLink() || cell.get('isFrame')) return;
+        if (cell.isLink() || cell.get('isFrame') || cell.get('componentRole') === 'child') return;
         const prevPosition = cell.previous('position');
         const prevBBox = cell.getBBox();
         prevBBox.x = prevPosition.x;
@@ -64,7 +64,7 @@ export default class Obstacles {
     }
 
     protected updateCellSize(cell: dia.Cell) {
-        if (cell.isLink() || cell.get('isFrame')) return;
+        if (cell.isLink() || cell.get('isFrame') || cell.get('componentRole') === 'child') return;
         const prevSize = cell.previous('size');
         const prevBBox = cell.getBBox();
         prevBBox.width = prevSize.width;

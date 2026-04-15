@@ -32,6 +32,10 @@
           <path d="M28.5039,8.1362l-12-7a1,1,0,0,0-1.0078,0l-12,7A1,1,0,0,0,3,9V23a1,1,0,0,0,.4961.8638l12,7a1,1,0,0,0,1.0078,0l12-7A1,1,0,0,0,29,23V9A1,1,0,0,0,28.5039,8.1362ZM16,3.1577,26.0156,9,16,14.8423,5.9844,9ZM5,10.7412l10,5.833V28.2588L5,22.4258ZM17,28.2588V16.5742l10-5.833V22.4258Z"/>
         </svg>
       </button>
+      <button id="nav-admin" class="nr-rail-item" type="button"
+              title="Admin" aria-label="Admin">
+        <!-- Icon is set by JS on init (see index.ts) -->
+      </button>
       <button id="nav-theme" class="nr-rail-item nr-rail-item--bottom" type="button"
               title="Switch to dark mode" aria-label="Switch to dark mode">
         <!-- Icon is set by JS on init; placeholder keeps the button sized correctly -->
@@ -58,6 +62,7 @@
       <div id="cd2-layers"></div>
       <div id="cd2-inspector"></div>
     </div>
+    <div id="admin" aria-hidden="true"></div>
 
     <script src="dist/bundle.js"></script>
   </body>

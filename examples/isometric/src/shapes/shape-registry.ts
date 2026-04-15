@@ -55,6 +55,11 @@ export interface ShapeDefaults {
      * can apply it without rebuilding the SVG composite itself.
      */
     iconHref?: string;
+    /**
+     * For complex shapes only: which layer (by index into `layers`) carries
+     * the icon. Defaults to 0 (main layer) for backwards compatibility.
+     */
+    iconLayerIndex?: number;
     /** Optional color overrides applied when a new instance is created */
     style?: ShapeStyle;
     /** When true, the component is composed of multiple layers instead of a single shape */

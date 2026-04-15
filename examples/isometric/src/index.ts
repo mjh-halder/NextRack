@@ -4,9 +4,11 @@ import '@carbon/styles/css/styles.css';
 import { panel, canvasEl, paletteEl, viewToggleContainerEl, designNameEl } from './system-designer';
 import { panel as cdPanel } from './component-designer';
 import { initTopHeader } from './top-header';
+import { initAdmin } from './admin';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Sun20 from '@carbon/icons/es/sun/20.js';
 import Moon20 from '@carbon/icons/es/moon/20.js';
+import Settings20 from '@carbon/icons/es/settings/20.js';
 
 // ---- Theme toggle (light: cds--white / dark: cds--g100) ----
 
@@ -16,6 +18,7 @@ const THEME_KEY = 'nr-theme';
 const MOON_SVG = carbonIconToString(Moon20 as CarbonIcon);
 // Sun — shown in dark mode (click to switch to light)
 const SUN_SVG = carbonIconToString(Sun20 as CarbonIcon);
+const SETTINGS_SVG = carbonIconToString(Settings20 as CarbonIcon);
 
 function applyTheme(dark: boolean) {
     document.documentElement.classList.toggle('cds--g100', dark);
@@ -39,21 +42,31 @@ document.getElementById('nav-theme')?.addEventListener('click', () => {
     applyTheme(next);
 });
 
-// ---- App-level view switching (System Designer ↔ Component Designer) ----
+// ---- App-level view switching (System Designer ↔ Component Designer ↔ Admin) ----
 
 const navGridBtn   = document.getElementById('nav-grid')            as HTMLButtonElement;
 const navShapesBtn = document.getElementById('nav-shapes')          as HTMLButtonElement;
+const navAdminBtn  = document.getElementById('nav-admin')           as HTMLButtonElement;
 const cdEl         = document.getElementById('component-designer')  as HTMLDivElement;
+const adminEl      = document.getElementById('admin')               as HTMLDivElement;
 
-type AppView = 'grid' | 'shapes';
+navAdminBtn.innerHTML = SETTINGS_SVG;
+
+initAdmin(adminEl);
+
+type AppView = 'grid' | 'shapes' | 'admin';
 
 function setAppView(view: AppView) {
-    const isGrid = view === 'grid';
+    const isGrid   = view === 'grid';
+    const isShapes = view === 'shapes';
+    const isAdmin  = view === 'admin';
 
     navGridBtn.classList.toggle('nr-rail-item--active', isGrid);
     navGridBtn.setAttribute('aria-current', isGrid ? 'page' : 'false');
-    navShapesBtn.classList.toggle('nr-rail-item--active', !isGrid);
-    navShapesBtn.setAttribute('aria-current', !isGrid ? 'page' : 'false');
+    navShapesBtn.classList.toggle('nr-rail-item--active', isShapes);
+    navShapesBtn.setAttribute('aria-current', isShapes ? 'page' : 'false');
+    navAdminBtn.classList.toggle('nr-rail-item--active', isAdmin);
+    navAdminBtn.setAttribute('aria-current', isAdmin ? 'page' : 'false');
 
     // System Designer elements
     canvasEl.style.display      = isGrid ? '' : 'none';
@@ -63,16 +76,21 @@ function setAppView(view: AppView) {
     if (!isGrid) designNameEl.style.display = 'none';
 
     // Component Designer
-    cdEl.setAttribute('aria-hidden', String(isGrid));
-    cdEl.style.display = isGrid ? 'none' : 'flex';
+    cdEl.setAttribute('aria-hidden', String(!isShapes));
+    cdEl.style.display = isShapes ? 'flex' : 'none';
+
+    // Admin
+    adminEl.setAttribute('aria-hidden', String(!isAdmin));
+    adminEl.style.display = isAdmin ? 'flex' : 'none';
 
     // Dismiss open inspectors on view switch
-    if (!isGrid) panel.hide();
-    if (isGrid) cdPanel.hide();
+    if (!isGrid)   panel.hide();
+    if (!isShapes) cdPanel.hide();
 }
 
 navGridBtn.addEventListener('click',   () => setAppView('grid'));
 navShapesBtn.addEventListener('click', () => setAppView('shapes'));
+navAdminBtn.addEventListener('click',  () => setAppView('admin'));
 
 // ---- Top header ----
 
