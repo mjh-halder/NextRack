@@ -28,6 +28,12 @@ module.exports = {
     devServer: {
         static: {
             directory: __dirname,
+            // Skip noisy paths: dist/ is rewritten by webpack on every build (would
+            // trigger an endless reload loop), node_modules/ contains ~10k+ files
+            // and churns whenever the system indexes it.
+            watch: {
+                ignored: ['**/node_modules/**', '**/dist/**'],
+            },
         },
         compress: true
     },

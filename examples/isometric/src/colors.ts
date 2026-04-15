@@ -9,6 +9,7 @@ export interface ColorToken {
  * Each token carries a base swatch color and a matching hover color.
  */
 export const PRIMARY_COLORS: ColorToken[] = [
+    { label: 'Grey 100',   base: '#161616', hover: '#262626' },
     { label: 'Grey 70',    base: '#525252', hover: '#6f6f6f' },
     { label: 'Teal 70',    base: '#005D5D', hover: '#007070' },
     { label: 'Cyan 70',    base: '#00539A', hover: '#0066BD' },

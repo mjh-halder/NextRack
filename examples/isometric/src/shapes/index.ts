@@ -14,6 +14,7 @@ import { Pyramid } from './pyramid/pyramid'
 import { Hexagonal } from './hexagonal/hexagonal'
 import { Octagon } from './octagon/octagon'
 import { Hexahedron } from './hexahedron/hexahedron'
+import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape'
 
 export const cellNamespace = {
     ...shapes,
@@ -31,6 +32,7 @@ export const cellNamespace = {
     Hexagonal,
     Octagon,
     Hexahedron,
+    SvgPolygonShape,
 }
 
 export {
@@ -48,4 +50,5 @@ export {
     Hexagonal,
     Octagon,
     Hexahedron,
+    SvgPolygonShape,
 }

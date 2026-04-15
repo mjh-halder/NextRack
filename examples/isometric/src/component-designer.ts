@@ -4,11 +4,13 @@ import { cellNamespace } from './shapes';
 import { Link } from './shapes/link/link';
 import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFactory } from './shapes/shape-factories';
 import { drawGrid, switchView, transformationMatrix, applyShapeStyle } from './utils';
+import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
+import { parseSvgFootprint } from './svg-footprint';
 import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
 const CD_GRID_COUNT = 10;
-import { ShapeRegistry, BUILT_IN_SHAPE_IDS, updateShapeDefaults, deleteShape, addShape, saveRegistryToStorage } from './shapes/shape-registry';
+import { ShapeRegistry, BUILT_IN_SHAPE_IDS, updateShapeDefaults, deleteShape, addShape, saveRegistryToStorage, ShapeLayer } from './shapes/shape-registry';
 import { BaseShape } from './shapes/shape-definition';
 import { PRIMARY_COLORS } from './colors';
 import cubeIconSvg from '../assets/cube-icon.svg';
@@ -48,6 +50,8 @@ const canvasEl     = document.getElementById('cd2-canvas')                as HTM
 const canvasEl2D   = document.getElementById('cd2-canvas-2d')             as HTMLDivElement;
 const inspectorEl  = document.getElementById('cd2-inspector')             as HTMLDivElement;
 const paletteEl    = document.getElementById('cd2-palette')               as HTMLDivElement;
+const layerPanelEl = document.getElementById('cd2-layers')                as HTMLDivElement;
+const canvasWrapEl = document.getElementById('cd2-canvas-wrap')           as HTMLDivElement;
 
 
 
@@ -115,21 +119,52 @@ let selectedCornerRadius = 0; // pixels
 // Chamfer state (not persisted to registry; only applies to cuboid shapes)
 let selectedChamferSize = 0; // pixels
 
+// SVG footprint state (complex shape mode only)
+let svgParseError = '';
+
 // Icon background state (not persisted to registry)
-const selectedIconBgEnabled = true;
+let selectedIconBgEnabled = true;
 let selectedIconBgColor = PRIMARY_COLORS[0].base; // Grey 70 by default
-let selectedIconBgShape: 'circle' | 'square' = 'circle';
+let selectedIconBgShape: 'circle' | 'square' | 'octagon' = 'circle';
+let selectedIconBgRadius = 6;
 
 // Direct references to the swatch buttons so syncExtrasFromShape can update
 // them without relying on a DOM query that could match unrelated elements.
 let iconBgSwatchRefs: Array<{ btn: HTMLElement; colorBase: string }> = [];
 
+// ── Complex Shape state ────────────────────────────────────────────────────────
+let isComplexShape = false;
+let layers: ShapeLayer[] = [];
+let selectedLayerIndex = 0;
+let layerShapes: IsometricShape[]   = [];  // ISO canvas shapes, one per layer
+let layerShapes2D: IsometricShape[] = [];  // 2D canvas shapes, one per layer
+
+// Extra slider DOM refs — assigned in build*Content functions
+let offsetXInput:        HTMLInputElement;
+let offsetYInput:        HTMLInputElement;
+let baseElevationInput:  HTMLInputElement;
+let offsetXValueEl:      HTMLElement;
+let offsetYValueEl:      HTMLElement;
+let baseElevationValueEl: HTMLElement;
+
+// Accordion sections toggled by complex shape mode
+let positionAccordionLi:          HTMLLIElement | null = null;
+let svgFootprintAccordionLi:      HTMLLIElement | null = null;
+let svgFootprintAccordionContent: HTMLElement   | null = null;
+
+// Icon background extra controls — only visible in complex shape mode
+let iconBgNoBackgroundBtnEl:   HTMLElement      | null = null;
+let iconBgCustomColorRowEl:    HTMLElement      | null = null;
+let iconBgCustomColorInputRef: HTMLInputElement | null = null;
+let iconBgCornerRadiusRowEl:   HTMLElement      | null = null;
+let iconBgCornerRadiusInputRef: HTMLInputElement | null = null;
+
+// Adaptive icon (no-bg + complex shape only): icon color follows app theme
+let selectedIconAdaptive = false;
+let iconAdaptiveToggleRowEl: HTMLElement | null = null;
+
 // Direct reference to the single color picker for sync without DOM queries.
 let colorPickerRef: HTMLInputElement | null = null;
-
-// Icon white tint state
-let iconPage = 0;
-const ICON_PAGE_SIZE = 12;
 
 /**
  * Pre-processes an SVG string so it renders fully white when used as a data URI.
@@ -256,6 +291,9 @@ let chamferRowEl:       HTMLElement;
 let iconFaceRowEl:      HTMLElement;
 
 const CDS_ICON_TRASH = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M11 4V3a1 1 0 0 0-1-1H6a1 1 0 0 0-1 1v1H1v1h1l.9 9a1 1 0 0 0 1 .9h8.1a1 1 0 0 0 1-.9L14 5h1V4zm-5-1h4v1H6zm6 10H4L3.1 5h9.8z"/></svg>`;
+const CDS_ICON_ARROW_UP   = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M8 3L3.5 7.5l.7.7L7.5 4.9V13h1V4.9l3.3 3.3.7-.7z"/></svg>`;
+const CDS_ICON_ARROW_DOWN = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M8 13l4.5-4.5-.7-.7-3.3 3.3V3H7.5v8.1L4.2 7.8l-.7.7z"/></svg>`;
+const CDS_ICON_COPY       = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14" aria-hidden="true"><path d="M12 4h-1V1H4L1 4v9h4v2h7v-2h1V4zm-8 8H2V4.5L4.5 2H11v2H5L4 5.1V12zm8 2H5V5h7v9z"/></svg>`;
 
 const CDS_ACCORDION_ARROW = `<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" class="cds--accordion__arrow"><path d="M11 8L6 13 5.3 12.3 9.6 8 5.3 3.7 6 3z"></path></svg>`;
 
@@ -285,6 +323,24 @@ function buildAccordionItem(
     li.appendChild(btn);
     li.appendChild(content);
     return li;
+}
+
+/**
+ * Updates the CSS custom property --nr-slider-fill on a range input so the
+ * Carbon-styled gradient track reflects the current value position.
+ * Must be called after any programmatic .value assignment and inside input handlers.
+ */
+function setSliderFill(el: HTMLInputElement) {
+    const min = parseFloat(el.min) || 0;
+    const max = parseFloat(el.max) || 100;
+    const val = parseFloat(el.value) || 0;
+    const pct = Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
+    el.style.setProperty('--nr-slider-fill', `${pct}%`);
+}
+
+/** Re-syncs the fill gradient for every slider currently in the inspector panel. */
+function syncAllSliderFills() {
+    inspectorEl.querySelectorAll<HTMLInputElement>('.nr-sd-slider').forEach(setSliderFill);
 }
 
 function buildSliderField(
@@ -325,8 +381,15 @@ function buildSliderField(
     slider.max = String(max);
     slider.step = String(step);
     assignInput(slider);
+    setSliderFill(slider); // set initial fill after value is assigned
     slider.addEventListener('input', () => {
-        valueEl.textContent = `${parseFloat(slider.value).toFixed(1)} GU`;
+        setSliderFill(slider);
+        // In complex shape mode the dimension sliders work in pixels, not grid units.
+        if (isComplexShape) {
+            valueEl.textContent = `${Math.round(parseFloat(slider.value))} px`;
+        } else {
+            valueEl.textContent = `${parseFloat(slider.value).toFixed(1)} GU`;
+        }
         onChange();
     });
 
@@ -348,7 +411,9 @@ function buildDimensionsContent(container: HTMLElement) {
         (el) => { depthInput  = el; el.value = '2'; },
         (el) => { depthValueEl  = el; el.textContent = '2.0 GU'; },
         onFieldChange, container);
+}
 
+function buildModifiersContent(container: HTMLElement) {
     // Corner radius — only for cuboid shapes.
     const crRow = document.createElement('div');
     cornerRadiusRowEl = crRow;
@@ -378,6 +443,21 @@ function buildDimensionsContent(container: HTMLElement) {
         },
         chRow);
     container.appendChild(chRow);
+}
+
+function buildPositionContent(container: HTMLElement) {
+    buildSliderField('Offset X', 'sd-offset-x', -8, 8, 0.5,
+        (el) => { offsetXInput = el; el.value = '0'; },
+        (el) => { offsetXValueEl = el; el.textContent = '0.0 GU'; },
+        onOffsetChange, container);
+    buildSliderField('Offset Y', 'sd-offset-y', -8, 8, 0.5,
+        (el) => { offsetYInput = el; el.value = '0'; },
+        (el) => { offsetYValueEl = el; el.textContent = '0.0 GU'; },
+        onOffsetChange, container);
+    buildSliderField('Elevation', 'sd-base-elevation', 0, 16, 0.5,
+        (el) => { baseElevationInput = el; el.value = '0'; },
+        (el) => { baseElevationValueEl = el; el.textContent = '0.0 GU'; },
+        onOffsetChange, container);
 }
 
 function buildFormFactorContent(container: HTMLElement) {
@@ -430,22 +510,30 @@ function buildFormFactorContent(container: HTMLElement) {
 const NO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><line x1="6" y1="16" x2="26" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 
 // Generates a composite SVG: colored background shape with icon SVG centered inside.
-function buildCompositeIconSvg(iconSvg: string, bgColor: string, bgShape: 'circle' | 'square'): string {
+function buildCompositeIconSvg(iconSvg: string, bgColor: string | null, bgShape: 'circle' | 'square' | 'octagon', applyWhiteFilter = true, bgRadius = 6): string {
     const S = 64;
     const pad = 13; // ~20% inset on each side
     const iconInner = S - 2 * pad;
-    const bgEl = bgShape === 'circle'
-        ? `<circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}" fill="${bgColor}"/>`
-        : `<rect width="${S}" height="${S}" rx="6" fill="${bgColor}"/>`;
+    let bgEl = '';
+    if (bgColor !== null) {
+        if (bgShape === 'circle') {
+            bgEl = `<circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}" fill="${bgColor}"/>`;
+        } else if (bgShape === 'octagon') {
+            // Regular octagon inscribed in S×S with ~18% clip on each corner
+            const c = Math.round(S * 0.18);
+            bgEl = `<polygon points="${c},0 ${S - c},0 ${S},${c} ${S},${S - c} ${S - c},${S} ${c},${S} 0,${S - c} 0,${c}" fill="${bgColor}"/>`;
+        } else {
+            bgEl = `<rect width="${S}" height="${S}" rx="${bgRadius}" fill="${bgColor}"/>`;
+        }
+    }
     const iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg)}`;
-    // White-tint is applied via an SVG <filter> on the <image> element rather than
-    // via a CSS :root rule inside the icon SVG. A CSS :root rule in a nested
-    // data-URI SVG can be misscoped to the composite SVG's root by the browser
-    // when the parent element transitions from display:none to visible, causing
-    // the background colour to be incorrectly overridden.
-    // The feColorMatrix below maps every non-transparent pixel to white (R=G=B=1)
-    // while preserving the original alpha channel.
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}"><defs><filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter></defs>${bgEl}<image href="${iconHref}" x="${pad}" y="${pad}" width="${iconInner}" height="${iconInner}" filter="url(#nr-white)"/></svg>`;
+    // White-tint: feColorMatrix maps every non-transparent pixel to white while preserving alpha.
+    // Skipped in adaptive mode — the CSS class nr-icon-adaptive handles coloring instead.
+    const filterDefs = applyWhiteFilter
+        ? `<defs><filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter></defs>`
+        : '';
+    const filterAttr = applyWhiteFilter ? ' filter="url(#nr-white)"' : '';
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${filterDefs}${bgEl}<image href="${iconHref}" x="${pad}" y="${pad}" width="${iconInner}" height="${iconInner}"${filterAttr}/></svg>`;
 }
 
 /**
@@ -462,7 +550,11 @@ function raiseToFront(viewEl: Element, selector: string): void {
 }
 
 function applyIconToCurrentShape() {
-    if (!currentShape) return;
+    // In complex shape mode, the icon is a component-level attribute placed on Layer 1.
+    const iconShape   = isComplexShape ? (layerShapes[0]   ?? null) : currentShape;
+    const iconShape2D = isComplexShape ? (layerShapes2D[0] ?? null) : currentShape2D;
+    if (!iconShape) return;
+
     const icon = AVAILABLE_ICONS.find(i => i.id === selectedIcon);
     if (!icon) {
         // Zero size hides the image without touching display — group selectors
@@ -471,14 +563,22 @@ function applyIconToCurrentShape() {
             topIcon:   { href: '', width: 0, height: 0 },
             topIcon2D: { href: '', width: 0, height: 0 },
         };
-        currentShape.attr(noIconAttrs);
-        currentShape2D?.attr(noIconAttrs);
+        iconShape.attr(noIconAttrs);
+        iconShape2D?.attr(noIconAttrs);
         return;
     }
-    const svgSource = buildCompositeIconSvg(icon.svg, selectedIconBgColor, selectedIconBgShape);
+    const isAdaptive = selectedIconAdaptive && !selectedIconBgEnabled;
+    const svgSource = buildCompositeIconSvg(
+        icon.svg,
+        selectedIconBgEnabled ? selectedIconBgColor : null,
+        selectedIconBgShape,
+        !isAdaptive,  // skip white filter when adaptive CSS class takes over
+        selectedIconBgRadius
+    );
+    const adaptiveClass = isAdaptive ? 'nr-icon-adaptive' : '';
     const iconPx = selectedIconSize * GRID_SIZE;
-    const { width: w, height: h } = currentShape.size();
-    const iH = currentShape.isometricHeight;
+    const { width: w, height: h } = iconShape.size();
+    const iH = iconShape.isometricHeight;
     const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgSource)}`;
     // 2D: centered in the shape's own bounding box
     const x2D = (w - iconPx) / 2;
@@ -528,19 +628,34 @@ function applyIconToCurrentShape() {
 
     // Do NOT set display here — group selectors iso/2d control visibility via toggleView().
     const iconAttrs = {
-        topIcon:   topIconAttrs,
-        topIcon2D: { href, x: x2D, y: y2D, width: iconPx, height: iconPx },
+        topIcon:   { ...topIconAttrs, class: adaptiveClass },
+        topIcon2D: { href, x: x2D, y: y2D, width: iconPx, height: iconPx, class: adaptiveClass },
     };
-    currentShape.attr(iconAttrs);
-    currentShape2D?.attr(iconAttrs);
+    iconShape.attr(iconAttrs);
+    iconShape2D?.attr(iconAttrs);
 
     // Guarantee the icon element is rendered above all face paths.
     // JointJS attr() never reorders DOM nodes, so this DOM move persists.
-    const isoView = paper.findViewByModel(currentShape);
+    const isoView = paper.findViewByModel(iconShape);
     if (isoView) raiseToFront(isoView.el, 'topIcon');
-    if (currentShape2D) {
-        const view2D = paper2D.findViewByModel(currentShape2D);
+    if (iconShape2D) {
+        const view2D = paper2D.findViewByModel(iconShape2D);
         if (view2D) raiseToFront(view2D.el, 'topIcon2D');
+    }
+}
+
+function updateAdaptiveToggleVisibility() {
+    const show = isComplexShape && !selectedIconBgEnabled;
+    if (iconAdaptiveToggleRowEl) iconAdaptiveToggleRowEl.style.display = show ? '' : 'none';
+    // When hidden, reset adaptive so icons render correctly on bg re-enable
+    if (!show && selectedIconAdaptive) {
+        selectedIconAdaptive = false;
+        // iconAdaptiveToggleRowEl is the nr-toggle wrapper div; uncheck it
+        if (iconAdaptiveToggleRowEl) {
+            iconAdaptiveToggleRowEl.classList.remove('nr-toggle--checked');
+            const btn = iconAdaptiveToggleRowEl.querySelector<HTMLButtonElement>('.nr-toggle__track');
+            if (btn) btn.setAttribute('aria-checked', 'false');
+        }
     }
 }
 
@@ -550,69 +665,68 @@ function buildIconContent(container: HTMLElement) {
         { id: null, label: 'No icon', svg: NO_ICON_SVG },
         ...AVAILABLE_ICONS.map(ic => ({ id: ic.id, label: ic.label, svg: ic.svg })),
     ];
-    const totalPages = Math.ceil(allIcons.length / ICON_PAGE_SIZE);
+
+    const scrollWrap = document.createElement('div');
+    scrollWrap.className = 'nr-sd-icon-scroll';
 
     const grid = document.createElement('div');
     grid.className = 'nr-sd-icon-grid';
 
-    const paginationRow = document.createElement('div');
-    paginationRow.className = 'nr-sd-icon-pagination';
+    for (const icon of allIcons) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-sd-icon-btn';
+        btn.setAttribute('title', icon.label);
+        btn.setAttribute('aria-label', icon.label);
+        btn.setAttribute('data-icon-id', icon.id ?? '');
+        const isSelected = icon.id === null ? selectedIcon === null : selectedIcon === icon.id;
+        if (isSelected) btn.classList.add('nr-sd-icon-btn--selected');
+        btn.innerHTML = icon.svg;
 
-    function renderPage() {
-        grid.innerHTML = '';
-        const start = iconPage * ICON_PAGE_SIZE;
-        const pageIcons = allIcons.slice(start, start + ICON_PAGE_SIZE);
+        btn.addEventListener('click', () => {
+            selectedIcon = icon.id;
+            grid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
+                b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
+            );
+            applyIconToCurrentShape();
+        });
 
-        for (const icon of pageIcons) {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'nr-sd-icon-btn';
-            btn.setAttribute('title', icon.label);
-            btn.setAttribute('aria-label', icon.label);
-            btn.setAttribute('data-icon-id', icon.id ?? '');
-            const isSelected = icon.id === null ? selectedIcon === null : selectedIcon === icon.id;
-            if (isSelected) btn.classList.add('nr-sd-icon-btn--selected');
-            btn.innerHTML = icon.svg;
-
-            btn.addEventListener('click', () => {
-                selectedIcon = icon.id;
-                grid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
-                    b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
-                );
-                applyIconToCurrentShape();
-            });
-
-            grid.appendChild(btn);
-        }
-
-        prevBtn.disabled = iconPage === 0;
-        nextBtn.disabled = iconPage >= totalPages - 1;
-        pageLabel.textContent = `${iconPage + 1} / ${totalPages}`;
+        grid.appendChild(btn);
     }
 
-    const prevBtn = document.createElement('button');
-    prevBtn.type = 'button';
-    prevBtn.className = 'nr-sd-icon-page-btn';
-    prevBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M10 11.5L5.5 8 10 4.5z"/></svg>`;
-    prevBtn.addEventListener('click', () => { iconPage--; renderPage(); });
+    scrollWrap.appendChild(grid);
+    container.appendChild(scrollWrap);
 
-    const pageLabel = document.createElement('span');
-    pageLabel.className = 'nr-sd-icon-page-label';
+    // Adaptive icon toggle — only in complex shape + no-bg mode
+    // Uses nr-toggle: button-based, ::before thumb, no cds-- conflict.
+    const adaptiveRow = document.createElement('div');
+    adaptiveRow.className = 'nr-toggle' + (selectedIconAdaptive ? ' nr-toggle--checked' : '');
+    adaptiveRow.style.display = (isComplexShape && !selectedIconBgEnabled) ? '' : 'none';
+    iconAdaptiveToggleRowEl = adaptiveRow;
 
-    const nextBtn = document.createElement('button');
-    nextBtn.type = 'button';
-    nextBtn.className = 'nr-sd-icon-page-btn';
-    nextBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M6 4.5L10.5 8 6 11.5z"/></svg>`;
-    nextBtn.addEventListener('click', () => { iconPage++; renderPage(); });
+    const adaptiveLabelText = document.createElement('span');
+    adaptiveLabelText.className = 'nr-toggle__label-text';
+    adaptiveLabelText.textContent = 'Theme adaptive';
 
-    paginationRow.appendChild(prevBtn);
-    paginationRow.appendChild(pageLabel);
-    paginationRow.appendChild(nextBtn);
+    const adaptiveTrack = document.createElement('button');
+    adaptiveTrack.type = 'button';
+    adaptiveTrack.id = 'sd-icon-adaptive';
+    adaptiveTrack.className = 'nr-toggle__track';
+    adaptiveTrack.setAttribute('role', 'switch');
+    adaptiveTrack.setAttribute('aria-checked', selectedIconAdaptive ? 'true' : 'false');
+    adaptiveTrack.setAttribute('aria-label', 'Theme adaptive');
 
-    renderPage();
+    adaptiveTrack.addEventListener('click', () => {
+        const next = !adaptiveRow.classList.contains('nr-toggle--checked');
+        adaptiveRow.classList.toggle('nr-toggle--checked', next);
+        adaptiveTrack.setAttribute('aria-checked', next ? 'true' : 'false');
+        selectedIconAdaptive = next;
+        applyIconToCurrentShape();
+    });
 
-    container.appendChild(grid);
-    container.appendChild(paginationRow);
+    adaptiveRow.appendChild(adaptiveLabelText);
+    adaptiveRow.appendChild(adaptiveTrack);
+    container.appendChild(adaptiveRow);
 
     // Face toggle — top or front (cuboid only)
     iconFaceRowEl = document.createElement('div');
@@ -620,7 +734,7 @@ function buildIconContent(container: HTMLElement) {
     iconFaceRowEl.style.display = selectedBaseShape === 'cuboid' ? '' : 'none';
 
     const faceLbl = document.createElement('label');
-    faceLbl.className = 'cds--label';
+    faceLbl.className = 'nr-sd-row-label';
     faceLbl.textContent = 'Face';
 
     const faceSwitcher = document.createElement('div');
@@ -670,8 +784,10 @@ function buildIconContent(container: HTMLElement) {
     slider.max = '4';
     slider.step = '0.1';
     slider.value = String(selectedIconSize);
+    setSliderFill(slider);
 
     slider.addEventListener('input', () => {
+        setSliderFill(slider);
         selectedIconSize = parseFloat(slider.value);
         sliderValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
         applyIconToCurrentShape();
@@ -683,38 +799,94 @@ function buildIconContent(container: HTMLElement) {
 }
 
 function buildIconBackgroundContent(container: HTMLElement) {
-    // ── Color swatches ────────────────────────────────────────────────────────
-    const swatchGrid = document.createElement('div');
-    swatchGrid.className = 'nr-sd-icon-grid';
+    // ── Swatch row: no-bg circle + color circles ──────────────────────────────
+    const swatchRow = document.createElement('div');
+    swatchRow.className = 'nr-sd-swatch-row';
 
     // Reset refs so syncExtrasFromShape always has fresh references.
     iconBgSwatchRefs = [];
 
+    // "No background" swatch — circle with diagonal slash (complex only)
+    const noBgBtn = document.createElement('button');
+    noBgBtn.type = 'button';
+    noBgBtn.className = 'nr-sd-swatch-btn nr-sd-swatch-btn--no-bg' + (!selectedIconBgEnabled ? ' nr-sd-swatch-btn--selected' : '');
+    noBgBtn.setAttribute('title', 'No background');
+    noBgBtn.setAttribute('aria-label', 'No background');
+    noBgBtn.style.display = isComplexShape ? '' : 'none';
+    iconBgNoBackgroundBtnEl = noBgBtn;
+    noBgBtn.addEventListener('click', () => {
+        selectedIconBgEnabled = false;
+        noBgBtn.classList.add('nr-sd-swatch-btn--selected');
+        swatchRow.querySelectorAll('.nr-sd-swatch-btn:not(.nr-sd-swatch-btn--no-bg)').forEach(b =>
+            b.classList.remove('nr-sd-swatch-btn--selected')
+        );
+        updateAdaptiveToggleVisibility();
+        applyIconToCurrentShape();
+    });
+    swatchRow.appendChild(noBgBtn);
+
+    // Color swatches
     for (const color of PRIMARY_COLORS) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'nr-sd-icon-btn' + (selectedIconBgColor === color.base ? ' nr-sd-icon-btn--selected' : '');
+        btn.className = 'nr-sd-swatch-btn' + (selectedIconBgEnabled && selectedIconBgColor === color.base ? ' nr-sd-swatch-btn--selected' : '');
         btn.setAttribute('title', color.label);
         btn.setAttribute('aria-label', color.label);
         iconBgSwatchRefs.push({ btn, colorBase: color.base });
 
-        const swatch = document.createElement('span');
-        swatch.style.cssText = `display:block;width:20px;height:20px;border-radius:50%;background:${color.base};transition:background 0.1s;`;
-        btn.appendChild(swatch);
+        const inner = document.createElement('span');
+        inner.className = 'nr-sd-swatch-inner';
+        inner.style.background = color.base;
+        btn.appendChild(inner);
 
-        btn.addEventListener('mouseenter', () => { swatch.style.background = color.hover; });
-        btn.addEventListener('mouseleave', () => { swatch.style.background = color.base; });
         btn.addEventListener('click', () => {
+            selectedIconBgEnabled = true;
             selectedIconBgColor = color.base;
-            swatchGrid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
-                b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
+            noBgBtn.classList.remove('nr-sd-swatch-btn--selected');
+            swatchRow.querySelectorAll('.nr-sd-swatch-btn:not(.nr-sd-swatch-btn--no-bg)').forEach(b =>
+                b.classList.toggle('nr-sd-swatch-btn--selected', b === btn)
             );
+            if (iconBgCustomColorInputRef) iconBgCustomColorInputRef.value = color.base;
+            updateAdaptiveToggleVisibility();
             applyIconToCurrentShape();
         });
-        swatchGrid.appendChild(btn);
+        swatchRow.appendChild(btn);
     }
 
-    container.appendChild(swatchGrid);
+    container.appendChild(swatchRow);
+
+    // ── Custom color picker (complex shape only) ──────────────────────────────
+    const customColorRow = document.createElement('div');
+    customColorRow.className = 'nr-sd-custom-color-row';
+    customColorRow.style.display = isComplexShape ? '' : 'none';
+    iconBgCustomColorRowEl = customColorRow;
+
+    const customColorLabel = document.createElement('label');
+    customColorLabel.className = 'nr-sd-row-label';
+    customColorLabel.setAttribute('for', 'sd-icon-bg-custom-color');
+    customColorLabel.textContent = 'Custom';
+
+    const customColorInput = document.createElement('input');
+    customColorInput.type = 'color';
+    customColorInput.id = 'sd-icon-bg-custom-color';
+    customColorInput.className = 'nr-sd-color-input';
+    customColorInput.value = selectedIconBgColor;
+    iconBgCustomColorInputRef = customColorInput;
+
+    customColorInput.addEventListener('input', () => {
+        selectedIconBgEnabled = true;
+        selectedIconBgColor = customColorInput.value;
+        noBgBtn.classList.remove('nr-sd-swatch-btn--selected');
+        swatchRow.querySelectorAll('.nr-sd-swatch-btn:not(.nr-sd-swatch-btn--no-bg)').forEach(b =>
+            b.classList.remove('nr-sd-swatch-btn--selected')
+        );
+        updateAdaptiveToggleVisibility();
+        applyIconToCurrentShape();
+    });
+
+    customColorRow.appendChild(customColorLabel);
+    customColorRow.appendChild(customColorInput);
+    container.appendChild(customColorRow);
 
     // ── Size slider ───────────────────────────────────────────────────────────
     const sliderRow = document.createElement('div');
@@ -741,14 +913,19 @@ function buildIconBackgroundContent(container: HTMLElement) {
     slider.max = '4';
     slider.step = '0.1';
     slider.value = String(selectedIconSize);
+    setSliderFill(slider);
 
     slider.addEventListener('input', () => {
+        setSliderFill(slider);
         selectedIconSize = parseFloat(slider.value);
         sliderValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
         // Keep the Icon-section size slider in sync
         const iconSizeSlider = document.querySelector<HTMLInputElement>('#sd-icon-size');
         const iconSizeValue  = document.querySelector<HTMLElement>('#sd-icon-size-value');
-        if (iconSizeSlider) iconSizeSlider.value = String(selectedIconSize);
+        if (iconSizeSlider) {
+            iconSizeSlider.value = String(selectedIconSize);
+            setSliderFill(iconSizeSlider);
+        }
         if (iconSizeValue)  iconSizeValue.textContent = `${selectedIconSize.toFixed(1)} cells`;
         applyIconToCurrentShape();
     });
@@ -768,9 +945,10 @@ function buildIconBackgroundContent(container: HTMLElement) {
     legend.textContent = 'Shape';
     fieldset.appendChild(legend);
 
-    const bgShapeOptions: Array<{ value: 'circle' | 'square'; label: string }> = [
-        { value: 'circle', label: 'Circle' },
-        { value: 'square', label: 'Square' },
+    const bgShapeOptions: Array<{ value: 'circle' | 'square' | 'octagon'; label: string }> = [
+        { value: 'circle',  label: 'Circle' },
+        { value: 'square',  label: 'Square' },
+        { value: 'octagon', label: 'Octagon' },
     ];
 
     for (const opt of bgShapeOptions) {
@@ -792,6 +970,9 @@ function buildIconBackgroundContent(container: HTMLElement) {
 
         input.addEventListener('change', () => {
             selectedIconBgShape = opt.value;
+            if (iconBgCornerRadiusRowEl) {
+                iconBgCornerRadiusRowEl.style.display = opt.value === 'square' ? '' : 'none';
+            }
             applyIconToCurrentShape();
         });
 
@@ -801,6 +982,47 @@ function buildIconBackgroundContent(container: HTMLElement) {
     }
 
     container.appendChild(fieldset);
+
+    // ── Corner Radius slider (square only) ────────────────────────────────────
+    const crRow = document.createElement('div');
+    crRow.className = 'nr-sd-slider-row';
+    crRow.style.display = selectedIconBgShape === 'square' ? '' : 'none';
+    iconBgCornerRadiusRowEl = crRow;
+
+    const crLabelRow = document.createElement('div');
+    crLabelRow.className = 'nr-sd-slider-label-row';
+    const crLbl = document.createElement('label');
+    crLbl.className = 'cds--label';
+    crLbl.setAttribute('for', 'sd-icon-bg-radius');
+    crLbl.textContent = 'Corner Roundness';
+    const crValueEl = document.createElement('span');
+    crValueEl.className = 'nr-sd-slider-value';
+    crValueEl.id = 'sd-icon-bg-radius-value';
+    crValueEl.textContent = `${selectedIconBgRadius}px`;
+    crLabelRow.appendChild(crLbl);
+    crLabelRow.appendChild(crValueEl);
+
+    const crSlider = document.createElement('input');
+    crSlider.type = 'range';
+    crSlider.id = 'sd-icon-bg-radius';
+    crSlider.className = 'nr-sd-slider';
+    crSlider.min = '0';
+    crSlider.max = '32';
+    crSlider.step = '1';
+    crSlider.value = String(selectedIconBgRadius);
+    setSliderFill(crSlider);
+    iconBgCornerRadiusInputRef = crSlider;
+
+    crSlider.addEventListener('input', () => {
+        setSliderFill(crSlider);
+        selectedIconBgRadius = parseInt(crSlider.value, 10);
+        crValueEl.textContent = `${selectedIconBgRadius}px`;
+        applyIconToCurrentShape();
+    });
+
+    crRow.appendChild(crLabelRow);
+    crRow.appendChild(crSlider);
+    container.appendChild(crRow);
 }
 
 function buildColorContent(container: HTMLElement) {
@@ -808,7 +1030,7 @@ function buildColorContent(container: HTMLElement) {
     row.className = 'nr-sd-color-row';
 
     const lbl = document.createElement('label');
-    lbl.className = 'cds--label';
+    lbl.className = 'nr-sd-row-label';
     lbl.setAttribute('for', 'sd-color-base');
     lbl.textContent = 'Shape Color';
 
@@ -825,24 +1047,51 @@ function buildColorContent(container: HTMLElement) {
         selectedStyle.topColor   = val;
         selectedStyle.frontColor = val;
         selectedStyle.sideColor  = val;
+        if (isComplexShape) {
+            const layer = layers[selectedLayerIndex];
+            if (layer) {
+                layer.style.topColor   = val;
+                layer.style.frontColor = val;
+                layer.style.sideColor  = val;
+            }
+            const s    = layerShapes[selectedLayerIndex];
+            const s2D  = layerShapes2D[selectedLayerIndex];
+            if (s)   applyShapeStyle(s,   layer?.style ?? {});
+            if (s2D) applyShapeStyle(s2D, layer?.style ?? {});
+            return;
+        }
         if (currentShape)   applyShapeStyle(currentShape,   selectedStyle);
         if (currentShape2D) applyShapeStyle(currentShape2D, selectedStyle);
     });
 
-    row.appendChild(lbl);
-    row.appendChild(input);
-    container.appendChild(row);
-
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';
-    clearBtn.className = 'cds--btn cds--btn--ghost cds--btn--sm';
-    clearBtn.style.marginTop = '4px';
-    clearBtn.textContent = 'Clear Color';
+    clearBtn.className = 'nr-sd-color-clear-btn';
+    clearBtn.setAttribute('title', 'Clear color');
+    clearBtn.setAttribute('aria-label', 'Clear color');
+    clearBtn.innerHTML = CDS_ICON_TRASH;
     clearBtn.addEventListener('click', () => {
         selectedStyle.topColor   = '';
         selectedStyle.frontColor = '';
         selectedStyle.sideColor  = '';
         input.value = '#e0e0e0';
+        if (isComplexShape) {
+            const layer = layers[selectedLayerIndex];
+            if (layer) layer.style = {};
+            const s    = layerShapes[selectedLayerIndex];
+            const s2D  = layerShapes2D[selectedLayerIndex];
+            if (s) {
+                s.attr('top/fill',   '#a8a8a8');
+                s.attr('front/fill', '#e0e0e0');
+                s.attr('side/fill',  '#c6c6c6');
+            }
+            if (s2D) {
+                s2D.attr('top/fill',   '#a8a8a8');
+                s2D.attr('front/fill', '#e0e0e0');
+                s2D.attr('side/fill',  '#c6c6c6');
+            }
+            return;
+        }
         if (currentShape) {
             currentShape.attr('top/fill',   '#a8a8a8');
             currentShape.attr('front/fill', '#e0e0e0');
@@ -854,7 +1103,11 @@ function buildColorContent(container: HTMLElement) {
             currentShape2D.attr('side/fill',  '#c6c6c6');
         }
     });
-    container.appendChild(clearBtn);
+
+    row.appendChild(lbl);
+    row.appendChild(input);
+    row.appendChild(clearBtn);
+    container.appendChild(row);
 }
 
 function buildInspectorPanel() {
@@ -892,22 +1145,71 @@ function buildInspectorPanel() {
     shapeNameInput.className = 'cds--text-input cds--text-input--sm';
     shapeNameInput.value = ShapeRegistry[currentShapeId]?.displayName ?? formatLabel(currentShapeId);
     shapeNameInput.addEventListener('input', () => {
-        if (!currentShape) return;
-        currentShape.attr('label/text', shapeNameInput.value);
-        currentShape2D?.attr('label/text', shapeNameInput.value);
+        const name = shapeNameInput.value;
+        if (isComplexShape) {
+            // In complex shapes, only the first layer carries the label.
+            layerShapes[0]?.attr('label/text', name);
+            layerShapes2D[0]?.attr('label/text', name);
+        } else if (currentShape) {
+            currentShape.attr('label/text', name);
+            currentShape2D?.attr('label/text', name);
+        }
     });
+
+    // Complex Shape toggle — shown directly below the name input
+    // Uses nr-toggle: button-based, ::before thumb, no cds-- conflict.
+    const complexToggleWrapper = document.createElement('div');
+    complexToggleWrapper.className = 'nr-toggle' + (isComplexShape ? ' nr-toggle--checked' : '');
+
+    const toggleText = document.createElement('span');
+    toggleText.className = 'nr-toggle__label-text';
+    toggleText.textContent = 'Complex Shape';
+
+    const toggleTrack = document.createElement('button');
+    toggleTrack.type = 'button';
+    toggleTrack.id = 'sd-complex-toggle';
+    toggleTrack.className = 'nr-toggle__track';
+    toggleTrack.setAttribute('role', 'switch');
+    toggleTrack.setAttribute('aria-checked', isComplexShape ? 'true' : 'false');
+    toggleTrack.setAttribute('aria-label', 'Complex Shape');
+    toggleTrack.addEventListener('click', () => {
+        const next = !complexToggleWrapper.classList.contains('nr-toggle--checked');
+        complexToggleWrapper.classList.toggle('nr-toggle--checked', next);
+        toggleTrack.setAttribute('aria-checked', next ? 'true' : 'false');
+        onComplexShapeToggle(next);
+    });
+
+    complexToggleWrapper.appendChild(toggleText);
+    complexToggleWrapper.appendChild(toggleTrack);
 
     nameSection.appendChild(nameLabel);
     nameSection.appendChild(shapeNameInput);
+    nameSection.appendChild(complexToggleWrapper);
     inspectorEl.appendChild(nameSection);
 
     const accordion = document.createElement('ul');
     accordion.className = 'cds--accordion';
-    accordion.appendChild(buildAccordionItem('Form Factor',  true, buildFormFactorContent));
-    accordion.appendChild(buildAccordionItem('Dimensions',   true, buildDimensionsContent));
-    accordion.appendChild(buildAccordionItem('Icon',            true,  buildIconContent));
+    accordion.appendChild(buildAccordionItem('Form Factor',     false, buildFormFactorContent));
+    accordion.appendChild(buildAccordionItem('Dimensions',      false, buildDimensionsContent));
+    accordion.appendChild(buildAccordionItem('Modifiers',       false, buildModifiersContent));
+
+    // Position section — only visible in complex shape mode
+    positionAccordionLi = buildAccordionItem('Position', false, buildPositionContent);
+    positionAccordionLi.style.display = isComplexShape ? '' : 'none';
+    accordion.appendChild(positionAccordionLi);
+
+    accordion.appendChild(buildAccordionItem('Icon',            false, buildIconContent));
     accordion.appendChild(buildAccordionItem('Icon Background', false, buildIconBackgroundContent));
-    accordion.appendChild(buildAccordionItem('Color',           true,  buildColorContent));
+    accordion.appendChild(buildAccordionItem('Color',           false, buildColorContent));
+
+    // SVG Footprint section — only visible in complex shape mode
+    svgFootprintAccordionLi = buildAccordionItem('SVG Footprint', false, (contentEl) => {
+        svgFootprintAccordionContent = contentEl;
+        syncSvgFootprintSection();
+    });
+    svgFootprintAccordionLi.style.display = isComplexShape ? '' : 'none';
+    accordion.appendChild(svgFootprintAccordionLi);
+
     inspectorEl.appendChild(accordion);
 
     const footer = document.createElement('div');
@@ -920,19 +1222,19 @@ function buildInspectorPanel() {
     saveBtn.textContent = 'Save Defaults';
     saveBtn.addEventListener('click', onSave);
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'cds--btn cds--btn--sm nr-btn--danger-ghost';
-    deleteBtn.type = 'button';
-    deleteBtn.style.width = '100%';
-    deleteBtn.innerHTML = `${CDS_ICON_TRASH} Delete Shape`;
-    deleteBtn.addEventListener('click', () => showDeleteConfirmModal(currentShapeId));
-
     const duplicateBtn = document.createElement('button');
     duplicateBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
     duplicateBtn.type = 'button';
     duplicateBtn.style.width = '100%';
     duplicateBtn.textContent = 'Duplicate';
     duplicateBtn.addEventListener('click', () => showDuplicateShapeModal(currentShapeId));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'cds--btn cds--btn--sm nr-btn--danger-ghost';
+    deleteBtn.type = 'button';
+    deleteBtn.style.width = '100%';
+    deleteBtn.innerHTML = `${CDS_ICON_TRASH} Delete Shape`;
+    deleteBtn.addEventListener('click', () => showDeleteConfirmModal(currentShapeId));
 
     footer.appendChild(saveBtn);
     footer.appendChild(duplicateBtn);
@@ -950,13 +1252,30 @@ function supportsCornerRadius(baseShape: string): boolean {
     return baseShape === 'cuboid';
 }
 
+// Returns true when a layer uses a custom SVG footprint for rendering.
+function isLayerSvg(layer: ShapeLayer): boolean {
+    return !!(layer.svgNormVerts && layer.svgNormVerts.length >= 3);
+}
+
 function applyCornerRadiusToCurrentShape() {
+    if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        if (layer) layer.cornerRadius = selectedCornerRadius;
+        layerShapes[selectedLayerIndex]?.set('cornerRadius', selectedCornerRadius);
+        layerShapes2D[selectedLayerIndex]?.set('cornerRadius', selectedCornerRadius);
+        return;
+    }
     if (!currentShape) return;
     currentShape.set('cornerRadius', selectedCornerRadius);
     currentShape2D?.set('cornerRadius', selectedCornerRadius);
 }
 
 function applyChamferSizeToCurrentShape() {
+    if (isComplexShape) {
+        layerShapes[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
+        layerShapes2D[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
+        return;
+    }
     if (!currentShape) return;
     currentShape.set('chamferSize', selectedChamferSize);
     currentShape2D?.set('chamferSize', selectedChamferSize);
@@ -969,19 +1288,29 @@ function updateDimensionLock() {
     heightInput.style.opacity = locked ? '0.4' : '';
     if (locked) {
         heightInput.value = widthInput.value;
-        if (heightValueEl) heightValueEl.textContent = `${parseFloat(widthInput.value).toFixed(1)} GU`;
+        if (heightValueEl) {
+            heightValueEl.textContent = isComplexShape
+                ? `${Math.round(parseFloat(widthInput.value))} px`
+                : `${parseFloat(widthInput.value).toFixed(1)} GU`;
+        }
     }
 
-    // Pyramid requires at least 2 GU of depth.
-    const minDepth = selectedBaseShape === 'pyramid' ? 2 : 0;
-    depthInput.min = String(minDepth);
-    if (parseFloat(depthInput.value) < minDepth) {
-        depthInput.value = String(minDepth);
-        if (depthValueEl) depthValueEl.textContent = `${minDepth.toFixed(1)} GU`;
+    // Pyramid depth minimum: only enforced in simple (GU) mode.
+    // In complex pixel mode the depth slider min is already set to 0.
+    if (!isComplexShape) {
+        const minDepth = selectedBaseShape === 'pyramid' ? 2 : 0;
+        depthInput.min = String(minDepth);
+        if (parseFloat(depthInput.value) < minDepth) {
+            depthInput.value = String(minDepth);
+            if (depthValueEl) depthValueEl.textContent = `${minDepth.toFixed(1)} GU`;
+        }
     }
 
-    // Corner radius, chamfer, and icon face are only available for cuboid shapes.
-    const showEdgeControls = supportsCornerRadius(selectedBaseShape);
+    // Corner radius and chamfer are only available for built-in polygon shapes,
+    // not for SVG-footprint layers (SVG vertices are always used without rounding).
+    const currentSvgLayer = isComplexShape ? (layers[selectedLayerIndex] ?? null) : null;
+    const hasSvgLayer     = currentSvgLayer !== null && isLayerSvg(currentSvgLayer);
+    const showEdgeControls = supportsCornerRadius(selectedBaseShape) && !hasSvgLayer;
     if (cornerRadiusRowEl) cornerRadiusRowEl.style.display = showEdgeControls ? '' : 'none';
     if (chamferRowEl)      chamferRowEl.style.display      = showEdgeControls ? '' : 'none';
     if (iconFaceRowEl)     iconFaceRowEl.style.display     = showEdgeControls ? '' : 'none';
@@ -1001,6 +1330,7 @@ function syncFormFromShape(shape: IsometricShape) {
     if (heightValueEl) heightValueEl.textContent = `${hGU.toFixed(1)} GU`;
     if (depthValueEl)  depthValueEl.textContent  = `${dGU.toFixed(1)} GU`;
     updateDimensionLock();
+    syncAllSliderFills();
 }
 
 // Update form factor, icon, and color controls from the registry for the given shape id.
@@ -1011,8 +1341,11 @@ function syncExtrasFromShape(id: string) {
     selectedIconFace    = defaults?.iconFace   ?? 'top';
     selectedIcon        = defaults?.icon       ?? null;
     selectedIconSize    = defaults?.iconSize   ?? 1;
+    selectedIconBgEnabled  = true; // reset to enabled on shape switch
+    selectedIconAdaptive   = false;
     selectedIconBgColor = defaults?.iconBgColor ?? PRIMARY_COLORS[0].base;
-    selectedIconBgShape = (defaults?.iconBgShape ?? 'circle') as 'circle' | 'square';
+    selectedIconBgShape  = (defaults?.iconBgShape ?? 'circle') as 'circle' | 'square' | 'octagon';
+    selectedIconBgRadius = defaults?.iconBgRadius ?? 6;
     selectedStyle     = {
         topColor:    defaults?.style?.topColor    ?? '',
         sideColor:   defaults?.style?.sideColor   ?? '',
@@ -1036,22 +1369,36 @@ function syncExtrasFromShape(id: string) {
     // Sync both size sliders (Icon section + Icon Background section share selectedIconSize)
     const sizeSlider = inspectorEl.querySelector<HTMLInputElement>('#sd-icon-size');
     const sizeValueEl = inspectorEl.querySelector<HTMLElement>('#sd-icon-size-value');
-    if (sizeSlider) sizeSlider.value = String(selectedIconSize);
+    if (sizeSlider) { sizeSlider.value = String(selectedIconSize); setSliderFill(sizeSlider); }
     if (sizeValueEl) sizeValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
     const bgSizeSlider = inspectorEl.querySelector<HTMLInputElement>('#sd-icon-bg-size');
     const bgSizeValueEl = inspectorEl.querySelector<HTMLElement>('#sd-icon-bg-size-value');
-    if (bgSizeSlider) bgSizeSlider.value = String(selectedIconSize);
+    if (bgSizeSlider) { bgSizeSlider.value = String(selectedIconSize); setSliderFill(bgSizeSlider); }
     if (bgSizeValueEl) bgSizeValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
 
-    // Sync icon background color swatches using direct refs (avoids false DOM matches).
-    for (const { btn, colorBase } of iconBgSwatchRefs) {
-        btn.classList.toggle('nr-sd-icon-btn--selected', colorBase === selectedIconBgColor);
+    // Sync icon background: no-bg swatch + color swatches + custom color picker
+    if (iconBgNoBackgroundBtnEl) {
+        iconBgNoBackgroundBtnEl.classList.toggle('nr-sd-swatch-btn--selected', !selectedIconBgEnabled);
     }
+    for (const { btn, colorBase } of iconBgSwatchRefs) {
+        btn.classList.toggle('nr-sd-swatch-btn--selected', selectedIconBgEnabled && colorBase === selectedIconBgColor);
+    }
+    if (iconBgCustomColorInputRef) iconBgCustomColorInputRef.value = selectedIconBgColor;
 
     // Sync icon background shape radio
     inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-icon-bg-shape"]').forEach(r => {
         r.checked = r.value === selectedIconBgShape;
     });
+
+    // Sync corner radius slider visibility and value
+    if (iconBgCornerRadiusRowEl) {
+        iconBgCornerRadiusRowEl.style.display = selectedIconBgShape === 'square' ? '' : 'none';
+    }
+    if (iconBgCornerRadiusInputRef) {
+        iconBgCornerRadiusInputRef.value = String(selectedIconBgRadius);
+        const crValueEl = document.getElementById('sd-icon-bg-radius-value');
+        if (crValueEl) crValueEl.textContent = `${selectedIconBgRadius}px`;
+    }
 
     // Sync single color input
     const representativeColor = selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || '#e0e0e0';
@@ -1059,10 +1406,25 @@ function syncExtrasFromShape(id: string) {
 
     // Apply dimension lock now that selectedBaseShape has been updated.
     updateDimensionLock();
+    syncAllSliderFills();
 }
 
 // Swap the canvas shape to match the selected form factor, preserving current dimensions.
 function applyFormFactorToCanvas() {
+    if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        if (!layer) return;
+        layer.baseShape = selectedBaseShape;
+        if (requiresSquareBase(selectedBaseShape)) {
+            layer.height = layer.width;
+            heightInput.value = String(layer.width / GRID_SIZE);
+            if (heightValueEl) heightValueEl.textContent = `${(layer.width / GRID_SIZE).toFixed(1)} GU`;
+        }
+        updateDimensionLock();
+        renderLayersOnCanvas();
+        return;
+    }
+
     if (!currentShape) return;
 
     // Snap height to width immediately when switching to a square-base form factor.
@@ -1110,6 +1472,30 @@ function applyFormFactorToCanvas() {
 
 // Apply slider dimension values to the preview shape (grid units → px).
 function onFieldChange() {
+    if (isComplexShape) {
+        // Sliders operate in pixels in complex mode.
+        const layer = layers[selectedLayerIndex];
+        if (!layer) return;
+        const w = parseFloat(widthInput.value);
+        if (requiresSquareBase(layer.baseShape)) {
+            heightInput.value = String(w);
+            if (heightValueEl) heightValueEl.textContent = `${Math.round(w)} px`;
+        }
+        const h = parseFloat(heightInput.value);
+        const d = parseFloat(depthInput.value);
+        if (isNaN(w) || isNaN(h) || isNaN(d) || w < 1 || h < 1 || d < 0) return;
+        layer.width  = w;
+        layer.height = h;
+        layer.depth  = d;
+        // Update the layer's shape in-place for smooth dragging
+        const s   = layerShapes[selectedLayerIndex];
+        const s2D = layerShapes2D[selectedLayerIndex];
+        s?.resize(layer.width, layer.height);
+        s?.set('isometricHeight', layer.depth);
+        s2D?.resize(layer.width, layer.height);
+        s2D?.set('isometricHeight', layer.depth);
+        return;
+    }
     if (!currentShape) return;
     const widthGU = parseFloat(widthInput.value);
     if (requiresSquareBase(selectedBaseShape)) {
@@ -1123,26 +1509,56 @@ function onFieldChange() {
     currentShape.set('isometricHeight', depthGU * GRID_SIZE);
     currentShape2D?.resize(widthGU * GRID_SIZE, heightGU * GRID_SIZE);
     currentShape2D?.set('isometricHeight', depthGU * GRID_SIZE);
+    centerShapeOnCanvas(currentShape, currentShape2D ?? null);
 }
 
 // Persist all template values to the Shape Registry.
 function onSave() {
+    // Pre-compute icon URI (shared by both simple and complex paths)
+    let iconHref: string | undefined;
+    if (selectedIcon) {
+        const iconEntry = AVAILABLE_ICONS.find(i => i.id === selectedIcon);
+        if (iconEntry) {
+            const svg = buildCompositeIconSvg(iconEntry.svg, selectedIconBgEnabled ? selectedIconBgColor : null, selectedIconBgShape, true, selectedIconBgRadius);
+            iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+        }
+    }
+
+    if (isComplexShape) {
+        if (layers.length === 0) return;
+        const layer1 = layers[0];
+        updateShapeDefaults(currentShapeId, {
+            displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
+            // Layer 1 dims used as the simple-shape fallback for the System Designer
+            defaultSize: { width: layer1.width, height: layer1.height },
+            defaultIsometricHeight: layer1.depth,
+            baseShape: layer1.baseShape,
+            iconFace: selectedIconFace,
+            icon: selectedIcon ?? undefined,
+            iconSize: selectedIconSize,
+            iconBgColor: selectedIconBgColor,
+            iconBgShape: selectedIconBgShape,
+            iconBgRadius: selectedIconBgRadius,
+            iconHref,
+            style: {
+                topColor:    selectedStyle.topColor    || undefined,
+                frontColor:  selectedStyle.frontColor  || undefined,
+                sideColor:   selectedStyle.sideColor   || undefined,
+                strokeColor: selectedStyle.strokeColor || undefined,
+            },
+            complexShape: true,
+            layers: layers.map(l => ({ ...l })),
+        });
+        saveRegistryToStorage();
+        document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+        return;
+    }
+
     if (!currentShape) return;
     const widthGU  = parseFloat(widthInput.value);
     const heightGU = parseFloat(heightInput.value);
     const depthGU  = parseFloat(depthInput.value);
     if (isNaN(widthGU) || isNaN(heightGU) || isNaN(depthGU)) return;
-
-    // Pre-compute the composite icon data URI so the system designer can apply
-    // the icon to instances without needing its own icon-building logic.
-    let iconHref: string | undefined;
-    if (selectedIcon) {
-        const iconEntry = AVAILABLE_ICONS.find(i => i.id === selectedIcon);
-        if (iconEntry) {
-            const svg = buildCompositeIconSvg(iconEntry.svg, selectedIconBgColor, selectedIconBgShape);
-            iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-        }
-    }
 
     updateShapeDefaults(currentShapeId, {
         displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
@@ -1154,6 +1570,7 @@ function onSave() {
         iconSize: selectedIconSize,
         iconBgColor: selectedIconBgColor,
         iconBgShape: selectedIconBgShape,
+        iconBgRadius: selectedIconBgRadius,
         iconHref,
         style: {
             topColor:    selectedStyle.topColor    || undefined,
@@ -1161,6 +1578,8 @@ function onSave() {
             sideColor:   selectedStyle.sideColor   || undefined,
             strokeColor: selectedStyle.strokeColor || undefined,
         },
+        complexShape: false,
+        layers: undefined,
     });
     saveRegistryToStorage();
     document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
@@ -1177,6 +1596,7 @@ function centerShapeOnCanvas(shape: IsometricShape, shape2D: IsometricShape | nu
 
 // Keep form in sync when resize or height tools are used directly on the shape.
 graph.on('change:size', (cell: dia.Cell) => {
+    if (isComplexShape) return; // layer shapes have no resize tools
     if (currentShape && cell.id === currentShape.id) {
         syncFormFromShape(currentShape);
         applyIconToCurrentShape();
@@ -1189,6 +1609,7 @@ graph.on('change:size', (cell: dia.Cell) => {
 });
 
 graph.on('change:isometricHeight', (cell: dia.Cell) => {
+    if (isComplexShape) return; // layer shapes have no height tools
     if (currentShape && cell.id === currentShape.id) {
         syncFormFromShape(currentShape);
         applyIconToCurrentShape();
@@ -1198,6 +1619,625 @@ graph.on('change:isometricHeight', (cell: dia.Cell) => {
         centerShapeOnCanvas(currentShape, currentShape2D);
     }
 });
+
+// ── Complex Shape helpers ─────────────────────────────────────────────────────
+
+// ── SVG Footprint helpers ─────────────────────────────────────────────────────
+
+/**
+ * Rebuilds the SVG Footprint inspector section for the currently selected layer.
+ * Shows an upload control when no SVG is loaded, or the filename + Remove button
+ * when one is active.  Displays any pending parse error beneath the control.
+ */
+function syncSvgFootprintSection() {
+    // Toggle the accordion item visibility
+    if (svgFootprintAccordionLi) {
+        svgFootprintAccordionLi.style.display = isComplexShape ? '' : 'none';
+    }
+    if (!isComplexShape || !svgFootprintAccordionContent) return;
+
+    const layer = layers[selectedLayerIndex] ?? null;
+    svgFootprintAccordionContent.innerHTML = '';
+
+    if (!layer) return;
+
+    if (isLayerSvg(layer)) {
+        // ── SVG is loaded: show filename and Remove button ────────────────
+        const row = document.createElement('div');
+        row.className = 'nr-svgfp-row';
+
+        const fileLabel = document.createElement('span');
+        fileLabel.className = 'nr-svgfp-filename';
+        fileLabel.title = layer.svgFootprintName ?? 'custom.svg';
+        fileLabel.textContent = layer.svgFootprintName ?? 'custom.svg';
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'cds--btn cds--btn--ghost cds--btn--sm nr-btn--danger-ghost';
+        removeBtn.textContent = 'Remove';
+        removeBtn.addEventListener('click', onRemoveSvgFootprint);
+
+        row.appendChild(fileLabel);
+        row.appendChild(removeBtn);
+        svgFootprintAccordionContent.appendChild(row);
+    } else {
+        // ── No SVG loaded: label left, compact upload button right ────────
+        const uploadRow = document.createElement('div');
+        uploadRow.className = 'nr-svgfp-row';
+
+        const fileNameSpan = document.createElement('span');
+        fileNameSpan.className = 'nr-svgfp-filename';
+        fileNameSpan.textContent = 'No file';
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.id = 'sd-svgfp-input';
+        fileInput.accept = '.svg,image/svg+xml';
+        fileInput.style.display = 'none';
+        fileInput.addEventListener('change', () => onSvgFootprintUpload(fileInput));
+
+        const uploadLabel = document.createElement('label');
+        uploadLabel.className = 'cds--btn cds--btn--secondary cds--btn--sm nr-svgfp-upload-label';
+        uploadLabel.setAttribute('for', 'sd-svgfp-input');
+        uploadLabel.textContent = 'Upload';
+
+        uploadRow.appendChild(fileNameSpan);
+        uploadRow.appendChild(fileInput);
+        uploadRow.appendChild(uploadLabel);
+        svgFootprintAccordionContent.appendChild(uploadRow);
+
+        const hint = document.createElement('p');
+        hint.className = 'cds--form__helper-text';
+        hint.style.marginTop = '4px';
+        hint.textContent = 'Single closed outline SVG only.';
+        svgFootprintAccordionContent.appendChild(hint);
+    }
+
+    // Parse error (cleared on layer switch and on successful upload/remove)
+    if (svgParseError) {
+        const errEl = document.createElement('p');
+        errEl.className = 'cds--form-requirement';
+        errEl.style.marginTop = '4px';
+        errEl.textContent = svgParseError;
+        svgFootprintAccordionContent.appendChild(errEl);
+    }
+}
+
+/** Reads the selected file, parses it, and applies the SVG footprint to the current layer. */
+function onSvgFootprintUpload(fileInput: HTMLInputElement) {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const svgString = e.target?.result as string;
+        if (typeof svgString !== 'string' || !svgString.trim()) return;
+
+        const result = parseSvgFootprint(svgString);
+        if (result.error || result.normVerts.length < 3) {
+            svgParseError = result.error ?? 'Could not extract a usable outline from this SVG.';
+            syncSvgFootprintSection();
+            return;
+        }
+
+        const layer = layers[selectedLayerIndex];
+        if (!layer) return;
+
+        svgParseError           = '';
+        layer.svgFootprint      = svgString;
+        layer.svgNormVerts      = result.normVerts;
+        layer.svgFootprintName  = file.name;
+
+        renderLayersOnCanvas();
+        syncSvgFootprintSection();
+        updateDimensionLock(); // hide corner radius / chamfer for SVG layer
+    };
+    reader.readAsText(file);
+}
+
+/** Removes the SVG footprint from the current layer, reverting to the built-in form factor. */
+function onRemoveSvgFootprint() {
+    const layer = layers[selectedLayerIndex];
+    if (!layer) return;
+
+    delete layer.svgFootprint;
+    delete layer.svgNormVerts;
+    delete layer.svgFootprintName;
+    svgParseError = '';
+
+    renderLayersOnCanvas();
+    syncSvgFootprintSection();
+    updateDimensionLock(); // restore corner radius / chamfer if form factor supports it
+}
+
+function showLayersPanel() {
+    layerPanelEl.style.display = 'flex';
+    canvasWrapEl.style.right = '508px'; // 300px inspector + 208px layers
+}
+
+function hideLayersPanel() {
+    layerPanelEl.style.display = 'none';
+    canvasWrapEl.style.right = '';
+}
+
+/**
+ * The component origin on the canvas: shapes with no offset are centred here.
+ * Using a fixed reference point so all layers share the same coordinate origin.
+ */
+function layerBasePos(): { x: number; y: number } {
+    const gridPx = CD_GRID_COUNT * GRID_SIZE;
+    return { x: gridPx / 2, y: gridPx / 2 };
+}
+
+function renderLayersOnCanvas() {
+    paper.removeTools();
+    graph.clear();
+    graph2D.clear();
+    layerShapes   = [];
+    layerShapes2D = [];
+    currentShape   = null;
+    currentShape2D = null;
+
+    const { x: bx, y: by } = layerBasePos();
+
+    // Build all shapes first (not yet in the graph) so we control insertion order.
+    for (let idx = 0; idx < layers.length; idx++) {
+        const layer = layers[idx];
+        const isoX = bx - layer.width  / 2 + layer.offsetX - layer.baseElevation;
+        const isoY = by - layer.height / 2 + layer.offsetY - layer.baseElevation;
+
+        // Use SvgPolygonShape when the layer has an uploaded SVG footprint,
+        // otherwise fall back to the selected built-in form factor.
+        let shape: IsometricShape;
+        if (isLayerSvg(layer)) {
+            const svgShape = new SvgPolygonShape();
+            svgShape.set('normalizedVerts', layer.svgNormVerts!);
+            shape = svgShape;
+        } else {
+            shape = (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['cuboid'])();
+        }
+        shape.resize(layer.width, layer.height);
+        shape.set('isometricHeight',        layer.depth);
+        shape.set('defaultIsometricHeight', layer.depth);
+        shape.set('defaultSize',            { width: layer.width, height: layer.height });
+        if (layer.cornerRadius !== undefined) shape.set('cornerRadius', layer.cornerRadius);
+        shape.position(isoX, isoY);
+        shape.toggleView(View.Isometric);
+        // Only the first layer carries the shape's label; additional layers are unlabelled.
+        if (idx > 0) shape.attr('label/text', '');
+        layerShapes.push(shape);
+
+        const x2D = bx - layer.width  / 2 + layer.offsetX;
+        const y2D = by - layer.height / 2 + layer.offsetY;
+
+        let shape2D: IsometricShape;
+        if (isLayerSvg(layer)) {
+            const svgShape2D = new SvgPolygonShape();
+            svgShape2D.set('normalizedVerts', layer.svgNormVerts!);
+            shape2D = svgShape2D;
+        } else {
+            shape2D = (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['cuboid'])();
+        }
+        shape2D.resize(layer.width, layer.height);
+        shape2D.set('isometricHeight',        layer.depth);
+        shape2D.set('defaultIsometricHeight', layer.depth);
+        shape2D.set('defaultSize',            { width: layer.width, height: layer.height });
+        if (layer.cornerRadius !== undefined) shape2D.set('cornerRadius', layer.cornerRadius);
+        shape2D.position(x2D, y2D);
+        shape2D.toggleView(View.TwoDimensional);
+        if (idx > 0) shape2D.attr('label/text', '');
+        layerShapes2D.push(shape2D);
+    }
+
+    // Add to graphs in reverse list order so that SVG painter's algorithm
+    // renders Layer 0 (top of the panel) on top of all lower layers.
+    // Last cell added = last SVG element = painted on top.
+    for (let idx = layerShapes.length - 1; idx >= 0; idx--) {
+        graph.addCell(layerShapes[idx]);
+        const s = layers[idx];
+        if (s.style.topColor || s.style.frontColor || s.style.sideColor || s.style.strokeColor) {
+            applyShapeStyle(layerShapes[idx], s.style);
+        }
+    }
+    for (let idx = layerShapes2D.length - 1; idx >= 0; idx--) {
+        graph2D.addCell(layerShapes2D[idx]);
+        const s = layers[idx];
+        if (s.style.topColor || s.style.frontColor || s.style.sideColor || s.style.strokeColor) {
+            applyShapeStyle(layerShapes2D[idx], s.style);
+        }
+    }
+
+    // currentShape points to the selected layer (used by slider sync on canvas events).
+    currentShape   = layerShapes[selectedLayerIndex]   ?? null;
+    currentShape2D = layerShapes2D[selectedLayerIndex] ?? null;
+
+    // Reapply icon to Layer 1 (component-level attribute) after canvas rebuild.
+    applyIconToCurrentShape();
+}
+
+function buildLayersPanel() {
+    layerPanelEl.innerHTML = '';
+
+    const header = document.createElement('div');
+    header.className = 'nr-panel-header';
+    const title = document.createElement('span');
+    title.className = 'nr-panel-title';
+    title.textContent = 'Layers';
+    header.appendChild(title);
+    layerPanelEl.appendChild(header);
+
+    const list = document.createElement('ul');
+    list.className = 'nr-layers-list';
+
+    const makeLayerAction = (icon: string, label: string, handler: () => void): HTMLButtonElement => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-layer-item-action';
+        btn.setAttribute('aria-label', label);
+        btn.innerHTML = icon;
+        btn.addEventListener('click', (e) => { e.stopPropagation(); handler(); });
+        return btn;
+    };
+
+    for (let i = 0; i < layers.length; i++) {
+        const layer = layers[i];
+        const li = document.createElement('li');
+        li.className = 'nr-layer-item' + (i === selectedLayerIndex ? ' nr-layer-item--selected' : '');
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'nr-layer-item-name';
+        nameSpan.textContent = layer.name;
+
+        const upBtn   = makeLayerAction(CDS_ICON_ARROW_UP,   `Move ${layer.name} up`,   () => onMoveLayerUp(i));
+        const downBtn = makeLayerAction(CDS_ICON_ARROW_DOWN, `Move ${layer.name} down`, () => onMoveLayerDown(i));
+        const dupBtn  = makeLayerAction(CDS_ICON_COPY,       `Duplicate ${layer.name}`, () => onDuplicateLayer(i));
+        const delBtn  = makeLayerAction(CDS_ICON_TRASH,      `Delete ${layer.name}`,    () => onDeleteLayer(i));
+        delBtn.classList.add('nr-layer-item-action--delete');
+
+        // Disable sort buttons at the boundaries
+        upBtn.disabled   = i === 0;
+        downBtn.disabled = i === layers.length - 1;
+
+        li.appendChild(nameSpan);
+        li.appendChild(upBtn);
+        li.appendChild(downBtn);
+        li.appendChild(dupBtn);
+        li.appendChild(delBtn);
+
+        li.addEventListener('click', () => {
+            selectedLayerIndex = i;
+            buildLayersPanel();
+            syncInspectorToLayer(i);
+            currentShape   = layerShapes[i]   ?? null;
+            currentShape2D = layerShapes2D[i] ?? null;
+        });
+
+        list.appendChild(li);
+    }
+
+    layerPanelEl.appendChild(list);
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'nr-layers-add-btn';
+    addBtn.textContent = '+ Add Layer';
+    addBtn.addEventListener('click', onAddLayer);
+    layerPanelEl.appendChild(addBtn);
+}
+
+function syncInspectorToLayer(index: number) {
+    const layer = layers[index];
+    if (!layer) return;
+
+    selectedBaseShape = layer.baseShape;
+
+    // Complex shape sliders always operate in pixels.
+    widthInput.value  = String(layer.width);
+    heightInput.value = String(layer.height);
+    depthInput.value  = String(layer.depth);
+    setSliderFill(widthInput);
+    setSliderFill(heightInput);
+    setSliderFill(depthInput);
+    if (widthValueEl)  widthValueEl.textContent  = `${Math.round(layer.width)} px`;
+    if (heightValueEl) heightValueEl.textContent = `${Math.round(layer.height)} px`;
+    if (depthValueEl)  depthValueEl.textContent  = `${Math.round(layer.depth)} px`;
+
+    if (offsetXInput)        { offsetXInput.value       = String(layer.offsetX);       setSliderFill(offsetXInput); }
+    if (offsetYInput)        { offsetYInput.value       = String(layer.offsetY);       setSliderFill(offsetYInput); }
+    if (baseElevationInput)  { baseElevationInput.value = String(layer.baseElevation); setSliderFill(baseElevationInput); }
+    if (offsetXValueEl)       offsetXValueEl.textContent       = `${Math.round(layer.offsetX)} px`;
+    if (offsetYValueEl)       offsetYValueEl.textContent       = `${Math.round(layer.offsetY)} px`;
+    if (baseElevationValueEl) baseElevationValueEl.textContent = `${Math.round(layer.baseElevation)} px`;
+
+    // Sync form factor radio buttons
+    inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
+        r.checked = r.value === layer.baseShape;
+    });
+
+    // Sync color picker
+    selectedStyle = {
+        topColor:    layer.style.topColor    ?? '',
+        sideColor:   layer.style.sideColor   ?? '',
+        frontColor:  layer.style.frontColor  ?? '',
+        strokeColor: layer.style.strokeColor ?? '',
+    };
+    const repColor = layer.style.topColor || layer.style.frontColor || layer.style.sideColor || '#e0e0e0';
+    if (colorPickerRef) colorPickerRef.value = repColor;
+
+    // Sync corner radius (may be overridden/hidden for SVG layers by updateDimensionLock)
+    const cr = layer.cornerRadius ?? 0;
+    selectedCornerRadius = cr;
+    if (cornerRadiusInput)   { cornerRadiusInput.value   = String(cr); setSliderFill(cornerRadiusInput); }
+    if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${cr} px`;
+
+    // SVG footprint section: clear any stale parse error, then refresh
+    svgParseError = '';
+    syncSvgFootprintSection();
+    updateDimensionLock();
+    syncAllSliderFills();
+}
+
+/** Called when offset/elevation sliders change */
+function onOffsetChange() {
+    if (!isComplexShape) return;
+    const layer = layers[selectedLayerIndex];
+    if (!layer) return;
+
+    // Sliders are in pixels in complex mode — no conversion needed.
+    layer.offsetX       = parseFloat(offsetXInput.value);
+    layer.offsetY       = parseFloat(offsetYInput.value);
+    layer.baseElevation = parseFloat(baseElevationInput.value);
+
+    if (offsetXValueEl)       offsetXValueEl.textContent       = `${Math.round(layer.offsetX)} px`;
+    if (offsetYValueEl)       offsetYValueEl.textContent       = `${Math.round(layer.offsetY)} px`;
+    if (baseElevationValueEl) baseElevationValueEl.textContent = `${Math.round(layer.baseElevation)} px`;
+
+    // Reposition the affected shape in-place (no full redraw needed)
+    const { x: bx, y: by } = layerBasePos();
+    const shape   = layerShapes[selectedLayerIndex];
+    const shape2D = layerShapes2D[selectedLayerIndex];
+    shape?.position(
+        bx - layer.width  / 2 + layer.offsetX - layer.baseElevation,
+        by - layer.height / 2 + layer.offsetY - layer.baseElevation
+    );
+    shape2D?.position(
+        bx - layer.width  / 2 + layer.offsetX,
+        by - layer.height / 2 + layer.offsetY
+    );
+}
+
+function onAddLayer() {
+    const newLayer: ShapeLayer = {
+        id:            `layer-${Date.now()}`,
+        name:          `Layer ${layers.length + 1}`,
+        baseShape:     'cuboid',
+        width:         2 * GRID_SIZE,
+        height:        2 * GRID_SIZE,
+        depth:         GRID_SIZE,
+        offsetX:       0,
+        offsetY:       0,
+        baseElevation: 0,
+        style:         {},
+        cornerRadius:  0,
+    };
+    layers.push(newLayer);
+    selectedLayerIndex = layers.length - 1;
+    renderLayersOnCanvas();
+    buildLayersPanel();
+    syncInspectorToLayer(selectedLayerIndex);
+}
+
+function onDeleteLayer(index: number) {
+    if (layers.length <= 1) return; // always keep at least one layer
+    layers.splice(index, 1);
+    if (selectedLayerIndex >= layers.length) selectedLayerIndex = layers.length - 1;
+    renderLayersOnCanvas();
+    buildLayersPanel();
+    syncInspectorToLayer(selectedLayerIndex);
+}
+
+function onMoveLayerUp(index: number) {
+    if (index <= 0) return;
+    [layers[index - 1], layers[index]] = [layers[index], layers[index - 1]];
+    if (selectedLayerIndex === index) selectedLayerIndex = index - 1;
+    else if (selectedLayerIndex === index - 1) selectedLayerIndex = index;
+    renderLayersOnCanvas();
+    buildLayersPanel();
+    syncInspectorToLayer(selectedLayerIndex);
+}
+
+function onMoveLayerDown(index: number) {
+    if (index >= layers.length - 1) return;
+    [layers[index], layers[index + 1]] = [layers[index + 1], layers[index]];
+    if (selectedLayerIndex === index) selectedLayerIndex = index + 1;
+    else if (selectedLayerIndex === index + 1) selectedLayerIndex = index;
+    renderLayersOnCanvas();
+    buildLayersPanel();
+    syncInspectorToLayer(selectedLayerIndex);
+}
+
+function onDuplicateLayer(index: number) {
+    const source = layers[index];
+    const copy: ShapeLayer = {
+        ...source,
+        id:   `layer-${Date.now()}`,
+        name: `${source.name} Copy`,
+        style: { ...source.style },
+    };
+    layers.splice(index + 1, 0, copy);
+    selectedLayerIndex = index + 1;
+    renderLayersOnCanvas();
+    buildLayersPanel();
+    syncInspectorToLayer(selectedLayerIndex);
+}
+
+/**
+ * Switch slider ranges between GU mode (simple shapes) and pixel mode (complex shapes).
+ * Must be called before syncInspectorToLayer / syncFormFromShape so that the slider
+ * min/max/step are correct when values are written.
+ */
+function updateSliderRangesForComplexMode(enabled: boolean) {
+    if (!widthInput || !heightInput || !depthInput) return;
+    if (enabled) {
+        widthInput.min  = '1';   widthInput.max  = '160'; widthInput.step = '1';
+        heightInput.min = '1';   heightInput.max = '160'; heightInput.step = '1';
+        depthInput.min  = '0';   depthInput.max  = '160'; depthInput.step = '1';
+        if (offsetXInput) {
+            offsetXInput.min  = '-160'; offsetXInput.max  = '160'; offsetXInput.step = '1';
+        }
+        if (offsetYInput) {
+            offsetYInput.min  = '-160'; offsetYInput.max  = '160'; offsetYInput.step = '1';
+        }
+        if (baseElevationInput) {
+            baseElevationInput.min  = '0'; baseElevationInput.max  = '320'; baseElevationInput.step = '1';
+        }
+    } else {
+        widthInput.min  = '0.5'; widthInput.max  = '8'; widthInput.step = '0.5';
+        heightInput.min = '0.5'; heightInput.max = '8'; heightInput.step = '0.5';
+        depthInput.min  = '0';   depthInput.max  = '8'; depthInput.step = '0.5';
+    }
+}
+
+function onComplexShapeToggle(enabled: boolean) {
+    if (enabled) {
+        // Read current single-shape dimensions from sliders (still in GU at this point)
+        const wGU = parseFloat(widthInput?.value  ?? '2');
+        const hGU = parseFloat(heightInput?.value ?? '2');
+        const dGU = parseFloat(depthInput?.value  ?? '1');
+        const w = (isNaN(wGU) ? 2 : wGU) * GRID_SIZE;
+        const h = (isNaN(hGU) ? 2 : hGU) * GRID_SIZE;
+        const d = (isNaN(dGU) ? 1 : dGU) * GRID_SIZE;
+
+        isComplexShape     = true;
+        selectedLayerIndex = 0;
+        layerShapes        = [];
+        layerShapes2D      = [];
+        layers = [{
+            id:            'layer-1',
+            name:          'Layer 1',
+            baseShape:     selectedBaseShape,
+            width:         w,
+            height:        h,
+            depth:         d,
+            offsetX:       0,
+            offsetY:       0,
+            baseElevation: 0,
+            style:         { ...selectedStyle },
+            cornerRadius:  selectedCornerRadius,
+        }];
+
+        paper.removeTools();
+        graph.clear();
+        graph2D.clear();
+        currentShape   = null;
+        currentShape2D = null;
+
+        updateSliderRangesForComplexMode(true);
+        renderLayersOnCanvas();
+        buildLayersPanel();
+        showLayersPanel();
+        if (positionAccordionLi)     positionAccordionLi.style.display     = '';
+        if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = '';
+        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = '';
+        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = '';
+        updateAdaptiveToggleVisibility();
+        syncInspectorToLayer(0);
+    } else {
+        // Revert to simple shape; restore Layer 1's properties to the sliders
+        const layer1       = layers[0];
+        isComplexShape     = false;
+        layers             = [];
+        layerShapes        = [];
+        layerShapes2D      = [];
+        selectedLayerIndex = 0;
+
+        updateSliderRangesForComplexMode(false);
+
+        if (layer1) {
+            selectedBaseShape = layer1.baseShape;
+            selectedStyle = {
+                topColor:    layer1.style.topColor    ?? '',
+                sideColor:   layer1.style.sideColor   ?? '',
+                frontColor:  layer1.style.frontColor  ?? '',
+                strokeColor: layer1.style.strokeColor ?? '',
+            };
+        }
+
+        hideLayersPanel();
+        if (positionAccordionLi)     positionAccordionLi.style.display     = 'none';
+        if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = 'none';
+        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = 'none';
+        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = 'none';
+        updateAdaptiveToggleVisibility();
+
+        // Rebuild the single-shape preview using Layer 1's dimensions
+        const initWidth  = layer1?.width  ?? 2 * GRID_SIZE;
+        const initHeight = layer1?.height ?? 2 * GRID_SIZE;
+        const initDepth  = layer1?.depth  ?? GRID_SIZE;
+
+        paper.removeTools();
+        graph.clear();
+        graph2D.clear();
+
+        const factory = getPreviewFactory(currentShapeId, selectedBaseShape);
+        if (!factory) return;
+
+        const gridPx = CD_GRID_COUNT * GRID_SIZE;
+        const posX = (gridPx - initWidth)  / 2;
+        const posY = (gridPx - initHeight) / 2;
+
+        const shape = factory();
+        shape.resize(initWidth, initHeight);
+        shape.set('isometricHeight',        initDepth);
+        shape.set('defaultIsometricHeight', initDepth);
+        shape.set('defaultSize',            { width: initWidth, height: initHeight });
+        shape.position(posX, posY);
+        shape.toggleView(View.Isometric);
+        graph.addCell(shape);
+        shape.addTools(paper, View.Isometric);
+        currentShape = shape;
+
+        const shape2D = factory();
+        shape2D.resize(initWidth, initHeight);
+        shape2D.set('isometricHeight',        initDepth);
+        shape2D.set('defaultIsometricHeight', initDepth);
+        shape2D.set('defaultSize',            { width: initWidth, height: initHeight });
+        shape2D.position(posX, posY);
+        shape2D.toggleView(View.TwoDimensional);
+        graph2D.addCell(shape2D);
+        currentShape2D = shape2D;
+
+        // Sync sliders back to Layer 1's values
+        syncFormFromShape(shape);
+
+        // Sync style
+        if (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || selectedStyle.strokeColor) {
+            applyShapeStyle(shape,   selectedStyle);
+            applyShapeStyle(shape2D, selectedStyle);
+        }
+        if (colorPickerRef) {
+            colorPickerRef.value = selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || '#e0e0e0';
+        }
+
+        // Sync corner radius from Layer 1
+        if (layer1?.cornerRadius !== undefined) {
+            selectedCornerRadius = layer1.cornerRadius;
+            if (cornerRadiusInput)   cornerRadiusInput.value   = String(selectedCornerRadius);
+            if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${selectedCornerRadius} px`;
+        }
+        applyCornerRadiusToCurrentShape();
+
+        // Sync form factor radio buttons
+        inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
+            r.checked = r.value === selectedBaseShape;
+        });
+        updateDimensionLock();
+
+        applyIconToCurrentShape();
+        svgParseError = '';
+        syncSvgFootprintSection(); // hides the section now that isComplexShape is false
+    }
+}
 
 // ── Shape selector (palette panel) ────────────────────────────────────────────
 
@@ -1697,81 +2737,128 @@ function loadShapeIntoCanvas(id: string) {
     paper.removeTools();
     graph.clear();
     graph2D.clear();
+    currentShape   = null;
+    currentShape2D = null;
+    layerShapes    = [];
+    layerShapes2D  = [];
     currentZoom = 1;
     // Reset the paper matrix so the viewport always returns to the centred baseline.
     paper.matrix(transformationMatrix(View.Isometric, CD_MARGIN, SIDEBAR_INSET, CD_GRID_COUNT));
 
-    const savedBaseShape = ShapeRegistry[id]?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid';
-    const factory = getPreviewFactory(id, savedBaseShape);
-    if (!factory) return;
-
-    // Load saved dimensions from registry; fall back to 2×2×2 GU for new shapes.
-    const FALLBACK_GU = 2 * GRID_SIZE;
     const savedDefaults = ShapeRegistry[id];
-    const initWidth  = savedDefaults?.defaultSize?.width              ?? FALLBACK_GU;
-    const initHeight = savedDefaults?.defaultSize?.height             ?? FALLBACK_GU;
-    const initDepth  = savedDefaults?.defaultIsometricHeight          ?? FALLBACK_GU;
-
-    // Centre the shape on the 10×10 GU canvas regardless of its size.
-    const gridPx = CD_GRID_COUNT * GRID_SIZE;
-    const posX = (gridPx - initWidth)  / 2;
-    const posY = (gridPx - initHeight) / 2;
-
-    const shape = factory();
-    shape.resize(initWidth, initHeight);
-    shape.set('isometricHeight',        initDepth);
-    shape.set('defaultIsometricHeight', initDepth);
-    shape.set('defaultSize',            { width: initWidth, height: initHeight });
-    shape.position(posX, posY);
-    shape.toggleView(View.Isometric);
-    graph.addCell(shape);
-    shape.addTools(paper, View.Isometric);
-    currentShape = shape;
-
-    const shape2D = factory();
-    shape2D.resize(initWidth, initHeight);
-    shape2D.set('isometricHeight',        initDepth);
-    shape2D.set('defaultIsometricHeight', initDepth);
-    shape2D.set('defaultSize',            { width: initWidth, height: initHeight });
-    shape2D.position(posX, posY);
-    shape2D.toggleView(View.TwoDimensional);
-    graph2D.addCell(shape2D);
-    currentShape2D = shape2D;
-
-    const displayName = ShapeRegistry[id]?.displayName ?? formatLabel(id);
-    shape.attr('label/text', displayName);
-    shape2D.attr('label/text', displayName);
+    const displayName   = savedDefaults?.displayName ?? formatLabel(id);
     if (shapeNameInput) shapeNameInput.value = displayName;
 
-    syncFormFromShape(shape);   // sets widthInput / heightInput
-    syncExtrasFromShape(id);    // sets selectedBaseShape, selectedStyle, then calls updateDimensionLock
+    // Restore icon/style/baseShape fields (common to both simple and complex paths)
+    syncExtrasFromShape(id);
 
-    // Apply saved colors to the preview shapes. Must come after syncExtrasFromShape
-    // has populated selectedStyle from the registry.
-    if (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || selectedStyle.strokeColor) {
-        applyShapeStyle(shape,   selectedStyle);
-        applyShapeStyle(shape2D, selectedStyle);
-    }
+    // Sync the complex toggle state in the inspector (it persists across palette switches)
+    // #sd-complex-toggle is now a <button> inside an .nr-toggle wrapper div.
+    const complexToggleBtn = inspectorEl.querySelector<HTMLButtonElement>('#sd-complex-toggle');
+    const complexToggleDiv = complexToggleBtn?.closest<HTMLElement>('.nr-toggle') ?? null;
 
-    // Reset icon page and corner radius/chamfer for each new shape load.
-    iconPage = 0;
     selectedCornerRadius = 0;
-    if (cornerRadiusInput)   cornerRadiusInput.value = '0';
-    if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = '0 px';
-    applyCornerRadiusToCurrentShape();
+    selectedChamferSize  = 0;
 
-    selectedChamferSize = 0;
-    if (chamferSizeInput)   chamferSizeInput.value = '0';
-    if (chamferSizeValueEl) chamferSizeValueEl.textContent = '0 px';
-    applyChamferSizeToCurrentShape();
-    applyIconToCurrentShape();
+    if (savedDefaults?.complexShape && savedDefaults.layers?.length) {
+        // ── Complex shape path ─────────────────────────────────────────────────
+        isComplexShape     = true;
+        layers             = savedDefaults.layers.map(l => ({ ...l }));
+        selectedLayerIndex = 0;
 
+        if (complexToggleDiv) complexToggleDiv.classList.add('nr-toggle--checked');
+        if (complexToggleBtn) complexToggleBtn.setAttribute('aria-checked', 'true');
+        if (positionAccordionLi)     positionAccordionLi.style.display     = '';
+        if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = '';
+        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = '';
+        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = '';
+
+        updateSliderRangesForComplexMode(true);
+        renderLayersOnCanvas();
+        // Label lives only on Layer 1 (layerShapes[0]); other layers stay unlabelled.
+        layerShapes[0]?.attr('label/text', displayName);
+        layerShapes2D[0]?.attr('label/text', displayName);
+        buildLayersPanel();
+        showLayersPanel();
+        syncInspectorToLayer(0);
+    } else {
+        // ── Simple shape path (original logic) ────────────────────────────────
+        isComplexShape     = false;
+        layers             = [];
+
+        updateSliderRangesForComplexMode(false);
+        if (complexToggleDiv) complexToggleDiv.classList.remove('nr-toggle--checked');
+        if (complexToggleBtn) complexToggleBtn.setAttribute('aria-checked', 'false');
+        if (positionAccordionLi)     positionAccordionLi.style.display     = 'none';
+        if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = 'none';
+        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = 'none';
+        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = 'none';
+        updateAdaptiveToggleVisibility();
+        hideLayersPanel();
+
+        const savedBaseShape = savedDefaults?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid';
+        const factory = getPreviewFactory(id, savedBaseShape);
+        if (!factory) return;
+
+        const FALLBACK_GU = 2 * GRID_SIZE;
+        const initWidth  = savedDefaults?.defaultSize?.width     ?? FALLBACK_GU;
+        const initHeight = savedDefaults?.defaultSize?.height    ?? FALLBACK_GU;
+        const initDepth  = savedDefaults?.defaultIsometricHeight ?? FALLBACK_GU;
+
+        const gridPx = CD_GRID_COUNT * GRID_SIZE;
+        const posX = (gridPx - initWidth)  / 2;
+        const posY = (gridPx - initHeight) / 2;
+
+        const shape = factory();
+        shape.resize(initWidth, initHeight);
+        shape.set('isometricHeight',        initDepth);
+        shape.set('defaultIsometricHeight', initDepth);
+        shape.set('defaultSize',            { width: initWidth, height: initHeight });
+        shape.position(posX, posY);
+        shape.toggleView(View.Isometric);
+        graph.addCell(shape);
+        shape.addTools(paper, View.Isometric);
+        currentShape = shape;
+
+        const shape2D = factory();
+        shape2D.resize(initWidth, initHeight);
+        shape2D.set('isometricHeight',        initDepth);
+        shape2D.set('defaultIsometricHeight', initDepth);
+        shape2D.set('defaultSize',            { width: initWidth, height: initHeight });
+        shape2D.position(posX, posY);
+        shape2D.toggleView(View.TwoDimensional);
+        graph2D.addCell(shape2D);
+        currentShape2D = shape2D;
+
+        shape.attr('label/text', displayName);
+        shape2D.attr('label/text', displayName);
+
+        syncFormFromShape(shape);
+
+        if (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || selectedStyle.strokeColor) {
+            applyShapeStyle(shape,   selectedStyle);
+            applyShapeStyle(shape2D, selectedStyle);
+        }
+
+        if (cornerRadiusInput)   cornerRadiusInput.value   = '0';
+        if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = '0 px';
+        applyCornerRadiusToCurrentShape();
+
+        if (chamferSizeInput)   chamferSizeInput.value   = '0';
+        if (chamferSizeValueEl) chamferSizeValueEl.textContent = '0 px';
+        applyChamferSizeToCurrentShape();
+
+        applyIconToCurrentShape();
+    }
 }
 
 // ── Paper element events ───────────────────────────────────────────────────────
 
 // Re-attach tools if the user clicks the shape after panning the canvas.
+// In complex shape mode, canvas shapes are not individually selectable —
+// layer selection is managed exclusively through the Layers panel.
 paper.on('element:pointerup', (elementView: dia.ElementView) => {
+    if (isComplexShape) return;
     paper.removeTools();
     const shape = elementView.model as IsometricShape;
     shape.addTools(paper, View.Isometric);

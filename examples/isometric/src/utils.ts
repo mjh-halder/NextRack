@@ -2,7 +2,9 @@ import { V, dia } from '@joint/core';
 import IsometricShape, { View } from './shapes/isometric-shape';
 import { GRID_COUNT, GRID_SIZE, SCALE, ISOMETRIC_SCALE, ROTATION_DEGREES } from './theme';
 import { Link } from './shapes';
-import type { ShapeStyle, ShapeDefaults } from './shapes/shape-registry';
+import type { ShapeStyle, ShapeDefaults, ShapeLayer } from './shapes/shape-registry';
+import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
+import { FORM_FACTOR_PREVIEWS } from './shapes/shape-factories';
 
 export const transformationMatrix = (view: View = View.Isometric, margin: number = 20, leftInset: number = 0, gridCount: number = GRID_COUNT) => {
     let matrix = V.createSVGMatrix().translate(margin + leftInset, margin);
@@ -256,6 +258,54 @@ export function applyRegistryDefaults(
             topIcon2D: { href: '', width: 0, height: 0 },
         });
     }
+}
+
+/**
+ * Build the shape stack for a complex component.
+ * Each ShapeLayer becomes its own IsometricShape, positioned relative to (baseX, baseY)
+ * which is the top-left of Layer 0. Returns shapes in layer order (index 0 = base).
+ * Geometry, dimensions, style, and positioning are applied; label/icon/meta are left
+ * for the caller so it can apply them to Layer 0 only.
+ */
+export function createComplexLayers(
+    layers: ShapeLayer[],
+    baseX: number,
+    baseY: number,
+    view: View
+): IsometricShape[] {
+    if (layers.length === 0) return [];
+    const baseLayer = layers[0];
+    const bx = baseX + baseLayer.width  / 2;
+    const by = baseY + baseLayer.height / 2;
+
+    const shapes: IsometricShape[] = [];
+    for (const layer of layers) {
+        const isSvg = !!(layer.svgNormVerts && layer.svgNormVerts.length >= 3);
+        const shape: IsometricShape = isSvg
+            ? new SvgPolygonShape()
+            : (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['cuboid'])();
+        if (isSvg && layer.svgNormVerts) {
+            (shape as SvgPolygonShape).set('normalizedVerts', layer.svgNormVerts);
+        }
+        shape.resize(layer.width, layer.height);
+        shape.set('isometricHeight',        layer.depth);
+        shape.set('defaultIsometricHeight', layer.depth);
+        shape.set('defaultSize',            { width: layer.width, height: layer.height });
+        if (layer.cornerRadius !== undefined) shape.set('cornerRadius', layer.cornerRadius);
+
+        const elev = view === View.Isometric ? layer.baseElevation : 0;
+        shape.position(
+            bx - layer.width  / 2 + layer.offsetX - elev,
+            by - layer.height / 2 + layer.offsetY - elev
+        );
+        shape.toggleView(view);
+
+        if (layer.style.topColor || layer.style.frontColor || layer.style.sideColor || layer.style.strokeColor) {
+            applyShapeStyle(shape, layer.style);
+        }
+        shapes.push(shape);
+    }
+    return shapes;
 }
 
 export const switchView = (paper: dia.Paper, view: View, selectedCell: IsometricShape | Link, leftInset: number = 0, gridCount: number = GRID_COUNT) => {

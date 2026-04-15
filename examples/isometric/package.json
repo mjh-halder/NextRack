@@ -17,6 +17,7 @@
     "tsc": "tsc"
   },
   "dependencies": {
+    "@carbon/icons": "^11.78.0",
     "@carbon/styles": "^1.104.0",
     "@joint/core": "workspace:^",
     "@joint/decorators": "workspace:^"

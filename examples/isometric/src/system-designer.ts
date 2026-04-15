@@ -667,61 +667,6 @@ function showAdjustGridModal() {
     xInput.select();
 }
 
-// ---- Menu Popup ----
-
-function showMenuPopup(anchor: HTMLElement) {
-    // Toggle: if popup is already open, close it
-    const existing = document.querySelector('.cds--overflow-menu-options');
-    if (existing) { existing.remove(); return; }
-
-    // Carbon OverflowMenu options panel — position: fixed overrides Carbon's default absolute
-    const popup = document.createElement('div');
-    popup.className = 'cds--overflow-menu-options cds--overflow-menu-options--open';
-    popup.setAttribute('role', 'menu');
-    const rect = anchor.getBoundingClientRect();
-    popup.style.cssText = `position:fixed;top:${rect.bottom}px;left:${rect.left}px;z-index:6000;`;
-
-    const list = document.createElement('ul');
-    list.className = 'cds--overflow-menu-options__content';
-
-    const items: Array<{ label: string; onClick: () => void }> = [
-        { label: 'New Design', onClick: () => { popup.remove(); showNewDesignModal(); } },
-        { label: 'Save',       onClick: () => { popup.remove(); saveGraph(graph); } },
-        { label: 'Load',       onClick: () => {
-            popup.remove();
-            loadGraph(graph, () => {
-                paper.removeTools();
-                currentCell = null;
-                panel.hide();
-                switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
-            });
-        }},
-    ];
-
-    for (const item of items) {
-        const li = document.createElement('li');
-        li.className = 'cds--overflow-menu-options__option';
-        const btn = document.createElement('button');
-        btn.className = 'cds--overflow-menu-options__btn';
-        btn.type = 'button';
-        btn.setAttribute('role', 'menuitem');
-        btn.textContent = item.label;
-        btn.addEventListener('click', item.onClick);
-        li.appendChild(btn);
-        list.appendChild(li);
-    }
-
-    popup.appendChild(list);
-    document.body.appendChild(popup);
-
-    const dismissOnOutsideClick = (e: MouseEvent) => {
-        if (!popup.contains(e.target as Node) && e.target !== anchor) {
-            popup.remove();
-            document.removeEventListener('mousedown', dismissOnOutsideClick, true);
-        }
-    };
-    document.addEventListener('mousedown', dismissOnOutsideClick, true);
-}
 
 // Apply or remove the Carbon-blue edge highlight that syncs tree ↔ canvas selection.
 function setTreeHighlight(cell: IsometricShape | null) {
@@ -756,7 +701,7 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
     if (currentView === View.Isometric) {
         sortElements(graph);
     }
-}, showMenuPopup, (cellId: string) => {
+}, (cellId: string) => {
     // Tree item clicked — select the element on the canvas
     const cell = graph.getCell(cellId);
     if (!cell || !(cell instanceof IsometricShape) || cell.get('isFrame')) return;
@@ -769,22 +714,40 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
 
 // Zone assignment helpers
 
+/** Collects IDs of all cells recursively embedded within element (any depth). */
+function getEmbeddedDeep(element: IsometricShape): Set<string> {
+    const ids = new Set<string>();
+    const visit = (el: dia.Element) => {
+        for (const child of el.getEmbeddedCells()) {
+            ids.add(String(child.id));
+            if (!child.isLink()) visit(child as dia.Element);
+        }
+    };
+    visit(element);
+    return ids;
+}
+
 /**
- * Returns the topmost Frame whose bounding box contains the element's center.
- * Within the same z-level (all frames default to z:-1), the most recently
- * inserted cell in the graph wins — matching the visual stacking order.
+ * Returns the innermost Frame whose bounding box contains the element's center,
+ * excluding the element itself and any of its embedded descendants (prevents
+ * circular embedding). "Innermost" means the smallest-area containing frame.
  */
 function findTopmostContainingFrame(element: IsometricShape): Frame | null {
     const center = element.getBBox().center();
-    const cells = graph.getCells();
+    const excludeIds = getEmbeddedDeep(element);
     const containing = graph.getElements()
-        .filter(e => e.get('isFrame') && e.getBBox().containsPoint(center)) as Frame[];
+        .filter(e =>
+            e !== element &&
+            !excludeIds.has(String(e.id)) &&
+            e.get('isFrame') &&
+            e.getBBox().containsPoint(center)
+        ) as Frame[];
     if (containing.length === 0) return null;
+    // Smallest area = innermost (most specific) zone
     containing.sort((a, b) => {
-        const za = (a.get('z') as number) ?? 0;
-        const zb = (b.get('z') as number) ?? 0;
-        if (za !== zb) return zb - za;                        // higher z wins
-        return cells.indexOf(b) - cells.indexOf(a);           // later insertion wins
+        const aBox = a.getBBox();
+        const bBox = b.getBBox();
+        return (aBox.width * aBox.height) - (bBox.width * bBox.height);
     });
     return containing[0];
 }
@@ -819,6 +782,7 @@ paper.on('element:pointerup', (elementView: dia.ElementView) => {
     const model = elementView.model;
     paper.removeTools();
     if (model.get('isFrame')) {
+        updateZoneAssignment(model as Frame);
         (model as Frame).addTools(paper, currentView);
         currentCell = null;
         currentFrame = model as Frame;
@@ -911,6 +875,9 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
         case 'view-fit':
             currentZoom = 1;
             switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
+            break;
+        case 'view-center':
+            centerGridInViewport(currentGridCountX, currentGridCountY);
             break;
         case 'view-toggle-grid':
             gridVisible = !gridVisible;

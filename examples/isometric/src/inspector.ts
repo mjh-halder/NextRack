@@ -1,6 +1,22 @@
 import { dia } from '@joint/core';
 import IsometricShape from './shapes/isometric-shape';
 import { ShapeRegistry } from './shapes/shape-registry';
+import { PRIMARY_COLORS } from './colors';
+const DEFAULT_ZONE_COLOR = '#0072c3';
+
+function hexToRgba(hex: string, alpha: number): string {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+const LABEL_POSITIONS: Record<string, { x: string | number; y: string | number; textAnchor: string }> = {
+    'top-left':     { x: 8,              y: 16,             textAnchor: 'start' },
+    'top-right':    { x: 'calc(w - 8)',  y: 16,             textAnchor: 'end'   },
+    'bottom-left':  { x: 8,              y: 'calc(h - 6)',  textAnchor: 'start' },
+    'bottom-right': { x: 'calc(w - 8)', y: 'calc(h - 6)', textAnchor: 'end'   },
+};
 
 // --- Node metadata ---
 
@@ -42,6 +58,14 @@ const LINK_FIELDS: { key: keyof LinkMeta; label: string; placeholder: string }[]
     { key: 'encryption', label: 'Encryption', placeholder: 'e.g. TLS'     },
 ];
 
+// --- Label position picker ---
+
+interface LabelPositionPicker {
+    row: HTMLElement;
+    getValue(): string;
+    setValue(pos: string): void;
+}
+
 // --- Panel ---
 
 export interface PanelActions {
@@ -70,6 +94,9 @@ export class PropertyPanel {
     private nodeLabelHiddenEl!: HTMLInputElement;
     private zoneNameInput!: HTMLInputElement;
     private zoneLabelHiddenEl!: HTMLInputElement;
+    private zoneColorSwatchBtns: Array<{ btn: HTMLButtonElement; color: string }> = [];
+    private selectedZoneColor = DEFAULT_ZONE_COLOR;
+    private zoneLabelPosPicker!: LabelPositionPicker;
     private linkInputs = {} as Record<keyof LinkMeta, HTMLInputElement>;
 
     constructor(el: HTMLElement, private actions: PanelActions) {
@@ -103,16 +130,28 @@ export class PropertyPanel {
         // ---- Zone section ----
         this.zoneSection = document.createElement('div');
         this.zoneSection.className = 'inspector-section';
+
         const { row: zoneNameRow, input: zoneNameInput } = this.buildRow(
             'zone-name', 'Zone Name', 'Zone Name'
         );
         this.zoneNameInput = zoneNameInput as HTMLInputElement;
         this.zoneSection.appendChild(zoneNameRow);
+
+        // Hide label — appears directly after Zone Name
         const { row: zoneLabelRow, input: zoneLabelInput } = this.buildCheckboxRow(
             'zone-label-hidden', 'Hide label'
         );
         this.zoneLabelHiddenEl = zoneLabelInput;
         this.zoneSection.appendChild(zoneLabelRow);
+
+        // Label position — hidden when Hide label is checked
+        this.zoneLabelPosPicker = this.buildLabelPositionRow();
+        this.zoneSection.appendChild(this.zoneLabelPosPicker.row);
+        this.zoneLabelHiddenEl.addEventListener('change', () => {
+            this.zoneLabelPosPicker.row.style.display = this.zoneLabelHiddenEl.checked ? 'none' : '';
+        });
+
+        this.zoneSection.appendChild(this.buildZoneColorRow());
         this.el.appendChild(this.zoneSection);
 
         // ---- Link section ----
@@ -127,28 +166,24 @@ export class PropertyPanel {
         }
         this.el.appendChild(this.linkSection);
 
-        // Save button
-        const saveBar = document.createElement('div');
-        saveBar.className = 'inspector-save-bar';
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'inspector-action-btn inspector-btn-primary';
-        saveBtn.textContent = 'Save';
-        saveBtn.addEventListener('click', () => this.save());
-        saveBar.appendChild(saveBtn);
-        this.el.appendChild(saveBar);
-
-        // Secondary action buttons
+        // Action buttons — stacked vertically with uniform spacing
         const actionsEl = document.createElement('div');
         actionsEl.className = 'inspector-actions';
 
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+        saveBtn.textContent = 'Save';
+        saveBtn.addEventListener('click', () => this.save());
+        actionsEl.appendChild(saveBtn);
+
         this.duplicateBtn = document.createElement('button');
-        this.duplicateBtn.className = 'inspector-action-btn inspector-btn-secondary';
+        this.duplicateBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
         this.duplicateBtn.textContent = 'Duplicate';
         this.duplicateBtn.addEventListener('click', () => this.actions.onDuplicate());
         actionsEl.appendChild(this.duplicateBtn);
 
         this.duplicateZoneBtn = document.createElement('button');
-        this.duplicateZoneBtn.className = 'inspector-action-btn inspector-btn-secondary';
+        this.duplicateZoneBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
         this.duplicateZoneBtn.textContent = 'Duplicate Zone';
         this.duplicateZoneBtn.addEventListener('click', () => {
             if (this.currentZone) this.actions.onDuplicateZone(this.currentZone);
@@ -156,12 +191,113 @@ export class PropertyPanel {
         actionsEl.appendChild(this.duplicateZoneBtn);
 
         this.deleteBtn = document.createElement('button');
-        this.deleteBtn.className = 'inspector-action-btn inspector-btn-danger';
+        this.deleteBtn.className = 'cds--btn cds--btn--danger--tertiary cds--btn--sm';
         this.deleteBtn.textContent = 'Delete';
         this.deleteBtn.addEventListener('click', () => this.actions.onDelete());
         actionsEl.appendChild(this.deleteBtn);
 
         this.el.appendChild(actionsEl);
+    }
+
+    private buildZoneColorRow(): HTMLElement {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'inspector-row';
+
+        const label = document.createElement('label');
+        label.className = 'cds--label';
+        label.textContent = 'Color';
+        wrapper.appendChild(label);
+
+        const swatchRow = document.createElement('div');
+        swatchRow.className = 'nr-inspector-swatch-row';
+
+        this.zoneColorSwatchBtns = [];
+        for (const color of PRIMARY_COLORS.filter(c => c.base !== '#161616')) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.title = color.label;
+            btn.setAttribute('aria-label', color.label);
+            btn.setAttribute('aria-pressed', 'false');
+            btn.className = 'nr-inspector-swatch-btn';
+            btn.style.setProperty('--swatch-color', color.base);
+            btn.addEventListener('click', () => {
+                this.selectedZoneColor = color.base;
+                this.syncZoneColorSwatches();
+            });
+            swatchRow.appendChild(btn);
+            this.zoneColorSwatchBtns.push({ btn, color: color.base });
+        }
+
+        wrapper.appendChild(swatchRow);
+        return wrapper;
+    }
+
+    private syncZoneColorSwatches() {
+        for (const { btn, color } of this.zoneColorSwatchBtns) {
+            const selected = color === this.selectedZoneColor;
+            btn.classList.toggle('nr-inspector-swatch-btn--selected', selected);
+            btn.setAttribute('aria-pressed', String(selected));
+        }
+    }
+
+    private buildLabelPositionRow(): LabelPositionPicker {
+        const POSITIONS = [
+            { key: 'top-left',     label: 'Top left',     dot: 'tl' },
+            { key: 'top-right',    label: 'Top right',    dot: 'tr' },
+            { key: 'bottom-left',  label: 'Bottom left',  dot: 'bl' },
+            { key: 'bottom-right', label: 'Bottom right', dot: 'br' },
+        ];
+
+        const row = document.createElement('div');
+        row.className = 'inspector-row';
+
+        const label = document.createElement('label');
+        label.textContent = 'Label Position';
+        row.appendChild(label);
+
+        const picker = document.createElement('div');
+        picker.className = 'nr-pos-picker';
+        picker.setAttribute('role', 'group');
+        picker.setAttribute('aria-label', 'Label position');
+
+        let selectedKey = 'top-left';
+        const entries: Array<{ btn: HTMLButtonElement; key: string }> = [];
+
+        const sync = () => {
+            for (const { btn, key } of entries) {
+                const on = key === selectedKey;
+                btn.classList.toggle('nr-pos-btn--selected', on);
+                btn.setAttribute('aria-pressed', String(on));
+            }
+        };
+
+        for (const pos of POSITIONS) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'nr-pos-btn';
+            btn.setAttribute('aria-label', pos.label);
+            btn.setAttribute('aria-pressed', 'false');
+
+            const dot = document.createElement('span');
+            dot.className = `nr-pos-dot nr-pos-dot--${pos.dot}`;
+            btn.appendChild(dot);
+
+            btn.addEventListener('click', () => { selectedKey = pos.key; sync(); });
+            picker.appendChild(btn);
+            entries.push({ btn, key: pos.key });
+        }
+
+        row.appendChild(picker);
+        sync();
+
+        return {
+            row,
+            getValue: () => selectedKey,
+            setValue: (pos: string) => {
+                selectedKey = POSITIONS.some(p => p.key === pos) ? pos : 'top-left';
+                sync();
+            },
+        };
     }
 
     private buildRow(id: string, labelText: string, placeholder: string, multiline = false) {
@@ -246,6 +382,21 @@ export class PropertyPanel {
         const name = this.zoneNameInput.value.trim();
         this.currentZone.attr('label/text', name || 'Zone');
         this.currentZone.attr('label/display', this.zoneLabelHiddenEl.checked ? 'none' : null);
+
+        // Apply color
+        const color = this.selectedZoneColor;
+        this.currentZone.set('zoneColor', color);
+        this.currentZone.attr('body/stroke', color);
+        this.currentZone.attr('body/fill', hexToRgba(color, 0.08));
+        this.currentZone.attr('label/fill', color);
+
+        // Apply label position
+        const selectedPos = this.zoneLabelPosPicker.getValue();
+        this.currentZone.set('zoneLabelPosition', selectedPos);
+        const pos = LABEL_POSITIONS[selectedPos];
+        this.currentZone.attr('label/x', pos.x);
+        this.currentZone.attr('label/y', pos.y);
+        this.currentZone.attr('label/text-anchor', pos.textAnchor);
     }
 
     private saveLink() {
@@ -284,13 +435,22 @@ export class PropertyPanel {
         this.currentLink = null;
         this.zoneNameInput.value = (frame.attr('label/text') as string | undefined) ?? '';
         this.zoneLabelHiddenEl.checked = frame.attr('label/display') === 'none';
+
+        // Restore saved color (fall back to default if never set)
+        this.selectedZoneColor = (frame.get('zoneColor') as string | undefined) ?? DEFAULT_ZONE_COLOR;
+        this.syncZoneColorSwatches();
+
+        // Restore label position and sync its visibility with the hide-label state
+        this.zoneLabelPosPicker.setValue((frame.get('zoneLabelPosition') as string | undefined) ?? 'top-left');
+        this.zoneLabelPosPicker.row.style.display = this.zoneLabelHiddenEl.checked ? 'none' : '';
+
         this.titleEl.textContent = 'Zone Properties';
         this.nodeSection.style.display = 'none';
         this.zoneSection.style.display = '';
         this.linkSection.style.display = 'none';
         this.duplicateBtn.style.display = 'none';
         this.duplicateZoneBtn.style.display = '';
-        this.deleteBtn.style.display = 'none';
+        this.deleteBtn.style.display = '';
         this.el.classList.remove('inspector-hidden');
     }
 

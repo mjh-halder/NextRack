@@ -4,16 +4,18 @@ import '@carbon/styles/css/styles.css';
 import { panel, canvasEl, paletteEl, viewToggleContainerEl, designNameEl } from './system-designer';
 import { panel as cdPanel } from './component-designer';
 import { initTopHeader } from './top-header';
+import { carbonIconToString, CarbonIcon } from './icons';
+import Sun20 from '@carbon/icons/es/sun/20.js';
+import Moon20 from '@carbon/icons/es/moon/20.js';
 
 // ---- Theme toggle (light: cds--white / dark: cds--g100) ----
 
 const THEME_KEY = 'nr-theme';
 
-// Carbon moon icon — shown in light mode (click to switch to dark)
-const MOON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor" width="20" height="20" aria-hidden="true"><path d="M13.502 5.414a15.075 15.075 0 0 0 0 21.17c5.98 5.979 15.956 5.988 21.916-.022a11.09 11.09 0 0 1-9.189-4.173 11.07 11.07 0 0 1-2.23-5.167A11.06 11.06 0 0 0 13.5 5.414z"/></svg>`;
-
-// Carbon sun icon — shown in dark mode (click to switch to light)
-const SUN_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor" width="20" height="20" aria-hidden="true"><path d="M16 12a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm0-2a6 6 0 1 0 0 12A6 6 0 0 0 16 10zm-1-7h2v4h-2zm0 21h2v4h-2zM4.22 5.64l1.42-1.42 2.82 2.83-1.42 1.41zM23.54 24.95l1.42-1.41 2.82 2.82-1.41 1.42zM3 15h4v2H3zm22 0h4v2h-4zM4.22 26.36l2.82-2.83 1.42 1.42-2.83 2.82zM23.54 7.05l2.83-2.83 1.41 1.42-2.82 2.82z"/></svg>`;
+// Moon — shown in light mode (click to switch to dark)
+const MOON_SVG = carbonIconToString(Moon20 as CarbonIcon);
+// Sun — shown in dark mode (click to switch to light)
+const SUN_SVG = carbonIconToString(Sun20 as CarbonIcon);
 
 function applyTheme(dark: boolean) {
     document.documentElement.classList.toggle('cds--g100', dark);

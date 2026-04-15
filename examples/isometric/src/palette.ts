@@ -5,11 +5,15 @@ import { META_KEY, NodeMeta } from './inspector';
 import { GRID_SIZE } from './theme';
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
 import { getPreviewFactory } from './shapes/shape-factories';
-import { applyRegistryDefaults } from './utils';
+import { applyRegistryDefaults, createComplexLayers } from './utils';
+import { carbonIconToString, CarbonIcon } from './icons';
+import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
+import CaretRight16 from '@carbon/icons/es/caret--right/16.js';
 
-// Carbon overflow-menu icon (3 vertical dots)
-const ICON_OVERFLOW = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor" width="16" height="16" aria-hidden="true"><circle cx="16" cy="8" r="2"/><circle cx="16" cy="16" r="2"/><circle cx="16" cy="24" r="2"/></svg>`;
-const ICON_CHEVRON_DOWN = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 11L3 6l.7-.7L8 9.6l4.3-4.3.7.7z"/></svg>`;
+const ICON_CHEVRON_DOWN = carbonIconToString(ChevronDown16 as CarbonIcon);
+// Tree toggle — filled right-pointing triangle.
+// CSS rotates it 90° clockwise when aria-expanded="true" so it points downward.
+const ICON_TREE_TOGGLE = carbonIconToString(CaretRight16 as CarbonIcon);
 
 interface PaletteItem {
     label: string;
@@ -28,7 +32,6 @@ const STAGGER = GRID_SIZE * 3;
 const STAGGER_COLS = 4;
 
 export type OnCreatedCallback = (shape: IsometricShape) => void;
-export type OnMenuClickCallback = (anchor: HTMLElement) => void;
 export type OnTreeSelectCallback = (cellId: string) => void;
 
 export class ComponentPalette {
@@ -37,27 +40,24 @@ export class ComponentPalette {
     private graph: dia.Graph;
     private getView: () => View;
     private onCreated: OnCreatedCallback;
-    private onMenuClick: OnMenuClickCallback;
     private onTreeSelect: OnTreeSelectCallback;
     private placeCount = 0;
     private listEl: HTMLElement;
-    private elementTreeListEl: HTMLElement;
+    private elementTreeListEl: HTMLUListElement;
     private selectedTreeId: string | null = null;
-    private treeItemEls = new Map<string, HTMLButtonElement>();
+    private treeItemEls = new Map<string, HTMLLIElement>();
 
     constructor(
         el: HTMLElement,
         graph: dia.Graph,
         getView: () => View,
         onCreated: OnCreatedCallback,
-        onMenuClick: OnMenuClickCallback,
         onTreeSelect: OnTreeSelectCallback
     ) {
         this.el = el;
         this.graph = graph;
         this.getView = getView;
         this.onCreated = onCreated;
-        this.onMenuClick = onMenuClick;
         this.onTreeSelect = onTreeSelect;
         this.build();
 
@@ -69,12 +69,12 @@ export class ComponentPalette {
     setTreeSelection(id: string | null) {
         if (this.selectedTreeId) {
             const prev = this.treeItemEls.get(this.selectedTreeId);
-            if (prev) prev.classList.remove('nr-tree-item--selected');
+            if (prev) prev.classList.remove('nr-tree-element--selected');
         }
         this.selectedTreeId = id;
         if (id) {
             const el = this.treeItemEls.get(id);
-            if (el) el.classList.add('nr-tree-item--selected');
+            if (el) el.classList.add('nr-tree-element--selected');
         }
     }
 
@@ -91,14 +91,14 @@ export class ComponentPalette {
         this.buildElementTree();
         // Re-apply selection highlight if the element still exists
         if (this.selectedTreeId && this.treeItemEls.has(this.selectedTreeId)) {
-            this.treeItemEls.get(this.selectedTreeId)!.classList.add('nr-tree-item--selected');
+            this.treeItemEls.get(this.selectedTreeId)!.classList.add('nr-tree-element--selected');
         } else {
             this.selectedTreeId = null;
         }
     }
 
     private build() {
-        // Panel header: product name + overflow menu trigger
+        // Panel header: product name
         const header = document.createElement('div');
         header.className = 'nr-panel-header';
 
@@ -106,21 +106,14 @@ export class ComponentPalette {
         title.className = 'nr-panel-title';
         title.textContent = 'System Designer';
 
-        const menuBtn = document.createElement('button');
-        menuBtn.className = 'cds--btn cds--btn--ghost cds--btn--icon-only nr-panel-menu-btn';
-        menuBtn.type = 'button';
-        menuBtn.setAttribute('aria-label', 'Menu');
-        menuBtn.title = 'Menu';
-        menuBtn.innerHTML = ICON_OVERFLOW;
-        menuBtn.addEventListener('click', () => this.onMenuClick(menuBtn));
-
         header.appendChild(title);
-        header.appendChild(menuBtn);
         this.el.appendChild(header);
 
         // Element Tree section (collapsible, max 35vh, sticky at top)
         this.elementTreeListEl = document.createElement('ul');
-        this.elementTreeListEl.className = 'nr-palette-list';
+        this.elementTreeListEl.className = 'nr-tree';
+        this.elementTreeListEl.setAttribute('role', 'tree');
+        this.elementTreeListEl.setAttribute('aria-label', 'Element Tree');
         const treeSection = this.buildCollapsibleSection('Element Tree', this.elementTreeListEl, { bodyClass: 'nr-section-body--tree' });
         this.el.appendChild(treeSection);
         this.buildElementTree();
@@ -168,33 +161,22 @@ export class ComponentPalette {
 
     private buildElementTree() {
         const allElements = this.graph.getElements();
-        const frames = allElements.filter(e => e.get('isFrame')) as Frame[];
-        const nonFrames = allElements.filter(e => !e.get('isFrame'));
-        const assignedIds = new Set<string>();
 
-        // 1. Zones with their embedded children
-        for (const frame of frames) {
-            const zoneLabel = (frame.attr('label/text') as string | undefined)?.trim() || 'Zone';
-            const frameLi = document.createElement('li');
-            const frameBtn = document.createElement('button');
-            frameBtn.className = 'nr-tree-item nr-tree-item--zone';
-            frameBtn.type = 'button';
-            frameBtn.textContent = zoneLabel;
-            frameBtn.title = zoneLabel;
-            // Zones are not inspector targets; no click handler needed yet
-            frameLi.appendChild(frameBtn);
-            this.elementTreeListEl.appendChild(frameLi);
+        // Root-level frames: frames with no parent frame
+        const rootFrames = allElements.filter(
+            e => e.get('isFrame') && !e.getParentCell()?.get('isFrame')
+        ) as Frame[];
 
-            const children = nonFrames.filter(e => e.getParentCell()?.id === frame.id);
-            for (const child of children) {
-                this.appendTreeItem(child, true);
-                assignedIds.add(String(child.id));
-            }
+        // Root-level non-frame elements: not embedded inside any frame
+        const rootElements = allElements.filter(
+            e => !e.get('isFrame') && !e.getParentCell()?.get('isFrame')
+        );
+
+        for (const frame of rootFrames) {
+            this.appendZoneNode(frame, this.elementTreeListEl);
         }
-
-        // 2. Unassigned elements at root level
-        for (const cell of nonFrames.filter(e => !assignedIds.has(String(e.id)))) {
-            this.appendTreeItem(cell, false);
+        for (const cell of rootElements) {
+            this.appendTreeItem(cell, this.elementTreeListEl);
         }
 
         if (this.elementTreeListEl.children.length === 0) {
@@ -205,22 +187,92 @@ export class ComponentPalette {
         }
     }
 
-    private appendTreeItem(cell: dia.Element, indented: boolean) {
+    /** Recursively builds a tree zone node for a frame and its children. */
+    private appendZoneNode(frame: Frame, parentUl: HTMLUListElement) {
+        const zoneLabel = (frame.attr('label/text') as string | undefined)?.trim() || 'Zone';
+        const embeds = frame.getEmbeddedCells();
+        const childFrames = embeds.filter(e => e.get('isFrame')) as Frame[];
+        const childElements = embeds.filter(e => !e.get('isFrame') && !e.isLink()) as dia.Element[];
+
+        const li = document.createElement('li');
+        li.className = 'nr-tree-zone';
+        li.setAttribute('role', 'treeitem');
+        li.setAttribute('aria-expanded', 'true');
+
+        const row = document.createElement('div');
+        row.className = 'nr-tree-row';
+
+        const toggleSpan = document.createElement('span');
+        toggleSpan.className = 'nr-tree-toggle';
+        toggleSpan.innerHTML = ICON_TREE_TOGGLE;
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'nr-tree-label';
+        labelSpan.textContent = zoneLabel;
+        labelSpan.title = zoneLabel;
+
+        row.appendChild(toggleSpan);
+        row.appendChild(labelSpan);
+        li.appendChild(row);
+
+        const childrenUl = document.createElement('ul');
+        childrenUl.className = 'nr-tree-children';
+        childrenUl.setAttribute('role', 'group');
+
+        for (const childFrame of childFrames) {
+            this.appendZoneNode(childFrame, childrenUl);
+        }
+        for (const child of childElements) {
+            this.appendTreeItem(child, childrenUl);
+        }
+
+        li.appendChild(childrenUl);
+
+        row.addEventListener('click', () => {
+            const expanded = li.getAttribute('aria-expanded') === 'true';
+            li.setAttribute('aria-expanded', String(!expanded));
+            childrenUl.style.display = expanded ? 'none' : '';
+        });
+
+        parentUl.appendChild(li);
+    }
+
+    private appendTreeItem(cell: dia.Element, parentUl: HTMLUListElement) {
         const meta = cell.get('meta') as { name?: string; kind?: string } | undefined;
         const label = meta?.name?.trim()
             || (cell.attr('label/text') as string | undefined)
             || meta?.kind
             || 'Element';
+        const iconHref = meta?.kind ? ShapeRegistry[meta.kind]?.iconHref : undefined;
+
         const li = document.createElement('li');
-        const btn = document.createElement('button');
-        btn.className = indented ? 'nr-tree-item nr-tree-item--child' : 'nr-tree-item';
-        btn.type = 'button';
-        btn.textContent = label;
-        btn.title = label;
-        btn.addEventListener('click', () => this.onTreeSelect(String(cell.id)));
-        li.appendChild(btn);
-        this.elementTreeListEl.appendChild(li);
-        this.treeItemEls.set(String(cell.id), btn);
+        li.className = 'nr-tree-element';
+        li.setAttribute('role', 'treeitem');
+
+        const row = document.createElement('div');
+        row.className = 'nr-tree-row';
+
+        if (iconHref) {
+            const iconImg = document.createElement('img');
+            iconImg.src = iconHref;
+            iconImg.className = 'nr-tree-icon';
+            iconImg.alt = '';
+            iconImg.setAttribute('aria-hidden', 'true');
+            row.appendChild(iconImg);
+        }
+
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'nr-tree-label';
+        labelSpan.textContent = label;
+        labelSpan.title = label;
+
+        row.appendChild(labelSpan);
+        li.appendChild(row);
+
+        row.addEventListener('click', () => this.onTreeSelect(String(cell.id)));
+
+        parentUl.appendChild(li);
+        this.treeItemEls.set(String(cell.id), li);
     }
 
     private buildList() {
@@ -259,18 +311,41 @@ export class ComponentPalette {
         const y = BASE_Y + row * STAGGER;
         this.placeCount++;
 
-        const shape = item.create();
+        const defaults = ShapeRegistry[item.kind];
+        const view = this.getView();
         const meta: NodeMeta = { name: '', kind: item.kind, vendor: '', model: '', notes: '' };
 
-        // Apply all registry defaults (dimensions, label, colors, icon) in one call.
-        const defaults = ShapeRegistry[item.kind];
+        // Complex shape: reproduce the component-designer stack — every layer is its own
+        // shape; Layer 0 is the base (carries meta/label/icon), layers 1+ embed into it.
+        if (defaults?.complexShape && defaults.layers?.length) {
+            const shapes = createComplexLayers(defaults.layers, x, y, view);
+            const base = shapes[0];
+            base.set(META_KEY, meta);
+            applyRegistryDefaults(base, defaults);
+            // Only Layer 0 carries the label; keep the others unlabelled.
+            for (let i = 1; i < shapes.length; i++) {
+                shapes[i].attr('label/text', '');
+            }
+            // Add in reverse so Layer 0 paints on top (painter's algorithm in SVG).
+            for (let i = shapes.length - 1; i >= 0; i--) {
+                this.graph.addCell(shapes[i]);
+            }
+            // Embed additional layers so they move with the base on drag.
+            for (let i = 1; i < shapes.length; i++) {
+                base.embed(shapes[i]);
+            }
+            this.onCreated(base);
+            return;
+        }
+
+        // Simple shape (unchanged).
+        const shape = item.create();
         if (defaults) {
             applyRegistryDefaults(shape, defaults);
         }
-
         shape.position(x, y);
         shape.set(META_KEY, meta);
-        shape.toggleView(this.getView());
+        shape.toggleView(view);
 
         this.graph.addCell(shape);
         this.onCreated(shape);

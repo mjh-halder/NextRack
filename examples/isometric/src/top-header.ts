@@ -42,6 +42,7 @@ const MENUS: MenuGroup[] = [
             { label: 'Zoom In',       action: 'view-zoom-in',     shortcut: '⌘+' }, // placeholder
             { label: 'Zoom Out',      action: 'view-zoom-out',    shortcut: '⌘−' }, // placeholder
             { label: 'Fit to Screen', action: 'view-fit',         shortcut: '⌘0' }, // placeholder
+            { label: 'Move to Center', action: 'view-center'                     },
             { label: 'Toggle Grid',   action: 'view-toggle-grid'                 }, // placeholder
         ],
     },

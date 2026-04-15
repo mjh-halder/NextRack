@@ -8,6 +8,30 @@ export interface ShapeStyle {
     strokeColor?: string;
 }
 
+/**
+ * One visual building block inside a Complex Shape component.
+ * All dimensional values are in pixels.
+ */
+export interface ShapeLayer {
+    id: string;
+    name: string;
+    baseShape: BaseShape;
+    width: number;
+    height: number;
+    depth: number;
+    offsetX: number;        // horizontal offset across the base plane
+    offsetY: number;        // depth offset across the base plane
+    baseElevation: number;  // isometric Z lift above the component base
+    style: ShapeStyle;
+    cornerRadius?: number;
+    /** Raw uploaded SVG string, stored for re-processing and serialization. */
+    svgFootprint?: string;
+    /** Normalized [0..1] vertices derived from svgFootprint. Scaled to layer size at render time. */
+    svgNormVerts?: [number, number][];
+    /** Original filename of the uploaded SVG, shown in the inspector. */
+    svgFootprintName?: string;
+}
+
 export interface ShapeDefaults {
     defaultSize: { width: number; height: number };
     defaultIsometricHeight: number;
@@ -23,7 +47,8 @@ export interface ShapeDefaults {
     /** Background color of the icon badge */
     iconBgColor?: string;
     /** Background shape of the icon badge */
-    iconBgShape?: 'circle' | 'square';
+    iconBgShape?: 'circle' | 'square' | 'octagon';
+    iconBgRadius?: number;
     /**
      * Pre-computed composite icon data URI (icon + coloured background).
      * Computed by the component designer at save time so the system designer
@@ -32,6 +57,10 @@ export interface ShapeDefaults {
     iconHref?: string;
     /** Optional color overrides applied when a new instance is created */
     style?: ShapeStyle;
+    /** When true, the component is composed of multiple layers instead of a single shape */
+    complexShape?: boolean;
+    /** Layer definitions for complex shapes; empty for simple shapes */
+    layers?: ShapeLayer[];
 }
 
 /**

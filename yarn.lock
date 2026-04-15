@@ -1989,6 +1989,15 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@carbon/icons@npm:^11.78.0":
+  version: 11.78.0
+  resolution: "@carbon/icons@npm:11.78.0"
+  dependencies:
+    "@ibm/telemetry-js": "npm:^1.5.0"
+  checksum: 10/f6fe6c226789f5b202d47f5ba2e243433f655439ed1a1c0404d572b7d48b82ffe1772b93f45043a8c1f3443a5f9be0b9b9a187729fa4892829e9867475a15f56
+  languageName: node
+  linkType: hard
+
 "@carbon/layout@npm:^11.51.0":
   version: 11.51.0
   resolution: "@carbon/layout@npm:11.51.0"
@@ -4489,6 +4498,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@joint/demo-isometric@workspace:examples/isometric"
   dependencies:
+    "@carbon/icons": "npm:^11.78.0"
     "@carbon/styles": "npm:^1.104.0"
     "@joint/core": "workspace:^"
     "@joint/decorators": "workspace:^"

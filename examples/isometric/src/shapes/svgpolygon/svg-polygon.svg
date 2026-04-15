@@ -1,0 +1,56 @@
+<g
+    magnet-selector="base"
+    highlighter-selector="base"
+>
+    <!-- 2D footprint — hit area, magnet, and 2D view representation -->
+    <path @selector="base" @group-selector="common"
+        :d="{{svgBasePath([size, normalizedVerts])}}"
+        fill="#e0e0e0"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <!-- ISO: all visible side faces as one compound path (single fill color) -->
+    <path @selector="side" @group-selector="iso"
+        :d="{{svgSideFacesPath([size, isometricHeight, normalizedVerts])}}"
+        fill="#c6c6c6"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <!-- ISO: top face — rendered last, painted on top of all side faces -->
+    <path @selector="top" @group-selector="iso"
+        :d="{{svgTopPath([size, isometricHeight, normalizedVerts])}}"
+        fill="#a8a8a8"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <!-- ISO: icon image on the top face; position/size set via attr() -->
+    <image @selector="topIcon" @group-selector="iso"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
+    <!-- 2D: icon image centered in the shape bounding box; position/size set via attr() -->
+    <image @selector="topIcon2D" @group-selector="2d"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
+    <text @selector="label" @group-selector="common"
+        text-anchor="left"
+        text-vertical-anchor="middle"
+        font-family="sans-serif"
+        font-size="11"
+        fill="#333"
+        stroke="#fff"
+        stroke-width="3"
+        paint-order="stroke"
+        y="calc(h + 10)"
+        x="calc(w + 10)"
+        text=""
+    />
+</g>
