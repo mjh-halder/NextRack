@@ -1052,7 +1052,6 @@
     padding: var(--cds-spacing-03, 8px) var(--cds-spacing-05, 16px);
     background: none;
     border: none;
-    border-bottom: 1px solid var(--cds-border-subtle-00, #e0e0e0);
     text-align: left;
     font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
     font-size: var(--cds-body-compact-01-font-size, 0.875rem);
@@ -2431,6 +2430,24 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
     background: var(--cds-background, #161616);
 }
 
+.nr-admin__upload-row {
+    margin: 0 0 var(--cds-spacing-05, 16px);
+}
+.nr-admin__upload-btn {
+    display: inline-block;
+    padding: 6px 14px;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.875rem;
+    color: var(--cds-interactive, #0f62fe);
+    border: 1px solid var(--cds-interactive, #0f62fe);
+    background: transparent;
+    cursor: pointer;
+}
+.nr-admin__upload-btn:hover {
+    background: var(--cds-interactive, #0f62fe);
+    color: var(--cds-text-inverse, #fff);
+}
+
 .nr-admin__search-input {
     display: block;
     width: 100%;
@@ -2736,4 +2753,17 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
 .nr-admin__table-btn svg {
     width: 16px;
     height: 16px;
+}
+.nr-admin__table-select {
+    padding: 2px 6px;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.75rem;
+    color: var(--cds-text-primary, #161616);
+    background: var(--cds-field-01, #f4f4f4);
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+}
+.cds--g100 .nr-admin__table-select {
+    color: var(--cds-text-primary, #f4f4f4);
+    background: var(--cds-field-01, #262626);
+    border-color: var(--cds-border-subtle-01, #393939);
 }

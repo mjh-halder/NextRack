@@ -10,7 +10,7 @@ import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM 
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
 const CD_GRID_COUNT = 10;
-import { ShapeRegistry, BUILT_IN_SHAPE_IDS, updateShapeDefaults, deleteShape, addShape, saveRegistryToStorage, ShapeLayer } from './shapes/shape-registry';
+import { ShapeRegistry, BUILT_IN_SHAPE_IDS, updateShapeDefinition, deleteShape, addShape, saveRegistryToStorage, ShapeLayer } from './shapes/shape-registry';
 import { BaseShape } from './shapes/shape-definition';
 import { PRIMARY_COLORS } from './colors';
 import { carbonIconToString, CarbonIcon } from './icons';
@@ -21,7 +21,8 @@ import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
 import { getIconById, addUploadedIcon, removeUploadedIcon } from './icon-catalog';
 import { getVisibleIcons } from './icon-config';
-import { getServerShapes } from './server-shapes';
+import { shapeStore } from './shape-store';
+import { COMPONENT_COLLECTIONS } from './admin';
 
 // DOM elements
 const canvasEl     = document.getElementById('cd2-canvas')                as HTMLDivElement;
@@ -244,6 +245,7 @@ let cornerRadiusInput:  HTMLInputElement;
 let cornerRadiusValueEl: HTMLElement;
 let cornerRadiusRowEl:  HTMLElement;
 let modifiersSvgInfoEl: HTMLElement | null = null;
+let modifiersAccordionLi: HTMLLIElement | null = null;
 let chamferSizeInput:   HTMLInputElement;
 let chamferSizeValueEl: HTMLElement;
 let chamferRowEl:       HTMLElement;
@@ -1265,11 +1267,13 @@ function buildColorContent(container: HTMLElement) {
             if (s) {
                 s.attr('top/fill',   '#a8a8a8');
                 s.attr('front/fill', '#e0e0e0');
+                s.attr('base/fill',  '#e0e0e0');
                 s.attr('side/fill',  '#c6c6c6');
             }
             if (s2D) {
                 s2D.attr('top/fill',   '#a8a8a8');
                 s2D.attr('front/fill', '#e0e0e0');
+                s2D.attr('base/fill',  '#e0e0e0');
                 s2D.attr('side/fill',  '#c6c6c6');
             }
             return;
@@ -1373,7 +1377,9 @@ function buildInspectorPanel() {
     accordion.className = 'cds--accordion';
     accordion.appendChild(buildAccordionItem('Form Factor',     false, buildFormFactorContent));
     accordion.appendChild(buildAccordionItem('Dimensions',      false, buildDimensionsContent));
-    accordion.appendChild(buildAccordionItem('Modifiers',       false, buildModifiersContent));
+    modifiersAccordionLi = buildAccordionItem('Modifiers', false, buildModifiersContent);
+    modifiersAccordionLi.style.display = supportsCornerRadius(selectedBaseShape) ? '' : 'none';
+    accordion.appendChild(modifiersAccordionLi);
 
     // Position section — only visible in complex shape mode
     positionAccordionLi = buildAccordionItem('Position', false, buildPositionContent);
@@ -1454,6 +1460,8 @@ function applyCornerRadiusToCurrentShape() {
 
 function applyChamferSizeToCurrentShape() {
     if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        if (layer) layer.chamferSize = selectedChamferSize;
         layerShapes[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
         layerShapes2D[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
         return;
@@ -1492,11 +1500,12 @@ function updateDimensionLock() {
     // not for SVG-footprint layers (SVG vertices are always used without rounding).
     const currentSvgLayer = isComplexShape ? (layers[selectedLayerIndex] ?? null) : null;
     const hasSvgLayer     = currentSvgLayer !== null && isLayerSvg(currentSvgLayer);
-    const showEdgeControls = supportsCornerRadius(selectedBaseShape) && !hasSvgLayer;
+    const isCuboid = supportsCornerRadius(selectedBaseShape);
+    const showEdgeControls = isCuboid && !hasSvgLayer;
     if (cornerRadiusRowEl) cornerRadiusRowEl.style.display = showEdgeControls ? '' : 'none';
     if (chamferRowEl)      chamferRowEl.style.display      = showEdgeControls ? '' : 'none';
     if (iconFaceRowEl)     iconFaceRowEl.style.display     = showEdgeControls ? '' : 'none';
-    // Info text appears only when the SVG-footprint path has actively hidden the sliders.
+    if (modifiersAccordionLi) modifiersAccordionLi.style.display = isCuboid ? '' : 'none';
     if (modifiersSvgInfoEl) modifiersSvgInfoEl.style.display = hasSvgLayer ? '' : 'none';
 }
 
@@ -1718,9 +1727,8 @@ function onSave() {
     if (isComplexShape) {
         if (layers.length === 0) return;
         const layer1 = layers[0];
-        updateShapeDefaults(currentShapeId, {
+        updateShapeDefinition(currentShapeId, {
             displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
-            // Layer 1 dims used as the simple-shape fallback for the System Designer
             defaultSize: { width: layer1.width, height: layer1.height },
             defaultIsometricHeight: layer1.depth,
             baseShape: layer1.baseShape,
@@ -1732,6 +1740,8 @@ function onSave() {
             iconBgRadius: selectedIconBgRadius,
             iconHref,
             iconLayerIndex,
+            cornerRadius: selectedCornerRadius,
+            chamferSize: selectedChamferSize,
             style: {
                 topColor:    selectedStyle.topColor    || undefined,
                 frontColor:  selectedStyle.frontColor  || undefined,
@@ -1739,7 +1749,7 @@ function onSave() {
                 strokeColor: selectedStyle.strokeColor || undefined,
             },
             complexShape: true,
-            layers: layers.map(l => ({ ...l })),
+            layers: layers.map(l => ({ ...l, style: { ...l.style } })),
         });
         saveRegistryToStorage();
         document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
@@ -1753,7 +1763,7 @@ function onSave() {
     const depthGU  = parseFloat(depthInput.value);
     if (isNaN(widthGU) || isNaN(heightGU) || isNaN(depthGU)) return;
 
-    updateShapeDefaults(currentShapeId, {
+    updateShapeDefinition(currentShapeId, {
         displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
         defaultSize: { width: widthGU * GRID_SIZE, height: heightGU * GRID_SIZE },
         defaultIsometricHeight: depthGU * GRID_SIZE,
@@ -1765,6 +1775,8 @@ function onSave() {
         iconBgShape: selectedIconBgShape,
         iconBgRadius: selectedIconBgRadius,
         iconHref,
+        cornerRadius: selectedCornerRadius,
+        chamferSize: selectedChamferSize,
         style: {
             topColor:    selectedStyle.topColor    || undefined,
             frontColor:  selectedStyle.frontColor  || undefined,
@@ -2053,6 +2065,7 @@ function renderLayersOnCanvas() {
         shape.set('defaultIsometricHeight', layer.depth);
         shape.set('defaultSize',            { width: layer.width, height: layer.height });
         if (layer.cornerRadius !== undefined) shape.set('cornerRadius', layer.cornerRadius);
+        if (layer.chamferSize !== undefined) shape.set('chamferSize', layer.chamferSize);
         shape.position(isoX, isoY);
         shape.toggleView(View.Isometric);
         // Only the first layer carries the shape's label; additional layers are unlabelled.
@@ -2075,6 +2088,7 @@ function renderLayersOnCanvas() {
         shape2D.set('defaultIsometricHeight', layer.depth);
         shape2D.set('defaultSize',            { width: layer.width, height: layer.height });
         if (layer.cornerRadius !== undefined) shape2D.set('cornerRadius', layer.cornerRadius);
+        if (layer.chamferSize !== undefined) shape2D.set('chamferSize', layer.chamferSize);
         shape2D.position(x2D, y2D);
         shape2D.toggleView(View.TwoDimensional);
         if (idx > 0) shape2D.attr('label/text', '');
@@ -2361,7 +2375,11 @@ function syncInspectorToLayer(index: number) {
 
     if (offsetXInput)        { offsetXInput.value       = String(layer.offsetX);       setSliderFill(offsetXInput); }
     if (offsetYInput)        { offsetYInput.value       = String(layer.offsetY);       setSliderFill(offsetYInput); }
-    if (baseElevationInput)  { baseElevationInput.value = String(layer.baseElevation); setSliderFill(baseElevationInput); }
+    if (baseElevationInput)  {
+        baseElevationInput.value    = String(layer.baseElevation);
+        baseElevationInput.disabled = index === 0;
+        setSliderFill(baseElevationInput);
+    }
     if (offsetXValueEl)       offsetXValueEl.textContent       = `${Math.round(layer.offsetX)} px`;
     if (offsetYValueEl)       offsetYValueEl.textContent       = `${Math.round(layer.offsetY)} px`;
     if (baseElevationValueEl) baseElevationValueEl.textContent = `${Math.round(layer.baseElevation)} px`;
@@ -2382,11 +2400,16 @@ function syncInspectorToLayer(index: number) {
     const repColor = layer.style.topColor || layer.style.frontColor || layer.style.sideColor || '#e0e0e0';
     if (colorPickerRef) colorPickerRef.value = repColor;
 
-    // Sync corner radius (may be overridden/hidden for SVG layers by updateDimensionLock)
+    // Sync corner radius and chamfer (may be overridden/hidden for SVG layers by updateDimensionLock)
     const cr = layer.cornerRadius ?? 0;
     selectedCornerRadius = cr;
     if (cornerRadiusInput)   { cornerRadiusInput.value   = String(cr); setSliderFill(cornerRadiusInput); }
     if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${cr} px`;
+
+    const cs = layer.chamferSize ?? 0;
+    selectedChamferSize = cs;
+    if (chamferSizeInput)   { chamferSizeInput.value   = String(cs); setSliderFill(chamferSizeInput); }
+    if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${cs} px`;
 
     // SVG footprint section: clear any stale parse error, then refresh
     svgParseError = '';
@@ -2401,10 +2424,9 @@ function onOffsetChange() {
     const layer = layers[selectedLayerIndex];
     if (!layer) return;
 
-    // Sliders are in pixels in complex mode — no conversion needed.
     layer.offsetX       = parseFloat(offsetXInput.value);
     layer.offsetY       = parseFloat(offsetYInput.value);
-    layer.baseElevation = parseFloat(baseElevationInput.value);
+    layer.baseElevation = selectedLayerIndex === 0 ? 0 : parseFloat(baseElevationInput.value);
 
     if (offsetXValueEl)       offsetXValueEl.textContent       = `${Math.round(layer.offsetX)} px`;
     if (offsetYValueEl)       offsetYValueEl.textContent       = `${Math.round(layer.offsetY)} px`;
@@ -3118,20 +3140,24 @@ function buildPalettePanel() {
     header.appendChild(title);
     paletteEl.appendChild(header);
 
+    const generalIds = new Set(shapeStore.list('general').map(s => s.id));
+
+    // ── User Components (first, expanded by default) ─────────────────────────
+    const userWrapper = document.createElement('div');
+
     const newBtn = document.createElement('button');
     newBtn.type = 'button';
     newBtn.className = 'nr-palette-new-btn';
     newBtn.textContent = '+ New Component';
     newBtn.addEventListener('click', showNewShapeModal);
-    paletteEl.appendChild(newBtn);
+    userWrapper.appendChild(newBtn);
 
-    // ── User Defined section ──────────────────────────────────────────────────
     const list = document.createElement('ul');
     list.className = 'nr-palette-list';
     list.setAttribute('role', 'listbox');
-    list.setAttribute('aria-label', 'User Defined Components');
+    list.setAttribute('aria-label', 'User Components');
 
-    for (const id of Object.keys(ShapeRegistry).filter(id => !BUILT_IN_SHAPE_IDS.has(id))) {
+    for (const id of Object.keys(ShapeRegistry).filter(id => !BUILT_IN_SHAPE_IDS.has(id) && !generalIds.has(id))) {
         const li = document.createElement('li');
         li.setAttribute('role', 'option');
         li.setAttribute('aria-selected', String(id === currentShapeId));
@@ -3168,66 +3194,68 @@ function buildPalettePanel() {
         list.appendChild(li);
     }
 
-    paletteEl.appendChild(buildCollapsibleSection('User Defined', list, false));
+    userWrapper.appendChild(list);
+    paletteEl.appendChild(buildCollapsibleSection('User Components', userWrapper, false));
 
-    // ── General Shapes (server-published) ────────────────────────────────────
-    const serverList = document.createElement('ul');
-    serverList.className = 'nr-palette-list';
-    serverList.setAttribute('role', 'listbox');
-    serverList.setAttribute('aria-label', 'General Shapes');
-
-    for (const entry of getServerShapes()) {
-        const sid = entry.id;
-        const def = entry.defaults;
-        const li = document.createElement('li');
-        li.setAttribute('role', 'option');
-        li.setAttribute('aria-selected', String(sid === currentShapeId));
-
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'nr-palette-item' + (sid === currentShapeId ? ' nr-palette-item--selected' : '');
-        btn.dataset.shapeId = sid;
-
-        const iconId  = def.icon;
-        const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
-        if (iconSvg) {
-            const iconSpan = document.createElement('span');
-            iconSpan.className = 'nr-palette-item-icon';
-            iconSpan.innerHTML = iconSvg;
-            iconSpan.setAttribute('aria-hidden', 'true');
-            btn.appendChild(iconSpan);
-        }
-        const labelSpan = document.createElement('span');
-        labelSpan.className = 'nr-palette-item-label';
-        labelSpan.textContent = def.displayName ?? formatLabel(sid);
-        btn.appendChild(labelSpan);
-
-        btn.addEventListener('click', () => {
-            if (!ShapeRegistry[sid]) {
-                addShape(sid, { ...def });
-            }
-            paletteEl.querySelectorAll<HTMLButtonElement>('.nr-palette-item').forEach(b => {
-                b.classList.toggle('nr-palette-item--selected', b === btn);
-                b.closest('li')?.setAttribute('aria-selected', String(b === btn));
-            });
-            currentShapeId = sid;
-            loadShapeIntoCanvas(sid);
-        });
-
-        li.appendChild(btn);
-        serverList.appendChild(li);
+    // ── Collection-based sections (General, Oracle, NetApp, …) ─────────────
+    const allGeneral = shapeStore.list('general');
+    const byCollection = new Map<string, typeof allGeneral>();
+    for (const stored of allGeneral) {
+        const col = stored.definition.collection || 'General';
+        if (!byCollection.has(col)) byCollection.set(col, []);
+        byCollection.get(col)!.push(stored);
     }
 
-    paletteEl.appendChild(buildCollapsibleSection('General Shapes', serverList, true));
+    for (const collectionName of COMPONENT_COLLECTIONS) {
+        const items = byCollection.get(collectionName) ?? [];
+        const colList = document.createElement('ul');
+        colList.className = 'nr-palette-list';
+        colList.setAttribute('role', 'listbox');
+        colList.setAttribute('aria-label', `${collectionName} Components`);
 
-    // ── Vendor sections (empty placeholders) ─────────────────────────────────
-    const VENDOR_SECTIONS = ['Oracle', 'NetApp'];
-    for (const vendor of VENDOR_SECTIONS) {
-        const emptyList = document.createElement('ul');
-        emptyList.className = 'nr-palette-list';
-        emptyList.setAttribute('role', 'listbox');
-        emptyList.setAttribute('aria-label', `${vendor} Components`);
-        paletteEl.appendChild(buildCollapsibleSection(vendor, emptyList, true));
+        for (const stored of items) {
+            const sid = stored.id;
+            const def = stored.definition;
+            const li = document.createElement('li');
+            li.setAttribute('role', 'option');
+            li.setAttribute('aria-selected', String(sid === currentShapeId));
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'nr-palette-item' + (sid === currentShapeId ? ' nr-palette-item--selected' : '');
+            btn.dataset.shapeId = sid;
+
+            const iconId  = def.icon;
+            const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
+            if (iconSvg) {
+                const iconSpan = document.createElement('span');
+                iconSpan.className = 'nr-palette-item-icon';
+                iconSpan.innerHTML = iconSvg;
+                iconSpan.setAttribute('aria-hidden', 'true');
+                btn.appendChild(iconSpan);
+            }
+            const labelSpan = document.createElement('span');
+            labelSpan.className = 'nr-palette-item-label';
+            labelSpan.textContent = def.displayName ?? formatLabel(sid);
+            btn.appendChild(labelSpan);
+
+            btn.addEventListener('click', () => {
+                if (!ShapeRegistry[sid]) {
+                    addShape(sid, { ...def });
+                }
+                paletteEl.querySelectorAll<HTMLButtonElement>('.nr-palette-item').forEach(b => {
+                    b.classList.toggle('nr-palette-item--selected', b === btn);
+                    b.closest('li')?.setAttribute('aria-selected', String(b === btn));
+                });
+                currentShapeId = sid;
+                loadShapeIntoCanvas(sid);
+            });
+
+            li.appendChild(btn);
+            colList.appendChild(li);
+        }
+
+        paletteEl.appendChild(buildCollapsibleSection(collectionName, colList, true));
     }
 }
 
@@ -3257,13 +3285,13 @@ function loadShapeIntoCanvas(id: string) {
     const complexToggleBtn = inspectorEl.querySelector<HTMLButtonElement>('#sd-complex-toggle');
     const complexToggleDiv = complexToggleBtn?.closest<HTMLElement>('.nr-toggle') ?? null;
 
-    selectedCornerRadius = 0;
-    selectedChamferSize  = 0;
+    selectedCornerRadius = savedDefaults?.cornerRadius ?? 0;
+    selectedChamferSize  = savedDefaults?.chamferSize ?? 0;
 
     if (savedDefaults?.complexShape && savedDefaults.layers?.length) {
         // ── Complex shape path ─────────────────────────────────────────────────
         isComplexShape     = true;
-        layers             = savedDefaults.layers.map(l => ({ ...l }));
+        layers             = savedDefaults.layers.map(l => ({ ...l, style: { ...l.style } }));
         selectedLayerIndex = 0;
 
         if (complexToggleDiv) complexToggleDiv.classList.add('nr-toggle--checked');
@@ -3314,6 +3342,8 @@ function loadShapeIntoCanvas(id: string) {
         shape.set('isometricHeight',        initDepth);
         shape.set('defaultIsometricHeight', initDepth);
         shape.set('defaultSize',            { width: initWidth, height: initHeight });
+        shape.set('cornerRadius', selectedCornerRadius);
+        shape.set('chamferSize', selectedChamferSize);
         shape.position(posX, posY);
         shape.toggleView(View.Isometric);
         graph.addCell(shape);
@@ -3324,6 +3354,8 @@ function loadShapeIntoCanvas(id: string) {
         shape2D.set('isometricHeight',        initDepth);
         shape2D.set('defaultIsometricHeight', initDepth);
         shape2D.set('defaultSize',            { width: initWidth, height: initHeight });
+        shape2D.set('cornerRadius', selectedCornerRadius);
+        shape2D.set('chamferSize', selectedChamferSize);
         shape2D.position(posX, posY);
         shape2D.toggleView(View.TwoDimensional);
         graph2D.addCell(shape2D);
@@ -3339,13 +3371,24 @@ function loadShapeIntoCanvas(id: string) {
             applyShapeStyle(shape2D, selectedStyle);
         }
 
-        if (cornerRadiusInput)   cornerRadiusInput.value   = '0';
-        if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = '0 px';
-        applyCornerRadiusToCurrentShape();
+        if (cornerRadiusInput)   { cornerRadiusInput.value = String(selectedCornerRadius); setSliderFill(cornerRadiusInput); }
+        if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${selectedCornerRadius} px`;
 
-        if (chamferSizeInput)   chamferSizeInput.value   = '0';
-        if (chamferSizeValueEl) chamferSizeValueEl.textContent = '0 px';
+        if (chamferSizeInput)   { chamferSizeInput.value = String(selectedChamferSize); setSliderFill(chamferSizeInput); }
+        if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${selectedChamferSize} px`;
+
+        applyCornerRadiusToCurrentShape();
         applyChamferSizeToCurrentShape();
+
+        // Force re-render so both modifiers are reflected in the initial paint.
+        if (currentShape) {
+            const { width, height } = currentShape.size();
+            currentShape.resize(width, height);
+        }
+        if (currentShape2D) {
+            const { width, height } = currentShape2D.size();
+            currentShape2D.resize(width, height);
+        }
 
         applyIconToCurrentShape();
     }

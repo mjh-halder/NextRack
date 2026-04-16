@@ -2,7 +2,7 @@ import { V, dia } from '@joint/core';
 import IsometricShape, { View } from './shapes/isometric-shape';
 import { GRID_COUNT, GRID_SIZE, SCALE, ISOMETRIC_SCALE, ROTATION_DEGREES } from './theme';
 import { Link } from './shapes';
-import type { ShapeStyle, ShapeDefaults, ShapeLayer } from './shapes/shape-registry';
+import type { ShapeStyle, ShapeDefinition, ShapeLayer } from './shapes/shape-registry';
 import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
 import { FORM_FACTOR_PREVIEWS } from './shapes/shape-factories';
 
@@ -168,6 +168,7 @@ export function applyShapeStyle(shape: dia.Element, style: ShapeStyle): void {
     }
     if (style.frontColor) {
         shape.attr('front/fill',    style.frontColor);
+        shape.attr('base/fill',     style.frontColor);
         shape.attr('cornerV3/fill', style.frontColor);
     }
     if (style.sideColor) {
@@ -204,7 +205,7 @@ export function applyShapeStyle(shape: dia.Element, style: ShapeStyle): void {
  */
 export function applyRegistryDefaults(
     shape: dia.Element,
-    defaults: ShapeDefaults,
+    defaults: ShapeDefinition,
     paper?: dia.Paper
 ): void {
     // ── Dimensions ───────────────────────────────────────────────────────────
@@ -213,6 +214,12 @@ export function applyRegistryDefaults(
     }
     if (defaults.defaultIsometricHeight != null) {
         shape.set('isometricHeight', defaults.defaultIsometricHeight);
+    }
+    if (defaults.cornerRadius != null) {
+        shape.set('cornerRadius', defaults.cornerRadius);
+    }
+    if (defaults.chamferSize != null) {
+        shape.set('chamferSize', defaults.chamferSize);
     }
 
     // ── Label ────────────────────────────────────────────────────────────────
@@ -315,6 +322,7 @@ export function createComplexLayers(
         shape.set('defaultIsometricHeight', layer.depth);
         shape.set('defaultSize',            { width: layer.width, height: layer.height });
         if (layer.cornerRadius !== undefined) shape.set('cornerRadius', layer.cornerRadius);
+        if (layer.chamferSize !== undefined) shape.set('chamferSize', layer.chamferSize);
 
         const elev = view === View.Isometric ? layer.baseElevation : 0;
         shape.position(

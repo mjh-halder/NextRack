@@ -88,6 +88,7 @@ function makeProxy(layer: ShapeLayer): IsometricShape {
     proxy.resize(layer.width, layer.height);
     proxy.set('isometricHeight', layer.depth);
     if (layer.cornerRadius !== undefined) proxy.set('cornerRadius', layer.cornerRadius);
+    if (layer.chamferSize !== undefined) proxy.set('chamferSize', layer.chamferSize);
     return proxy;
 }
 
@@ -145,13 +146,13 @@ function isoFacesForLayer(layer: ShapeLayer): FaceDesc[] {
         ];
     }
     if (proxy instanceof CuboidShape) {
-        // Covers Computer / Firewall / Switch / Hexahedron / plain CuboidShape.
         return [
+            { element: 'path', attrs: { d: proxy.baseCuboidPath(),     fill: fillFor(layer.style, 'front'), ...commonStroke } },
             { element: 'path', attrs: { d: proxy.cuboidFrontPath(),    fill: fillFor(layer.style, 'front'), ...commonStroke } },
             { element: 'path', attrs: { d: proxy.cuboidSidePath(),     fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path', attrs: { d: proxy.cuboidCornerV3Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
             { element: 'path', attrs: { d: proxy.cuboidCornerV1Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
             { element: 'path', attrs: { d: proxy.cuboidCornerV2Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.cuboidCornerV3Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
             { element: 'path', attrs: { d: proxy.topCuboidPath(),      fill: fillFor(layer.style, 'top'),   ...commonStroke } },
         ];
     }
@@ -159,6 +160,7 @@ function isoFacesForLayer(layer: ShapeLayer): FaceDesc[] {
         const { width: w, height: h } = proxy.size();
         const iH = proxy.isometricHeight;
         return [
+            { element: 'ellipse', attrs: { cx: w / 2, cy: h / 2, rx: w / 2, ry: h / 2, fill: fillFor(layer.style, 'front'), ...commonStroke } },
             { element: 'path',    attrs: { d: proxy.sideData, fill: fillFor(layer.style, 'side'), ...commonStroke } },
             { element: 'ellipse', attrs: { cx: w / 2 - iH, cy: h / 2 - iH, rx: w / 2, ry: h / 2, fill: fillFor(layer.style, 'top'), ...commonStroke } },
         ];

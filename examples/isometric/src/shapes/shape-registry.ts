@@ -24,6 +24,7 @@ export interface ShapeLayer {
     baseElevation: number;  // isometric Z lift above the component base
     style: ShapeStyle;
     cornerRadius?: number;
+    chamferSize?: number;
     /** Raw uploaded SVG string, stored for re-processing and serialization. */
     svgFootprint?: string;
     /** Normalized [0..1] vertices derived from svgFootprint. Scaled to layer size at render time. */
@@ -32,7 +33,7 @@ export interface ShapeLayer {
     svgFootprintName?: string;
 }
 
-export interface ShapeDefaults {
+export interface ShapeDefinition {
     defaultSize: { width: number; height: number };
     defaultIsometricHeight: number;
     baseShape?: BaseShape;
@@ -66,6 +67,9 @@ export interface ShapeDefaults {
     complexShape?: boolean;
     /** Layer definitions for complex shapes; empty for simple shapes */
     layers?: ShapeLayer[];
+    cornerRadius?: number;
+    chamferSize?: number;
+    collection?: string;
 }
 
 /**
@@ -73,7 +77,7 @@ export interface ShapeDefaults {
  * This is the single source of truth — used to initialize the registry
  * and to re-hydrate it after localStorage is loaded (defensive).
  */
-const BUILT_IN_DEFAULTS: Record<string, ShapeDefaults> = {
+const BUILT_IN_DEFAULTS: Record<string, ShapeDefinition> = {
     'firewall': {
         defaultSize: { width: GRID_SIZE * 3, height: GRID_SIZE },
         defaultIsometricHeight: GRID_SIZE * 2,
@@ -122,11 +126,21 @@ export function deleteShape(id: string): void {
     } catch { /* non-critical */ }
 }
 
-export function addShape(id: string, defaults: ShapeDefaults): void {
+export function addShape(id: string, defaults: ShapeDefinition): void {
     ShapeRegistry[id] = defaults;
+    try {
+        const raw = localStorage.getItem(DELETED_STORAGE_KEY);
+        if (raw) {
+            const list: string[] = JSON.parse(raw);
+            const filtered = list.filter(d => d !== id);
+            if (filtered.length !== list.length) {
+                localStorage.setItem(DELETED_STORAGE_KEY, JSON.stringify(filtered));
+            }
+        }
+    } catch { /* non-critical */ }
 }
 
-export function updateShapeDefaults(id: string, patch: Partial<ShapeDefaults>): void {
+export function updateShapeDefinition(id: string, patch: Partial<ShapeDefinition>): void {
     if (!ShapeRegistry[id]) return;
     const { style, ...rest } = patch;
     Object.assign(ShapeRegistry[id], rest);
@@ -152,7 +166,7 @@ export function loadRegistryFromStorage(): void {
         // Merge user-saved shapes on top of the built-in defaults.
         const raw = localStorage.getItem(REGISTRY_STORAGE_KEY);
         if (raw) {
-            const saved = JSON.parse(raw) as Record<string, ShapeDefaults>;
+            const saved = JSON.parse(raw) as Record<string, ShapeDefinition>;
             for (const [id, defaults] of Object.entries(saved)) {
                 ShapeRegistry[id] = defaults;
             }
@@ -184,7 +198,7 @@ export function loadRegistryFromStorage(): void {
 }
 
 // Populated with built-in defaults, then immediately hydrated from localStorage.
-export const ShapeRegistry: Record<string, ShapeDefaults> = { ...BUILT_IN_DEFAULTS };
+export const ShapeRegistry: Record<string, ShapeDefinition> = { ...BUILT_IN_DEFAULTS };
 
 // Hydrate with any user-saved shapes immediately on module load.
 loadRegistryFromStorage();

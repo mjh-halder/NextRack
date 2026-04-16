@@ -203,7 +203,7 @@ export function initTopHeader(
 
     const appName = document.createElement('span');
     appName.className = 'nr-header-app-name';
-    appName.textContent = 'Kairos Drawer';
+    appName.textContent = 'Xyronos';
 
     const docName = document.createElement('span');
     docName.className = 'nr-header-doc-name';

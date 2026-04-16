@@ -5,7 +5,7 @@
 // Wiring: initAdmin() is called once from index.ts. show()/hide() are driven by
 // the app-level view switcher in index.ts.
 
-import { ICON_CATALOG, IconCatalogEntry, getIconById } from './icon-catalog';
+import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon } from './icon-catalog';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Edit16 from '@carbon/icons/es/edit/16.js';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
@@ -21,10 +21,11 @@ import {
     setIconScope,
     IconScope,
 } from './icon-config';
-import { ShapeRegistry, BUILT_IN_SHAPE_IDS, deleteShape, saveRegistryToStorage } from './shapes/shape-registry';
-import { getServerShapes, publishShape, unpublishShape } from './server-shapes';
+import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, deleteShape, saveRegistryToStorage } from './shapes/shape-registry';
+import { shapeStore } from './shape-store';
+import { componentStore, ComponentDefinition } from './component-store';
 
-type AdminView = 'icon-config' | 'shape-registry' | 'user-settings';
+type AdminView = 'icon-config' | 'component-library' | 'user-settings';
 
 let rootEl: HTMLDivElement | null = null;
 let currentView: AdminView = 'icon-config';
@@ -37,9 +38,9 @@ let iconSearchTerm = '';
 const AVAILABLE_MAX = 300;
 
 const NAV_ITEMS: Array<{ id: AdminView; label: string }> = [
-    { id: 'icon-config',    label: 'Icon Configuration' },
-    { id: 'shape-registry', label: 'Shape Registry' },
-    { id: 'user-settings',  label: 'User Settings' },
+    { id: 'icon-config',       label: 'Icon Configuration' },
+    { id: 'component-library', label: 'Component Library' },
+    { id: 'user-settings',     label: 'User Settings' },
 ];
 
 export function initAdmin(container: HTMLDivElement): void {
@@ -83,27 +84,28 @@ function selectView(view: AdminView): void {
     const contentEl = rootEl.querySelector<HTMLDivElement>('.nr-admin__content');
     if (!contentEl) return;
     contentEl.innerHTML = '';
-    if (view === 'icon-config')    renderIconConfig(contentEl);
-    if (view === 'shape-registry') renderShapeRegistry(contentEl);
-    if (view === 'user-settings')  renderUserSettings(contentEl);
+    if (view === 'icon-config')       renderIconConfig(contentEl);
+    if (view === 'component-library') renderComponentLibrary(contentEl);
+    if (view === 'user-settings')     renderUserSettings(contentEl);
 }
 
-function renderShapeRegistry(container: HTMLElement): void {
+function renderComponentLibrary(container: HTMLElement): void {
     const host = document.createElement('div');
     container.appendChild(host);
 
     const render = () => {
         host.innerHTML = '';
-        buildLocalShapesSection(host, render);
-        buildServerShapesSection(host, render);
+        buildGeneralComponentsSection(host, render);
+        buildUserComponentsSection(host, render);
     };
     render();
 }
 
 function buildShapeRow(
     id: string,
-    def: import('./shapes/shape-registry').ShapeDefaults,
+    def: ShapeDefinition,
     actions: HTMLElement,
+    onCollectionChange?: (value: string) => void,
 ): HTMLTableRowElement {
     const tr = document.createElement('tr');
 
@@ -124,14 +126,27 @@ function buildShapeRow(
     tdName.textContent = def.displayName || '—';
     tr.appendChild(tdName);
 
+    const tdCollection = document.createElement('td');
+    if (onCollectionChange) {
+        const select = document.createElement('select');
+        select.className = 'nr-admin__table-select';
+        for (const col of COMPONENT_COLLECTIONS) {
+            const opt = document.createElement('option');
+            opt.value = col;
+            opt.textContent = col;
+            if ((def.collection || 'General') === col) opt.selected = true;
+            select.appendChild(opt);
+        }
+        select.addEventListener('change', () => onCollectionChange(select.value));
+        tdCollection.appendChild(select);
+    } else {
+        tdCollection.textContent = def.collection || 'General';
+    }
+    tr.appendChild(tdCollection);
+
     const tdBase = document.createElement('td');
     tdBase.textContent = def.baseShape || '—';
     tr.appendChild(tdBase);
-
-    const tdIcon = document.createElement('td');
-    tdIcon.textContent = def.icon || '—';
-    tdIcon.className = 'nr-admin__table-mono';
-    tr.appendChild(tdIcon);
 
     const tdSize = document.createElement('td');
     const w = Math.round(def.defaultSize.width);
@@ -166,12 +181,15 @@ function createActionBtn(iconSvg: string, label: string, onClick: () => void, da
     return btn;
 }
 
-const SHAPE_TABLE_COLUMNS = ['', 'ID', 'Display Name', 'Base Shape', 'Icon', 'Size (W×H)', 'Depth', 'Complex', ''];
+export const COMPONENT_COLLECTIONS = ['General', 'Oracle', 'NetApp'] as const;
+export type ComponentCollection = (typeof COMPONENT_COLLECTIONS)[number];
+
+const TABLE_COLUMNS = ['', 'ID', 'Display Name', 'Collection', 'Base Shape', 'Size (W×H)', 'Depth', 'Complex', ''];
 
 function buildTableHead(): HTMLTableSectionElement {
     const thead = document.createElement('thead');
     const row = document.createElement('tr');
-    for (const col of SHAPE_TABLE_COLUMNS) {
+    for (const col of TABLE_COLUMNS) {
         const th = document.createElement('th');
         th.textContent = col;
         row.appendChild(th);
@@ -180,27 +198,114 @@ function buildTableHead(): HTMLTableSectionElement {
     return thead;
 }
 
-function buildLocalShapesSection(host: HTMLElement, rerender: () => void): void {
+function ensureComponent(id: string, def: ShapeDefinition, category: 'general' | 'user'): void {
+    if (!componentStore.get(category, id)) {
+        componentStore.save({
+            id,
+            name: def.displayName || id,
+            category,
+            shapeId: id,
+            properties: {},
+        });
+    }
+}
+
+function buildGeneralComponentsSection(host: HTMLElement, rerender: () => void): void {
     const heading = document.createElement('h2');
     heading.className = 'nr-admin__heading';
-    heading.textContent = 'Local Shapes';
+    heading.textContent = 'General Components';
     host.appendChild(heading);
 
     const desc = document.createElement('p');
     desc.className = 'nr-admin__desc';
-    desc.textContent = 'Shapes stored in your browser. Publish them to the server to make them available to all users.';
+    desc.textContent = 'Product-level components available to all users.';
     host.appendChild(desc);
 
-    const serverIds = new Set(getServerShapes().map(e => e.id));
+    const generalShapes = shapeStore.list('general');
+
+    if (generalShapes.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'nr-admin__section-empty';
+        empty.textContent = 'No general components yet. Promote components from User Components below.';
+        host.appendChild(empty);
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'nr-admin__table';
+    table.appendChild(buildTableHead());
+
+    const tbody = document.createElement('tbody');
+    for (const stored of generalShapes) {
+        const actions = document.createElement('div');
+        actions.className = 'nr-admin__table-action-group';
+
+        const editBtn = createActionBtn(ACTION_ICON_EDIT, 'Edit', () => {
+            document.dispatchEvent(new CustomEvent('nextrack:navigate-to-shape', { detail: { shapeId: stored.id } }));
+        });
+        actions.appendChild(editBtn);
+
+        const removeBtn = createActionBtn(ACTION_ICON_REMOVE, 'Demote to User Component', () => {
+            if (!confirm(`Move "${stored.definition.displayName || stored.id}" back to User Components?`)) return;
+            shapeStore.remove('general', stored.id);
+            shapeStore.save('user', stored.id, stored.definition);
+            const comp = componentStore.get('general', stored.id);
+            if (comp) {
+                componentStore.remove('general', stored.id);
+                componentStore.save({ ...comp, category: 'user' });
+            }
+            rerender();
+        });
+        actions.appendChild(removeBtn);
+
+        const deleteBtn = createActionBtn(ACTION_ICON_DELETE, 'Delete', () => {
+            if (!confirm(`Delete general component "${stored.definition.displayName || stored.id}"?`)) return;
+            shapeStore.remove('general', stored.id);
+            componentStore.remove('general', stored.id);
+            deleteShape(stored.id);
+            saveRegistryToStorage();
+            document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+            rerender();
+        }, true);
+        actions.appendChild(deleteBtn);
+
+        tbody.appendChild(buildShapeRow(stored.id, stored.definition, actions, (value) => {
+            stored.definition.collection = value === 'General' ? undefined : value;
+            shapeStore.save('general', stored.id, stored.definition);
+            if (ShapeRegistry[stored.id]) {
+                ShapeRegistry[stored.id].collection = stored.definition.collection;
+                saveRegistryToStorage();
+            }
+            document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+        }));
+    }
+
+    table.appendChild(tbody);
+    host.appendChild(table);
+}
+
+function buildUserComponentsSection(host: HTMLElement, rerender: () => void): void {
+    const heading = document.createElement('h2');
+    heading.className = 'nr-admin__heading';
+    heading.style.marginTop = '2rem';
+    heading.textContent = 'User Components';
+    host.appendChild(heading);
+
+    const desc = document.createElement('p');
+    desc.className = 'nr-admin__desc';
+    desc.textContent = 'Your private components. Promote them to General to make them available to all users.';
+    host.appendChild(desc);
+
+    const generalIds = new Set(shapeStore.list('general').map(s => s.id));
 
     const userShapes = Object.entries(ShapeRegistry).filter(
-        ([id]) => !BUILT_IN_SHAPE_IDS.has(id)
+        ([id]) => !BUILT_IN_SHAPE_IDS.has(id) && !generalIds.has(id)
     );
 
     if (userShapes.length === 0) {
         const empty = document.createElement('p');
         empty.className = 'nr-admin__section-empty';
-        empty.textContent = 'No user-defined shapes yet. Create shapes in the Component Designer.';
+        empty.textContent = 'No user components. Create components in the Component Designer.';
         host.appendChild(empty);
         return;
     }
@@ -219,68 +324,30 @@ function buildLocalShapesSection(host: HTMLElement, rerender: () => void): void 
         });
         actions.appendChild(editBtn);
 
-        const publishBtn = createActionBtn(
-            ACTION_ICON_PUBLISH,
-            serverIds.has(id) ? 'Update on server' : 'Publish to server',
-            () => { publishShape(id, def); rerender(); },
-        );
-        actions.appendChild(publishBtn);
+        const promoteBtn = createActionBtn(ACTION_ICON_PUBLISH, 'Promote to General Component', () => {
+            shapeStore.save('general', id, def);
+            ensureComponent(id, def, 'general');
+            componentStore.remove('user', id);
+            rerender();
+        });
+        actions.appendChild(promoteBtn);
 
         const deleteBtn = createActionBtn(ACTION_ICON_DELETE, 'Delete', () => {
-            if (!confirm(`Delete local shape "${def.displayName || id}"?`)) return;
+            if (!confirm(`Delete user component "${def.displayName || id}"?`)) return;
             deleteShape(id);
             saveRegistryToStorage();
+            shapeStore.remove('user', id);
+            componentStore.remove('user', id);
             document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
             rerender();
         }, true);
         actions.appendChild(deleteBtn);
 
-        tbody.appendChild(buildShapeRow(id, def, actions));
-    }
-
-    table.appendChild(tbody);
-    host.appendChild(table);
-}
-
-function buildServerShapesSection(host: HTMLElement, rerender: () => void): void {
-    const heading = document.createElement('h2');
-    heading.className = 'nr-admin__heading';
-    heading.style.marginTop = '2rem';
-    heading.textContent = 'Server Shapes';
-    host.appendChild(heading);
-
-    const desc = document.createElement('p');
-    desc.className = 'nr-admin__desc';
-    desc.textContent = 'Shapes published to the server. All users who open the application will see these shapes in their palette.';
-    host.appendChild(desc);
-
-    const serverShapes = getServerShapes();
-
-    if (serverShapes.length === 0) {
-        const empty = document.createElement('p');
-        empty.className = 'nr-admin__section-empty';
-        empty.textContent = 'No shapes published to the server yet.';
-        host.appendChild(empty);
-        return;
-    }
-
-    const table = document.createElement('table');
-    table.className = 'nr-admin__table';
-    table.appendChild(buildTableHead());
-
-    const tbody = document.createElement('tbody');
-    for (const entry of serverShapes) {
-        const actions = document.createElement('div');
-        actions.className = 'nr-admin__table-action-group';
-
-        const removeBtn = createActionBtn(ACTION_ICON_REMOVE, 'Remove from server', () => {
-            if (!confirm(`Remove "${entry.defaults.displayName || entry.id}" from server?`)) return;
-            unpublishShape(entry.id);
-            rerender();
-        }, true);
-        actions.appendChild(removeBtn);
-
-        tbody.appendChild(buildShapeRow(entry.id, entry.defaults, actions));
+        tbody.appendChild(buildShapeRow(id, def, actions, (value) => {
+            def.collection = value === 'General' ? undefined : value;
+            saveRegistryToStorage();
+            document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+        }));
     }
 
     table.appendChild(tbody);
@@ -314,6 +381,41 @@ function renderIconConfig(container: HTMLElement): void {
         'Add more icons from the full Carbon library via search below.';
     container.appendChild(desc);
 
+    // Upload custom SVG icon
+    const uploadRow = document.createElement('div');
+    uploadRow.className = 'nr-admin__upload-row';
+
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.svg,image/svg+xml';
+    fileInput.style.display = 'none';
+    fileInput.id = 'nr-admin-icon-upload';
+
+    fileInput.addEventListener('change', () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        const label = file.name.replace(/\.[^.]+$/, '');
+        const reader = new FileReader();
+        reader.onload = () => {
+            addUploadedIcon(label, reader.result as string);
+            renderSections();
+        };
+        reader.readAsText(file);
+        fileInput.value = '';
+    });
+
+    const uploadLabel = document.createElement('label');
+    uploadLabel.className = 'nr-admin__upload-btn';
+    uploadLabel.setAttribute('for', 'nr-admin-icon-upload');
+    uploadLabel.textContent = 'Upload SVG Icon';
+    uploadLabel.setAttribute('role', 'button');
+    uploadLabel.tabIndex = 0;
+    uploadLabel.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+
+    uploadRow.appendChild(fileInput);
+    uploadRow.appendChild(uploadLabel);
+    container.appendChild(uploadRow);
+
     // Search input (sticky at the top of the content area).
     const searchWrap = document.createElement('div');
     searchWrap.className = 'nr-admin__search';
@@ -326,7 +428,6 @@ function renderIconConfig(container: HTMLElement): void {
     searchWrap.appendChild(input);
     container.appendChild(searchWrap);
 
-    // Sections host — re-rendered on search/toggle without rebuilding the search input.
     const sectionsHost = document.createElement('div');
     sectionsHost.className = 'nr-admin__sections';
     container.appendChild(sectionsHost);
@@ -336,7 +437,6 @@ function renderIconConfig(container: HTMLElement): void {
         buildSections(sectionsHost);
     };
 
-    // Debounce typing: re-render is O(n) on the full catalog, so avoid per-keystroke churn.
     let searchDebounce: number | null = null;
     input.addEventListener('input', () => {
         iconSearchTerm = input.value;
