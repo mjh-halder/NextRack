@@ -1162,7 +1162,7 @@
     justify-content: space-between;
     width: 100%;
     padding: var(--cds-spacing-03, 8px) var(--cds-spacing-03, 8px) var(--cds-spacing-03, 8px) var(--cds-spacing-05, 16px);
-    background: var(--cds-layer-01, #f4f4f4);
+    background: transparent;
     border: none;
     cursor: pointer;
     font-family: var(--cds-label-01-font-family, 'IBM Plex Sans', sans-serif);
@@ -1174,12 +1174,9 @@
     text-align: left;
 }
 
-.nr-section-header:hover {
-    background: var(--cds-layer-hover-01, #e8e8e8);
-}
-
+.nr-section-header:hover,
 .nr-section-header:active {
-    background: var(--cds-layer-active-01, #d1d1d1);
+    background: transparent;
 }
 
 /* Chevron icon inside section header */
@@ -1204,41 +1201,161 @@
     display: none;
 }
 
-/* Element Tree body: fixed max height, always-visible minimal scrollbar so
-   the user sees there's more content to scroll. */
+/* Palette search box — intentionally not Carbon-styled. Spans the full
+   menu width. Each search has only ONE 1px border (border-bottom); the
+   line above the search is provided by the preceding element's own
+   border-bottom (panel header for Elements; Element Tree section for
+   Components). This avoids 2px doubled lines. */
+.nr-palette-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    margin: 0;
+    padding: 6px 16px;
+    box-sizing: border-box;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+}
+
+/* Element Tree section: provides the line below the tree so the
+   Components search beneath it doesn't need its own border-top. */
+.nr-palette-section--tree {
+    border-bottom: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+}
+
+.nr-palette-search-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--cds-icon-secondary, #525252);
+}
+
+.nr-palette-search-icon svg {
+    width: 14px;
+    height: 14px;
+}
+
+.nr-palette-search-input {
+    flex: 1;
+    min-width: 0;
+    padding: 0 20px 0 0;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--cds-text-primary, #161616);
+}
+
+/* Push the native clear-button (×) flush to the right edge. */
+.nr-palette-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    position: absolute;
+    right: 16px;
+    cursor: pointer;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='%23525252'%3E%3Cpath d='M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+
+.cds--g100 .nr-palette-search {
+    border-bottom-color: var(--cds-border-subtle-01, #393939);
+}
+
+.cds--g100 .nr-palette-section--tree {
+    border-bottom-color: var(--cds-border-subtle-01, #393939);
+}
+
+.cds--g100 .nr-palette-search-icon {
+    color: var(--cds-icon-secondary, #c6c6c6);
+}
+
+.cds--g100 .nr-palette-search-input {
+    color: var(--cds-text-primary, #f4f4f4);
+}
+
+/* Element Tree body: native scrollbar is hidden, a custom always-visible
+   one is drawn alongside the viewport. Flex layout ensures the viewport
+   actually shrinks to the body's max-height so overflow scrolling works. */
 .nr-section-body--tree {
     max-height: 35vh;
-    overflow-y: scroll;
-    scrollbar-width: thin;
-    scrollbar-color: var(--cds-border-subtle-01, #c6c6c6) transparent;
+    overflow: hidden;
+    position: relative;
+    display: flex;
 }
 
-.nr-section-body--tree::-webkit-scrollbar {
-    width: 4px;
+.nr-tree-scroll-wrap {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+    display: flex;
 }
 
-.nr-section-body--tree::-webkit-scrollbar-track {
-    background: transparent;
+.nr-tree-scroll-viewport {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    /* Hide the native scrollbar entirely — the custom track sits next to it. */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding-right: 6px; /* reserve space for the custom track */
 }
 
-.nr-section-body--tree::-webkit-scrollbar-thumb {
-    background: var(--cds-border-subtle-01, #c6c6c6);
-    border-radius: 0;
+.nr-tree-scroll-viewport::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    display: none;
 }
 
-.cds--g100 .nr-section-body--tree {
-    scrollbar-color: var(--cds-border-subtle-01, #525252) transparent;
+.nr-tree-scroll-track {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 6px;
+    height: 100%;
+    background: rgba(141, 141, 141, 0.10);
+    cursor: pointer;
 }
 
-.cds--g100 .nr-section-body--tree::-webkit-scrollbar-thumb {
-    background: var(--cds-border-subtle-01, #525252);
+.nr-tree-scroll-thumb {
+    position: absolute;
+    right: 0;
+    width: 6px;
+    background: rgba(141, 141, 141, 0.35);
+    cursor: pointer;
 }
 
-/* Scrollable container for Components + Zoning */
+.nr-tree-scroll-thumb:hover,
+.nr-tree-scroll-thumb--dragging {
+    background: rgba(141, 141, 141, 0.6);
+}
+
+.cds--g100 .nr-tree-scroll-track {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.cds--g100 .nr-tree-scroll-thumb {
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.cds--g100 .nr-tree-scroll-thumb:hover,
+.cds--g100 .nr-tree-scroll-thumb--dragging {
+    background: rgba(255, 255, 255, 0.45);
+}
+
+/* Scrollable container for Components + Zoning. The line above is provided
+   by the preceding Components search's border-bottom — no own border-top. */
 .nr-palette-scrollable {
     flex: 1;
     overflow-y: auto;
-    border-top: 1px solid var(--cds-border-subtle-01, #e0e0e0);
     min-height: 0;
 }
 
@@ -1282,6 +1399,17 @@
     background: var(--cds-layer-hover-01, #e8e8e8);
 }
 
+/* While the viewport is actively scrolling, suppress row hover highlights
+   so the cells don't flicker as content moves under a stationary cursor.
+   Re-enabled ~150 ms after the last scroll event (see palette.ts). */
+.nr-tree-scrolling .nr-tree-row:hover {
+    background: transparent;
+}
+
+.nr-tree-scrolling .nr-tree-element--selected > .nr-tree-row {
+    /* keep the selected highlight unchanged — only hover is suppressed */
+}
+
 /* Level-1 indent: children inside a zone */
 .nr-tree-children .nr-tree-row {
     padding-inline-start: 26px; /* 8px base + 16px toggle + 2px extra nesting hint */
@@ -1296,6 +1424,74 @@
 .nr-tree-element--selected > .nr-tree-row {
     background: var(--cds-layer-selected-01, #e0e0e0);
     border-inline-start-color: var(--cds-interactive, #0f62fe);
+}
+
+/* Drag-and-drop reorder — Carbon blue thin drop indicator.
+   Positioned via ::before (above) / ::after (below) so it never affects layout. */
+.nr-tree-row {
+    position: relative;
+}
+
+.nr-tree-row--dragging {
+    opacity: 0.5;
+}
+
+.nr-tree-row--drop-above::before,
+.nr-tree-row--drop-below::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--cds-interactive, #0f62fe);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.nr-tree-row--drop-above::before {
+    top: -1px;
+}
+
+.nr-tree-row--drop-below::after {
+    bottom: -1px;
+}
+
+/* Element → zone: highlight the zone row as a valid drop target. */
+.nr-tree-row--drop-into {
+    background: rgba(15, 98, 254, 0.1);
+    outline: 1px solid var(--cds-interactive, #0f62fe);
+    outline-offset: -1px;
+}
+
+/* Drag handle for zone rows — sits on the right edge, only visible on hover */
+.nr-tree-drag-handle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    flex-shrink: 0;
+    margin-left: auto;
+    color: var(--cds-icon-secondary, #525252);
+    cursor: grab;
+    opacity: 0;
+}
+
+.nr-tree-drag-handle svg {
+    width: 12px;
+    height: 12px;
+}
+
+.nr-tree-row:hover .nr-tree-drag-handle {
+    opacity: 0.6;
+}
+
+.nr-tree-row:hover .nr-tree-drag-handle:hover {
+    opacity: 1;
+}
+
+.cds--g100 .nr-tree-drag-handle {
+    color: var(--cds-icon-secondary, #c6c6c6);
 }
 
 /* Toggle triangle: right-pointing by default (collapsed), rotates to down (expanded) */

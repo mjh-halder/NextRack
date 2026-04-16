@@ -1,5 +1,5 @@
 import { Model } from '@joint/decorators';
-import { dia, elementTools } from '@joint/core';
+import { dia } from '@joint/core';
 import svg from './frame.svg';
 import IsometricShape, { View } from '../isometric-shape';
 import { FrameCornerControl } from '../../tools';
@@ -31,11 +31,6 @@ export class Frame extends IsometricShape {
                 new FrameCornerControl({ corner: 'bottom-left' }),
                 new FrameCornerControl({ corner: 'top-right' }),
                 new FrameCornerControl({ corner: 'top-left' }),
-                new elementTools.Remove({
-                    x: '100%',
-                    y: 0,
-                    offset: { x: -8, y: 8 },
-                }),
             ],
         });
         this.findView(paper).addTools(toolView);

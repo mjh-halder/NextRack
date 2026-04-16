@@ -1578,7 +1578,6 @@ function applyFormFactorToCanvas() {
     shape.position(pos.x, pos.y);
     shape.toggleView(View.Isometric);
     graph.addCell(shape);
-    shape.addTools(paper, View.Isometric);
     currentShape = shape;
 
     const shape2D = getPreviewFactory(currentShapeId, selectedBaseShape)();
@@ -1684,6 +1683,7 @@ function onSave() {
         });
         saveRegistryToStorage();
         document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+        buildPalettePanel();
         return;
     }
 
@@ -1716,6 +1716,7 @@ function onSave() {
     });
     saveRegistryToStorage();
     document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+    buildPalettePanel();
 }
 
 function centerShapeOnCanvas(shape: IsometricShape, shape2D: IsometricShape | null) {
@@ -2567,7 +2568,6 @@ function onComplexShapeToggle(enabled: boolean) {
         shape.position(posX, posY);
         shape.toggleView(View.Isometric);
         graph.addCell(shape);
-        shape.addTools(paper, View.Isometric);
         currentShape = shape;
 
         const shape2D = factory();
@@ -3207,7 +3207,6 @@ function loadShapeIntoCanvas(id: string) {
         shape.position(posX, posY);
         shape.toggleView(View.Isometric);
         graph.addCell(shape);
-        shape.addTools(paper, View.Isometric);
         currentShape = shape;
 
         const shape2D = factory();
@@ -3252,10 +3251,7 @@ function loadShapeIntoCanvas(id: string) {
 // layer selection is managed exclusively through the Layers panel.
 paper.on('element:pointerup', (elementView: dia.ElementView) => {
     if (isComplexShape) return;
-    paper.removeTools();
-    const shape = elementView.model as IsometricShape;
-    shape.addTools(paper, View.Isometric);
-    currentShape = shape;
+    currentShape = elementView.model as IsometricShape;
 });
 
 // ── Exported panel shim ────────────────────────────────────────────────────────

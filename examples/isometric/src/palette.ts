@@ -11,6 +11,8 @@ import { carbonIconToString, CarbonIcon } from './icons';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import CaretRight16 from '@carbon/icons/es/caret--right/16.js';
 import Area16 from '@carbon/icons/es/area/16.js';
+import Search16 from '@carbon/icons/es/search/16.js';
+import DragVertical16 from '@carbon/icons/es/drag--vertical/16.js';
 import { getIconById } from './icon-catalog';
 
 const ICON_CHEVRON_DOWN = carbonIconToString(ChevronDown16 as CarbonIcon);
@@ -19,6 +21,10 @@ const ICON_CHEVRON_DOWN = carbonIconToString(ChevronDown16 as CarbonIcon);
 const ICON_TREE_TOGGLE = carbonIconToString(CaretRight16 as CarbonIcon);
 // Carbon "Area" icon used for zones in the element tree.
 const ICON_TREE_ZONE = carbonIconToString(Area16 as CarbonIcon);
+// Carbon "Search" icon used inside the palette search inputs.
+const ICON_SEARCH = carbonIconToString(Search16 as CarbonIcon);
+// Carbon "Drag Vertical" icon shown as a drag handle on zone rows.
+const ICON_DRAG_VERTICAL = carbonIconToString(DragVertical16 as CarbonIcon);
 
 interface PaletteItem {
     label: string;
@@ -53,6 +59,18 @@ export class ComponentPalette {
     private elementTreeListEl: HTMLUListElement;
     private selectedTreeId: string | null = null;
     private treeItemEls = new Map<string, HTMLLIElement>();
+    private treeViewport: HTMLDivElement | null = null;
+    // Drag-and-drop state for element-tree reordering.
+    private dragCellId: string | null = null;
+    // Search filter state.
+    private treeSearchTerm = '';
+    private componentSearchTerm = '';
+    // Callback fired when a zone should be highlighted in the canvas during
+    // element-tree drag-drop (zoneId = highlight, null = clear).
+    private onZoneDropHighlight: ((zoneId: string | null) => void) | null = null;
+    // Returns the currently selected zone (Frame) on the canvas, if any.
+    // Set by the system designer so addToGraph can embed new components.
+    private getActiveZone: (() => Frame | null) | null = null;
 
     constructor(
         el: HTMLElement,
@@ -68,11 +86,12 @@ export class ComponentPalette {
         this.onTreeSelect = onTreeSelect;
         this.build();
 
-        graph.on('add remove reset change:meta change:parent', () => this.refreshElementTree());
+        graph.on('add remove reset change:meta change:parent change:z', () => this.refreshElementTree());
         document.addEventListener('nextrack:registry-changed', () => this.refresh());
     }
 
-    /** Update tree selection highlight without triggering the onTreeSelect callback. */
+    /** Update tree selection highlight without triggering the onTreeSelect callback.
+     *  Also scrolls the tree viewport so the selected item is visible. */
     setTreeSelection(id: string | null) {
         if (this.selectedTreeId) {
             const prev = this.treeItemEls.get(this.selectedTreeId);
@@ -81,7 +100,33 @@ export class ComponentPalette {
         this.selectedTreeId = id;
         if (id) {
             const el = this.treeItemEls.get(id);
-            if (el) el.classList.add('nr-tree-element--selected');
+            if (el) {
+                el.classList.add('nr-tree-element--selected');
+                this.scrollTreeToItem(el);
+            }
+        }
+    }
+
+    /** Register a callback invoked when an element-tree drag-drop operation
+     *  wants to highlight (or clear) a target zone on the canvas. */
+    setZoneDropHighlightCallback(cb: (zoneId: string | null) => void): void {
+        this.onZoneDropHighlight = cb;
+    }
+
+    /** Provide a getter that returns the currently selected zone on the canvas.
+     *  Used by addToGraph to embed new components into the active zone. */
+    setActiveZoneGetter(fn: () => Frame | null): void {
+        this.getActiveZone = fn;
+    }
+
+    /** Scroll the tree viewport so the given <li> is visible. */
+    private scrollTreeToItem(li: HTMLElement): void {
+        if (!this.treeViewport) return;
+        const vp = this.treeViewport;
+        const liRect = li.getBoundingClientRect();
+        const vpRect = vp.getBoundingClientRect();
+        if (liRect.top < vpRect.top || liRect.bottom > vpRect.bottom) {
+            li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         }
     }
 
@@ -89,6 +134,7 @@ export class ComponentPalette {
     refresh() {
         this.listEl.innerHTML = '';
         this.buildList();
+        this.applyComponentSearchFilter();
     }
 
     /** Rebuild the element tree when the graph changes. */
@@ -102,6 +148,7 @@ export class ComponentPalette {
         } else {
             this.selectedTreeId = null;
         }
+        this.applyTreeSearchFilter();
     }
 
     private build() {
@@ -116,20 +163,200 @@ export class ComponentPalette {
         header.appendChild(title);
         this.el.appendChild(header);
 
-        // Element Tree section (collapsible, max 35vh, sticky at top)
+        // Search Elements input — filters the element tree below.
+        const treeSearchBox = document.createElement('div');
+        treeSearchBox.className = 'nr-palette-search';
+        const treeSearchIcon = document.createElement('span');
+        treeSearchIcon.className = 'nr-palette-search-icon';
+        treeSearchIcon.innerHTML = ICON_SEARCH;
+        treeSearchIcon.setAttribute('aria-hidden', 'true');
+        const treeSearch = document.createElement('input');
+        treeSearch.type = 'search';
+        treeSearch.className = 'nr-palette-search-input';
+        treeSearch.placeholder = 'Search elements';
+        treeSearch.setAttribute('aria-label', 'Search elements');
+        treeSearch.addEventListener('input', () => {
+            this.treeSearchTerm = treeSearch.value;
+            this.applyTreeSearchFilter();
+        });
+        treeSearchBox.appendChild(treeSearchIcon);
+        treeSearchBox.appendChild(treeSearch);
+        this.el.appendChild(treeSearchBox);
+
+        // Element Tree section (collapsible, max 35vh, sticky at top).
+        // The tree lives inside a custom-scrollbar wrapper so the scrollbar
+        // is permanently visible regardless of OS scrollbar auto-hide.
         this.elementTreeListEl = document.createElement('ul');
         this.elementTreeListEl.className = 'nr-tree';
         this.elementTreeListEl.setAttribute('role', 'tree');
         this.elementTreeListEl.setAttribute('aria-label', 'Element Tree');
-        const treeSection = this.buildCollapsibleSection('Element Tree', this.elementTreeListEl, { bodyClass: 'nr-section-body--tree' });
+
+        const treeViewport = document.createElement('div');
+        treeViewport.className = 'nr-tree-scroll-viewport';
+        treeViewport.appendChild(this.elementTreeListEl);
+        this.treeViewport = treeViewport;
+
+        const treeWrap = document.createElement('div');
+        treeWrap.className = 'nr-tree-scroll-wrap';
+        treeWrap.appendChild(treeViewport);
+
+        const scrollTrack = document.createElement('div');
+        scrollTrack.className = 'nr-tree-scroll-track';
+        const scrollThumb = document.createElement('div');
+        scrollThumb.className = 'nr-tree-scroll-thumb';
+        scrollTrack.appendChild(scrollThumb);
+        treeWrap.appendChild(scrollTrack);
+
+        const treeSection = this.buildCollapsibleSection('Element Tree', treeWrap, { bodyClass: 'nr-section-body--tree' });
+        treeSection.classList.add('nr-palette-section--tree');
         this.el.appendChild(treeSection);
         this.buildElementTree();
+
+        // Sync the custom thumb with viewport scroll position + content size.
+        let lastThumbH = 0;
+        let lastTrackH = 0;
+        const updateThumb = () => {
+            const vh = treeViewport.clientHeight;
+            const ch = treeViewport.scrollHeight;
+            lastTrackH = vh;
+            if (ch <= vh || vh === 0) {
+                // Content fits — show a full-track thumb so the strip stays visible.
+                lastThumbH = vh;
+                scrollThumb.style.height = '100%';
+                scrollThumb.style.top    = '0';
+                return;
+            }
+            const ratio    = vh / ch;
+            const thumbH   = Math.max(20, Math.round(vh * ratio));
+            const maxScroll = ch - vh;
+            const maxTop    = vh - thumbH;
+            const top       = maxScroll === 0 ? 0 : Math.round((treeViewport.scrollTop / maxScroll) * maxTop);
+            lastThumbH = thumbH;
+            scrollThumb.style.height = `${thumbH}px`;
+            scrollThumb.style.top    = `${top}px`;
+        };
+        treeViewport.addEventListener('scroll', updateThumb);
+        new ResizeObserver(updateThumb).observe(treeViewport);
+        new MutationObserver(updateThumb).observe(this.elementTreeListEl, { childList: true, subtree: true });
+        requestAnimationFrame(updateThumb);
+
+        // Suppress row hover highlights while scrolling so the visual state
+        // doesn't strobe as rows shift under a stationary cursor. Reset
+        // shortly after the last scroll event.
+        let scrollIdleTimer: number | null = null;
+        treeViewport.addEventListener('scroll', () => {
+            treeViewport.classList.add('nr-tree-scrolling');
+            if (scrollIdleTimer !== null) window.clearTimeout(scrollIdleTimer);
+            scrollIdleTimer = window.setTimeout(() => {
+                treeViewport.classList.remove('nr-tree-scrolling');
+                scrollIdleTimer = null;
+            }, 150);
+        });
+
+        // Drag the thumb to scroll. Movement in track-px → movement in
+        // content-px scaled by (content / viewport).
+        scrollThumb.addEventListener('mousedown', (evt: MouseEvent) => {
+            evt.preventDefault();
+            evt.stopPropagation();
+            const startY      = evt.clientY;
+            const startScroll = treeViewport.scrollTop;
+            scrollThumb.classList.add('nr-tree-scroll-thumb--dragging');
+            const onMove = (e: MouseEvent) => {
+                const trackUsable = lastTrackH - lastThumbH;
+                if (trackUsable <= 0) return;
+                const maxScroll = treeViewport.scrollHeight - treeViewport.clientHeight;
+                const dy = e.clientY - startY;
+                treeViewport.scrollTop = Math.max(0, Math.min(maxScroll, startScroll + (dy * maxScroll) / trackUsable));
+            };
+            const onUp = () => {
+                scrollThumb.classList.remove('nr-tree-scroll-thumb--dragging');
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup',   onUp);
+            };
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup',   onUp);
+        });
+
+        // Click on the track jumps the viewport so the thumb centres under the cursor.
+        scrollTrack.addEventListener('mousedown', (evt: MouseEvent) => {
+            if (evt.target === scrollThumb) return; // thumb has its own handler
+            evt.preventDefault();
+            const rect = scrollTrack.getBoundingClientRect();
+            const y    = evt.clientY - rect.top;
+            const maxScroll = treeViewport.scrollHeight - treeViewport.clientHeight;
+            const trackUsable = lastTrackH - lastThumbH;
+            if (trackUsable <= 0) return;
+            const target = ((y - lastThumbH / 2) / trackUsable) * maxScroll;
+            treeViewport.scrollTop = Math.max(0, Math.min(maxScroll, target));
+        });
+
+        // Search Components input — filters items in Components/Zoning sections.
+        const componentSearchBox = document.createElement('div');
+        componentSearchBox.className = 'nr-palette-search';
+        const componentSearchIcon = document.createElement('span');
+        componentSearchIcon.className = 'nr-palette-search-icon';
+        componentSearchIcon.innerHTML = ICON_SEARCH;
+        componentSearchIcon.setAttribute('aria-hidden', 'true');
+        const componentSearch = document.createElement('input');
+        componentSearch.type = 'search';
+        componentSearch.className = 'nr-palette-search-input';
+        componentSearch.placeholder = 'Search components';
+        componentSearch.setAttribute('aria-label', 'Search components');
+        componentSearch.addEventListener('input', () => {
+            this.componentSearchTerm = componentSearch.value;
+            this.applyComponentSearchFilter();
+        });
+        componentSearchBox.appendChild(componentSearchIcon);
+        componentSearchBox.appendChild(componentSearch);
+        this.el.appendChild(componentSearchBox);
 
         // Components + Zoning sections (scrollable remainder)
         this.listEl = document.createElement('div');
         this.listEl.className = 'nr-palette-scrollable';
         this.el.appendChild(this.listEl);
         this.buildList();
+    }
+
+    /** Hide tree rows whose label doesn't match. Zones stay visible if any
+        descendant matches. */
+    private applyTreeSearchFilter(): void {
+        const term = this.treeSearchTerm.trim().toLowerCase();
+        const filterUl = (ul: HTMLUListElement): boolean => {
+            let anyVisible = false;
+            const lis = Array.from(ul.children) as HTMLElement[];
+            for (const li of lis) {
+                if (li.classList.contains('nr-tree-element')) {
+                    const lbl = li.querySelector<HTMLElement>('.nr-tree-label')?.textContent ?? '';
+                    const match = !term || lbl.toLowerCase().includes(term);
+                    li.style.display = match ? '' : 'none';
+                    if (match) anyVisible = true;
+                } else if (li.classList.contains('nr-tree-zone')) {
+                    const lbl = li.querySelector<HTMLElement>('.nr-tree-row .nr-tree-label')?.textContent ?? '';
+                    const ownMatch = !term || lbl.toLowerCase().includes(term);
+                    const childUl  = li.querySelector<HTMLUListElement>(':scope > .nr-tree-children');
+                    const childMatch = childUl ? filterUl(childUl) : false;
+                    const visible = ownMatch || childMatch;
+                    li.style.display = visible ? '' : 'none';
+                    if (visible) anyVisible = true;
+                }
+            }
+            return anyVisible;
+        };
+        filterUl(this.elementTreeListEl);
+    }
+
+    /** Hide palette items whose label doesn't match. Empty sections stay
+        visible (header still shown) so the user knows the section exists. */
+    private applyComponentSearchFilter(): void {
+        const term = this.componentSearchTerm.trim().toLowerCase();
+        const items = this.listEl.querySelectorAll<HTMLElement>('.nr-palette-item');
+        items.forEach(btn => {
+            const lbl = btn.querySelector<HTMLElement>('.nr-palette-item-label')?.textContent
+                     ?? btn.textContent ?? '';
+            const match = !term || lbl.toLowerCase().includes(term);
+            const li = btn.closest('li');
+            if (li) (li as HTMLElement).style.display = match ? '' : 'none';
+        });
     }
 
     /** Builds a collapsible section with a clickable header and chevron. */
@@ -214,6 +441,11 @@ export class ComponentPalette {
         const row = document.createElement('div');
         row.className = 'nr-tree-row';
 
+        const dragHandle = document.createElement('span');
+        dragHandle.className = 'nr-tree-drag-handle';
+        dragHandle.innerHTML = ICON_DRAG_VERTICAL;
+        dragHandle.setAttribute('aria-hidden', 'true');
+
         const toggleSpan = document.createElement('span');
         toggleSpan.className = 'nr-tree-toggle';
         toggleSpan.innerHTML = ICON_TREE_TOGGLE;
@@ -225,6 +457,7 @@ export class ComponentPalette {
 
         row.appendChild(toggleSpan);
         row.appendChild(labelSpan);
+        row.appendChild(dragHandle);
         li.appendChild(row);
 
         const childrenUl = document.createElement('ul');
@@ -244,7 +477,13 @@ export class ComponentPalette {
             const expanded = li.getAttribute('aria-expanded') === 'true';
             li.setAttribute('aria-expanded', String(!expanded));
             childrenUl.style.display = expanded ? 'none' : '';
+            // When opening a zone, scroll so the children area is visible.
+            if (!expanded && childrenUl.children.length > 0) {
+                requestAnimationFrame(() => this.scrollTreeToItem(childrenUl.lastElementChild as HTMLElement));
+            }
         });
+
+        this.attachRowDragHandlers(row, frame);
 
         parentUl.appendChild(li);
     }
@@ -285,8 +524,158 @@ export class ComponentPalette {
 
         row.addEventListener('click', () => this.onTreeSelect(String(cell.id)));
 
+        this.attachElementDragHandlers(row, cell);
+
         parentUl.appendChild(li);
         this.treeItemEls.set(String(cell.id), li);
+    }
+
+    /**
+     * Drag handlers for ZONE rows. Zones can be reordered among siblings
+     * (same parent) and can also receive element drops (component transfer).
+     */
+    private attachRowDragHandlers(row: HTMLElement, cell: dia.Cell): void {
+        row.setAttribute('draggable', 'true');
+        const cellId = String(cell.id);
+
+        row.addEventListener('dragstart', (evt: DragEvent) => {
+            this.dragCellId = cellId;
+            if (evt.dataTransfer) {
+                evt.dataTransfer.effectAllowed = 'move';
+                evt.dataTransfer.setData('text/plain', cellId);
+            }
+            row.classList.add('nr-tree-row--dragging');
+        });
+
+        row.addEventListener('dragend', () => {
+            this.dragCellId = null;
+            row.classList.remove('nr-tree-row--dragging');
+            this.clearDropIndicators();
+            this.onZoneDropHighlight?.(null);
+        });
+
+        row.addEventListener('dragover', (evt: DragEvent) => {
+            if (!this.dragCellId || this.dragCellId === cellId) return;
+            const dragged = this.graph.getCell(this.dragCellId);
+            if (!dragged) return;
+
+            // Element → zone transfer?
+            if (!dragged.get('isFrame')) {
+                evt.preventDefault();
+                if (evt.dataTransfer) evt.dataTransfer.dropEffect = 'move';
+                this.clearDropIndicators();
+                row.classList.add('nr-tree-row--drop-into');
+                this.onZoneDropHighlight?.(cellId);
+                return;
+            }
+
+            // Zone → zone reorder (same parent only).
+            if (!this.canReorderInto(this.dragCellId, cellId)) return;
+            evt.preventDefault();
+            if (evt.dataTransfer) evt.dataTransfer.dropEffect = 'move';
+            const rect = row.getBoundingClientRect();
+            const above = (evt.clientY - rect.top) < rect.height / 2;
+            this.clearDropIndicators();
+            row.classList.add(above ? 'nr-tree-row--drop-above' : 'nr-tree-row--drop-below');
+        });
+
+        row.addEventListener('dragleave', () => {
+            row.classList.remove('nr-tree-row--drop-above', 'nr-tree-row--drop-below', 'nr-tree-row--drop-into');
+            this.onZoneDropHighlight?.(null);
+        });
+
+        row.addEventListener('drop', (evt: DragEvent) => {
+            if (!this.dragCellId || this.dragCellId === cellId) return;
+            const dragged = this.graph.getCell(this.dragCellId);
+            if (!dragged) return;
+            evt.preventDefault();
+            evt.stopPropagation();
+
+            if (!dragged.get('isFrame')) {
+                // Element → zone: transfer and reposition.
+                this.transferToZone(this.dragCellId, cellId);
+            } else if (this.canReorderInto(this.dragCellId, cellId)) {
+                // Zone → zone: reorder.
+                const rect = row.getBoundingClientRect();
+                const above = (evt.clientY - rect.top) < rect.height / 2;
+                this.reorderSiblings(this.dragCellId, cellId, above ? 'before' : 'after');
+            }
+
+            this.clearDropIndicators();
+            this.onZoneDropHighlight?.(null);
+            this.dragCellId = null;
+        });
+    }
+
+    /**
+     * Drag handlers for ELEMENT (non-zone) rows. Elements can be dragged
+     * onto zones but cannot be reordered among themselves. No drag-handle
+     * icon is shown — the entire row is the grip.
+     */
+    private attachElementDragHandlers(row: HTMLElement, cell: dia.Cell): void {
+        row.setAttribute('draggable', 'true');
+        const cellId = String(cell.id);
+
+        row.addEventListener('dragstart', (evt: DragEvent) => {
+            this.dragCellId = cellId;
+            if (evt.dataTransfer) {
+                evt.dataTransfer.effectAllowed = 'move';
+                evt.dataTransfer.setData('text/plain', cellId);
+            }
+            row.classList.add('nr-tree-row--dragging');
+        });
+
+        row.addEventListener('dragend', () => {
+            this.dragCellId = null;
+            row.classList.remove('nr-tree-row--dragging');
+            this.clearDropIndicators();
+        });
+
+        // Element rows do NOT accept drops — no dragover/drop handlers.
+    }
+
+    private clearDropIndicators(): void {
+        this.elementTreeListEl.querySelectorAll('.nr-tree-row--drop-above, .nr-tree-row--drop-below, .nr-tree-row--drop-into')
+            .forEach(el => el.classList.remove('nr-tree-row--drop-above', 'nr-tree-row--drop-below', 'nr-tree-row--drop-into'));
+    }
+
+    /** Reorder only makes sense when source and target share the same parent. */
+    private canReorderInto(draggedId: string, targetId: string): boolean {
+        const dragged = this.graph.getCell(draggedId);
+        const target  = this.graph.getCell(targetId);
+        if (!dragged || !target) return false;
+        const draggedParent = dragged.getParentCell()?.id ?? null;
+        const targetParent  = target.getParentCell()?.id  ?? null;
+        return draggedParent === targetParent;
+    }
+
+    private reorderSiblings(draggedId: string, targetId: string, position: 'before' | 'after'): void {
+        const dragged = this.graph.getCell(draggedId);
+        const target  = this.graph.getCell(targetId);
+        if (!dragged || !target) return;
+        const targetZ = (target.get('z') as number | undefined) ?? 0;
+        dragged.set('z', position === 'before' ? targetZ - 0.001 : targetZ + 0.001);
+    }
+
+    /** Move an element into a zone: unembed from current parent, embed into
+        the target zone, and reposition to the zone's lower-left corner. */
+    private transferToZone(elementId: string, zoneId: string): void {
+        const element = this.graph.getCell(elementId) as dia.Element | null;
+        const zone    = this.graph.getCell(zoneId)    as Frame      | null;
+        if (!element || !zone) return;
+        // Already in this zone? Nothing to do.
+        if (element.getParentCell()?.id === zone.id) return;
+
+        const currentParent = element.getParentCell();
+        if (currentParent) (currentParent as dia.Element).unembed(element);
+        zone.embed(element);
+
+        // Place at the lower-left corner of the zone with one grid-unit padding.
+        const { x: zx, y: zy } = zone.position();
+        const { height: zh }   = zone.size();
+        const { height: eh }   = (element as dia.Element).size();
+        const pad = GRID_SIZE;
+        (element as dia.Element).position(zx + pad, zy + zh - eh - pad);
     }
 
     private buildList() {
@@ -379,6 +768,7 @@ export class ComponentPalette {
 
             cc.toggleView(view);
             this.graph.addCell(cc);
+            this.embedIntoActiveZone(cc);
             this.onCreated(cc);
             return;
         }
@@ -393,6 +783,20 @@ export class ComponentPalette {
         shape.toggleView(view);
 
         this.graph.addCell(shape);
+        this.embedIntoActiveZone(shape);
         this.onCreated(shape);
+    }
+
+    /** If a zone is currently selected on the canvas, embed the new element
+     *  into it and reposition to the zone's lower-left corner. */
+    private embedIntoActiveZone(element: IsometricShape): void {
+        const zone = this.getActiveZone?.() ?? null;
+        if (!zone) return;
+        zone.embed(element);
+        const { x: zx, y: zy } = zone.position();
+        const { height: zh }   = zone.size();
+        const { height: eh }   = element.size();
+        const pad = GRID_SIZE;
+        element.position(zx + pad, zy + zh - eh - pad);
     }
 }

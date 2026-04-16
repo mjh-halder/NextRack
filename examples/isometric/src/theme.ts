@@ -1,6 +1,8 @@
 export const GRID_SIZE = 20;
 export const GRID_COUNT = 25;
-export const HIGHLIGHT_COLOR = '#BE4B87';
+// $support-caution-major — used for all dynamic editing tools (selection
+// borders, zone resize handles, connect-tool icon).
+export const HIGHLIGHT_COLOR = '#ff832b';
 export const BG_COLOR = '#FFFFFF';
 export const SCALE = 2;
 export const ISOMETRIC_SCALE = 0.8602

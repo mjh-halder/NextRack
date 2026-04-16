@@ -166,15 +166,24 @@ export class PropertyPanel {
         }
         this.el.appendChild(this.linkSection);
 
-        // Action buttons — stacked vertically with uniform spacing
+        // Auto-save: zone fields apply instantly.
+        this.zoneNameInput.addEventListener('input', () => this.saveZone());
+        this.zoneLabelHiddenEl.addEventListener('change', () => this.saveZone());
+
+        // Auto-save: node fields apply instantly.
+        for (const field of NODE_FIELDS) {
+            this.nodeInputs[field.key].addEventListener('input', () => this.saveNode());
+        }
+        this.nodeLabelHiddenEl.addEventListener('change', () => this.saveNode());
+
+        // Auto-save: link fields apply instantly.
+        for (const field of LINK_FIELDS) {
+            this.linkInputs[field.key].addEventListener('input', () => this.saveLink());
+        }
+
+        // Action buttons — stacked vertically with uniform spacing. No Save.
         const actionsEl = document.createElement('div');
         actionsEl.className = 'inspector-actions';
-
-        const saveBtn = document.createElement('button');
-        saveBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
-        saveBtn.textContent = 'Save';
-        saveBtn.addEventListener('click', () => this.save());
-        actionsEl.appendChild(saveBtn);
 
         this.duplicateBtn = document.createElement('button');
         this.duplicateBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
@@ -193,7 +202,14 @@ export class PropertyPanel {
         this.deleteBtn = document.createElement('button');
         this.deleteBtn.className = 'cds--btn cds--btn--danger--tertiary cds--btn--sm';
         this.deleteBtn.textContent = 'Delete';
-        this.deleteBtn.addEventListener('click', () => this.actions.onDelete());
+        this.deleteBtn.addEventListener('click', () => {
+            if (this.currentZone) {
+                this.currentZone.remove();
+                this.hide();
+            } else {
+                this.actions.onDelete();
+            }
+        });
         actionsEl.appendChild(this.deleteBtn);
 
         this.el.appendChild(actionsEl);
@@ -223,6 +239,7 @@ export class PropertyPanel {
             btn.addEventListener('click', () => {
                 this.selectedZoneColor = color.base;
                 this.syncZoneColorSwatches();
+                this.saveZone();
             });
             swatchRow.appendChild(btn);
             this.zoneColorSwatchBtns.push({ btn, color: color.base });
@@ -282,7 +299,7 @@ export class PropertyPanel {
             dot.className = `nr-pos-dot nr-pos-dot--${pos.dot}`;
             btn.appendChild(dot);
 
-            btn.addEventListener('click', () => { selectedKey = pos.key; sync(); });
+            btn.addEventListener('click', () => { selectedKey = pos.key; sync(); this.saveZone(); });
             picker.appendChild(btn);
             entries.push({ btn, key: pos.key });
         }
@@ -424,8 +441,10 @@ export class PropertyPanel {
         this.zoneSection.style.display = 'none';
         this.linkSection.style.display = 'none';
         this.duplicateBtn.style.display = '';
+        this.duplicateBtn.textContent = 'Duplicate';
         this.duplicateZoneBtn.style.display = 'none';
         this.deleteBtn.style.display = '';
+        this.deleteBtn.textContent = 'Delete';
         this.el.classList.remove('inspector-hidden');
     }
 
@@ -451,6 +470,7 @@ export class PropertyPanel {
         this.duplicateBtn.style.display = 'none';
         this.duplicateZoneBtn.style.display = '';
         this.deleteBtn.style.display = '';
+        this.deleteBtn.textContent = 'Delete Zone';
         this.el.classList.remove('inspector-hidden');
     }
 

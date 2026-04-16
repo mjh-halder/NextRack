@@ -107,7 +107,7 @@ const SIDEBAR_INSET = 276;
 
 // Carbon --cds-interactive blue, used as the tree-selection highlight on shapes
 const TREE_HIGHLIGHT_ID = 'tree-selection';
-const TREE_HIGHLIGHT_COLOR = '#0f62fe';
+const TREE_HIGHLIGHT_COLOR = HIGHLIGHT_COLOR;
 
 let currentView = View.Isometric;
 let currentCell: IsometricShape | Link = null;
@@ -190,8 +190,6 @@ const paper = new dia.Paper({
             step: GRID_SIZE / 2,
             startDirections: ['top', 'bottom', 'left', 'right'],
             endDirections:   ['top', 'bottom', 'left', 'right'],
-            // Use the existing obstacle detection to determine if the point is an obstacle
-            // By default, the router would need to build its own obstacles map
             isPointObstacle: (point: g.Point) => {
                 const x = Math.floor(point.x / GRID_SIZE) * GRID_SIZE - GRID_SIZE;
                 const y = Math.floor(point.y / GRID_SIZE) * GRID_SIZE - GRID_SIZE;
@@ -213,7 +211,7 @@ const paper = new dia.Paper({
                 layer: dia.Paper.Layers.BACK,
                 attrs: {
                     'stroke': HIGHLIGHT_COLOR,
-                    'stroke-width': 3
+                    'stroke-width': 3,
                 }
             }
         }
@@ -762,6 +760,30 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
     setTreeHighlight(cell);
 });
 
+// Let the palette know which zone is selected so new components get embedded.
+palette.setActiveZoneGetter(() => currentFrame);
+
+// When element-tree drag-drop targets a zone, tint the zone on the canvas
+// with the same orange used by the canvas drag highlight.
+palette.setZoneDropHighlightCallback((zoneId) => {
+    // Clear previous
+    if (dropTargetZone) {
+        dropTargetZone.attr({
+            body: { fill: ZONE_DEFAULT_FILL, stroke: ZONE_DEFAULT_STROKE },
+            label: { fill: ZONE_DEFAULT_STROKE },
+        });
+        dropTargetZone = null;
+    }
+    if (!zoneId) return;
+    const zone = graph.getCell(zoneId);
+    if (!zone || !zone.get('isFrame')) return;
+    (zone as Frame).attr({
+        body: { fill: ZONE_DROP_FILL, stroke: ZONE_DROP_STROKE },
+        label: { fill: ZONE_DROP_STROKE },
+    });
+    dropTargetZone = zone as Frame;
+});
+
 // Zone assignment helpers
 
 /** Collects IDs of all cells recursively embedded within element (any depth). */
@@ -828,7 +850,48 @@ paper.on('link:pointerup', (linkView: dia.LinkView) => {
     setTreeHighlight(null);
 });
 
+// Zone-drop hint: while dragging an element across the canvas, temporarily
+// tint the target zone's own fill + stroke to orange so the user sees which
+// zone would receive the component. No extra highlighter mask — just the
+// zone's native attrs are swapped and restored.
+const ZONE_DEFAULT_FILL   = 'rgba(0, 114, 195, 0.08)';
+const ZONE_DEFAULT_STROKE = '#0072c3';
+const ZONE_DROP_FILL      = 'rgba(255, 131, 43, 0.15)';
+const ZONE_DROP_STROKE    = '#ff832b';
+let dropTargetZone: Frame | null = null;
+
+function clearZoneDropHighlight(): void {
+    if (!dropTargetZone) return;
+    dropTargetZone.attr({
+        body: { fill: ZONE_DEFAULT_FILL, stroke: ZONE_DEFAULT_STROKE },
+        label: { fill: ZONE_DEFAULT_STROKE },
+    });
+    dropTargetZone = null;
+}
+
+paper.on('element:pointermove', (elementView: dia.ElementView) => {
+    const model = elementView.model;
+    if (model.get('isFrame') || model.get('componentRole') === 'child') return;
+
+    const shape = resolveComponentBase(model) as IsometricShape;
+    const targetZone = findTopmostContainingFrame(shape);
+
+    if (targetZone?.id === dropTargetZone?.id) return;
+
+    clearZoneDropHighlight();
+
+    if (targetZone && targetZone.id !== shape.getParentCell()?.id) {
+        targetZone.attr({
+            body: { fill: ZONE_DROP_FILL, stroke: ZONE_DROP_STROKE },
+            label: { fill: ZONE_DROP_STROKE },
+        });
+        dropTargetZone = targetZone;
+    }
+});
+
 paper.on('element:pointerup', (elementView: dia.ElementView) => {
+    clearZoneDropHighlight();
+
     const model = elementView.model;
     paper.removeTools();
     if (model.get('isFrame')) {
