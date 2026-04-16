@@ -1,5 +1,4 @@
 <g
-    magnet-selector="base"
     highlighter-selector="base"
 >
     <ellipse @selector="base" @group-selector="common"

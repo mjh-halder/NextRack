@@ -40,7 +40,6 @@ export const CONNECT_TOOL_MARKUP = util.svg`
 `;
 
 export const CONNECT_TOOL_PRESET = {
-    magnet: 'base',
     useModelGeometry: true,
     x: '100%',
     y: -CONNECT_ICON_PX,

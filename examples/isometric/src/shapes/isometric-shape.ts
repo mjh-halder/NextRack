@@ -1,5 +1,6 @@
 import { dia, g, elementTools } from '@joint/core';
 import { CenterBasedHeightControl, PyramidHeightControl, SizeControl, ProportionalSizeControl, CONNECT_TOOL_PRESET } from '../tools';
+import { PORT_GROUPS, initPorts, updatePortPositions as syncPortPositions, PortView } from './ports';
 
 export const ISOMETRIC_HEIGHT_KEY = 'isometric-height';
 export const SIZE_KEY = 'size';
@@ -25,9 +26,24 @@ export default class IsometricShape extends dia.Element<IsometricElementAttribut
 
     tools: Tools = {};
 
+    private currentPortView: PortView = 'isometric';
+
     constructor(...args: any[]) {
         super(...args);
+        if (this.usePorts()) {
+            if (!this.get('ports')?.groups) {
+                this.set('ports', { groups: PORT_GROUPS, items: [] }, { silent: true });
+            }
+            initPorts(this, this.currentPortView);
+            this.on('change:size change:isometricHeight', () => this.updatePortPositions());
+        }
         this.toggleView(View.Isometric);
+    }
+
+    protected usePorts(): boolean { return true; }
+
+    protected updatePortPositions(): void {
+        syncPortPositions(this, this.currentPortView);
     }
 
     get defaultIsometricHeight(): number {
@@ -83,19 +99,12 @@ export default class IsometricShape extends dia.Element<IsometricElementAttribut
 
     toggleView(view: View) {
         const isIsometric = view === View.Isometric;
-        // There are 3 group selectors in the markup:
-        // '2d' - the 2D view
-        // 'iso' - the isometric view
-        // 'common' - the common elements, displayed in both views
-        // Here we only switch the visibility of the '2d' and 'iso' groups.
         this.attr({
-            '2d': {
-                display: isIsometric ? 'none' : 'block'
-            },
-            'iso': {
-                display: isIsometric ? 'block' : 'none'
-            }
+            '2d':  { display: isIsometric ? 'none' : 'block' },
+            'iso': { display: isIsometric ? 'block' : 'none' },
         });
+        this.currentPortView = isIsometric ? 'isometric' : '2d';
+        if (this.usePorts()) this.updatePortPositions();
     }
 }
 

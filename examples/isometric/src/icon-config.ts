@@ -27,7 +27,7 @@ const STORAGE_KEY = 'nr-icon-config-v3';
 
 function defaultScopeFor(entry: IconCatalogEntry | undefined): IconScope {
     if (!entry) return 'none';
-    return entry.source === 'custom' ? 'general' : 'none';
+    return (entry.source === 'custom' || entry.source === 'uploaded') ? 'general' : 'none';
 }
 
 type Listener = () => void;

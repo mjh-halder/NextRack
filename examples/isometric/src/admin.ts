@@ -5,14 +5,26 @@
 // Wiring: initAdmin() is called once from index.ts. show()/hide() are driven by
 // the app-level view switcher in index.ts.
 
-import { ICON_CATALOG, IconCatalogEntry } from './icon-catalog';
+import { ICON_CATALOG, IconCatalogEntry, getIconById } from './icon-catalog';
+import { carbonIconToString, CarbonIcon } from './icons';
+import Edit16 from '@carbon/icons/es/edit/16.js';
+import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
+import Upload16 from '@carbon/icons/es/upload/16.js';
+import SubtractAlt16 from '@carbon/icons/es/subtract--alt/16.js';
+
+const ACTION_ICON_EDIT    = carbonIconToString(Edit16 as CarbonIcon);
+const ACTION_ICON_DELETE  = carbonIconToString(TrashCan16 as CarbonIcon);
+const ACTION_ICON_PUBLISH = carbonIconToString(Upload16 as CarbonIcon);
+const ACTION_ICON_REMOVE  = carbonIconToString(SubtractAlt16 as CarbonIcon);
 import {
     getAllConfig,
     setIconScope,
     IconScope,
 } from './icon-config';
+import { ShapeRegistry, BUILT_IN_SHAPE_IDS, deleteShape, saveRegistryToStorage } from './shapes/shape-registry';
+import { getServerShapes, publishShape, unpublishShape } from './server-shapes';
 
-type AdminView = 'icon-config' | 'user-settings';
+type AdminView = 'icon-config' | 'shape-registry' | 'user-settings';
 
 let rootEl: HTMLDivElement | null = null;
 let currentView: AdminView = 'icon-config';
@@ -25,8 +37,9 @@ let iconSearchTerm = '';
 const AVAILABLE_MAX = 300;
 
 const NAV_ITEMS: Array<{ id: AdminView; label: string }> = [
-    { id: 'icon-config',   label: 'Icon Configuration' },
-    { id: 'user-settings', label: 'User Settings' },
+    { id: 'icon-config',    label: 'Icon Configuration' },
+    { id: 'shape-registry', label: 'Shape Registry' },
+    { id: 'user-settings',  label: 'User Settings' },
 ];
 
 export function initAdmin(container: HTMLDivElement): void {
@@ -70,8 +83,208 @@ function selectView(view: AdminView): void {
     const contentEl = rootEl.querySelector<HTMLDivElement>('.nr-admin__content');
     if (!contentEl) return;
     contentEl.innerHTML = '';
-    if (view === 'icon-config')   renderIconConfig(contentEl);
-    if (view === 'user-settings') renderUserSettings(contentEl);
+    if (view === 'icon-config')    renderIconConfig(contentEl);
+    if (view === 'shape-registry') renderShapeRegistry(contentEl);
+    if (view === 'user-settings')  renderUserSettings(contentEl);
+}
+
+function renderShapeRegistry(container: HTMLElement): void {
+    const host = document.createElement('div');
+    container.appendChild(host);
+
+    const render = () => {
+        host.innerHTML = '';
+        buildLocalShapesSection(host, render);
+        buildServerShapesSection(host, render);
+    };
+    render();
+}
+
+function buildShapeRow(
+    id: string,
+    def: import('./shapes/shape-registry').ShapeDefaults,
+    actions: HTMLElement,
+): HTMLTableRowElement {
+    const tr = document.createElement('tr');
+
+    const tdThumb = document.createElement('td');
+    tdThumb.className = 'nr-admin__table-thumb';
+    if (def.icon) {
+        const entry = getIconById(def.icon);
+        if (entry) tdThumb.innerHTML = entry.svg;
+    }
+    tr.appendChild(tdThumb);
+
+    const tdId = document.createElement('td');
+    tdId.textContent = id;
+    tdId.className = 'nr-admin__table-mono';
+    tr.appendChild(tdId);
+
+    const tdName = document.createElement('td');
+    tdName.textContent = def.displayName || '—';
+    tr.appendChild(tdName);
+
+    const tdBase = document.createElement('td');
+    tdBase.textContent = def.baseShape || '—';
+    tr.appendChild(tdBase);
+
+    const tdIcon = document.createElement('td');
+    tdIcon.textContent = def.icon || '—';
+    tdIcon.className = 'nr-admin__table-mono';
+    tr.appendChild(tdIcon);
+
+    const tdSize = document.createElement('td');
+    const w = Math.round(def.defaultSize.width);
+    const h = Math.round(def.defaultSize.height);
+    tdSize.textContent = `${w}×${h}`;
+    tr.appendChild(tdSize);
+
+    const tdDepth = document.createElement('td');
+    tdDepth.textContent = String(Math.round(def.defaultIsometricHeight));
+    tr.appendChild(tdDepth);
+
+    const tdComplex = document.createElement('td');
+    tdComplex.textContent = def.complexShape ? `Yes (${def.layers?.length ?? 0} layers)` : 'No';
+    tr.appendChild(tdComplex);
+
+    const tdActions = document.createElement('td');
+    tdActions.className = 'nr-admin__table-actions';
+    tdActions.appendChild(actions);
+    tr.appendChild(tdActions);
+
+    return tr;
+}
+
+function createActionBtn(iconSvg: string, label: string, onClick: () => void, danger = false): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'nr-admin__table-btn' + (danger ? ' nr-admin__table-btn--danger' : '');
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    btn.innerHTML = iconSvg;
+    btn.addEventListener('click', onClick);
+    return btn;
+}
+
+const SHAPE_TABLE_COLUMNS = ['', 'ID', 'Display Name', 'Base Shape', 'Icon', 'Size (W×H)', 'Depth', 'Complex', ''];
+
+function buildTableHead(): HTMLTableSectionElement {
+    const thead = document.createElement('thead');
+    const row = document.createElement('tr');
+    for (const col of SHAPE_TABLE_COLUMNS) {
+        const th = document.createElement('th');
+        th.textContent = col;
+        row.appendChild(th);
+    }
+    thead.appendChild(row);
+    return thead;
+}
+
+function buildLocalShapesSection(host: HTMLElement, rerender: () => void): void {
+    const heading = document.createElement('h2');
+    heading.className = 'nr-admin__heading';
+    heading.textContent = 'Local Shapes';
+    host.appendChild(heading);
+
+    const desc = document.createElement('p');
+    desc.className = 'nr-admin__desc';
+    desc.textContent = 'Shapes stored in your browser. Publish them to the server to make them available to all users.';
+    host.appendChild(desc);
+
+    const serverIds = new Set(getServerShapes().map(e => e.id));
+
+    const userShapes = Object.entries(ShapeRegistry).filter(
+        ([id]) => !BUILT_IN_SHAPE_IDS.has(id)
+    );
+
+    if (userShapes.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'nr-admin__section-empty';
+        empty.textContent = 'No user-defined shapes yet. Create shapes in the Component Designer.';
+        host.appendChild(empty);
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'nr-admin__table';
+    table.appendChild(buildTableHead());
+
+    const tbody = document.createElement('tbody');
+    for (const [id, def] of userShapes) {
+        const actions = document.createElement('div');
+        actions.className = 'nr-admin__table-action-group';
+
+        const editBtn = createActionBtn(ACTION_ICON_EDIT, 'Edit', () => {
+            document.dispatchEvent(new CustomEvent('nextrack:navigate-to-shape', { detail: { shapeId: id } }));
+        });
+        actions.appendChild(editBtn);
+
+        const publishBtn = createActionBtn(
+            ACTION_ICON_PUBLISH,
+            serverIds.has(id) ? 'Update on server' : 'Publish to server',
+            () => { publishShape(id, def); rerender(); },
+        );
+        actions.appendChild(publishBtn);
+
+        const deleteBtn = createActionBtn(ACTION_ICON_DELETE, 'Delete', () => {
+            if (!confirm(`Delete local shape "${def.displayName || id}"?`)) return;
+            deleteShape(id);
+            saveRegistryToStorage();
+            document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+            rerender();
+        }, true);
+        actions.appendChild(deleteBtn);
+
+        tbody.appendChild(buildShapeRow(id, def, actions));
+    }
+
+    table.appendChild(tbody);
+    host.appendChild(table);
+}
+
+function buildServerShapesSection(host: HTMLElement, rerender: () => void): void {
+    const heading = document.createElement('h2');
+    heading.className = 'nr-admin__heading';
+    heading.style.marginTop = '2rem';
+    heading.textContent = 'Server Shapes';
+    host.appendChild(heading);
+
+    const desc = document.createElement('p');
+    desc.className = 'nr-admin__desc';
+    desc.textContent = 'Shapes published to the server. All users who open the application will see these shapes in their palette.';
+    host.appendChild(desc);
+
+    const serverShapes = getServerShapes();
+
+    if (serverShapes.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'nr-admin__section-empty';
+        empty.textContent = 'No shapes published to the server yet.';
+        host.appendChild(empty);
+        return;
+    }
+
+    const table = document.createElement('table');
+    table.className = 'nr-admin__table';
+    table.appendChild(buildTableHead());
+
+    const tbody = document.createElement('tbody');
+    for (const entry of serverShapes) {
+        const actions = document.createElement('div');
+        actions.className = 'nr-admin__table-action-group';
+
+        const removeBtn = createActionBtn(ACTION_ICON_REMOVE, 'Remove from server', () => {
+            if (!confirm(`Remove "${entry.defaults.displayName || entry.id}" from server?`)) return;
+            unpublishShape(entry.id);
+            rerender();
+        }, true);
+        actions.appendChild(removeBtn);
+
+        tbody.appendChild(buildShapeRow(entry.id, entry.defaults, actions));
+    }
+
+    table.appendChild(tbody);
+    host.appendChild(table);
 }
 
 function renderUserSettings(container: HTMLElement): void {

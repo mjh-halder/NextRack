@@ -19,8 +19,9 @@ import Copy16 from '@carbon/icons/es/copy/16.js';
 import ChevronUp16 from '@carbon/icons/es/chevron--up/16.js';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
-import { getIconById } from './icon-catalog';
+import { getIconById, addUploadedIcon, removeUploadedIcon } from './icon-catalog';
 import { getVisibleIcons } from './icon-config';
+import { getServerShapes } from './server-shapes';
 
 // DOM elements
 const canvasEl     = document.getElementById('cd2-canvas')                as HTMLDivElement;
@@ -700,10 +701,7 @@ function buildIconContent(container: HTMLElement) {
     // below only reflects the layer set at inspector-construction time.
     iconAccordionContentEl = container;
 
-    // Filter the catalog to the icons marked visible for this picker context.
-    // Complex Shape mode uses its own visibility flag so admins can tailor the
-    // two contexts independently.
-    const visible = getVisibleIcons(isComplexShape ? 'complexShape' : 'componentEditor');
+    const getVisible = () => getVisibleIcons(isComplexShape ? 'complexShape' : 'componentEditor');
 
     // Layer target dropdown — only meaningful when editing a complex shape
     // with more than one layer. Clamp first so the preselected <option>
@@ -779,13 +777,14 @@ function buildIconContent(container: HTMLElement) {
 
     const renderGrid = () => {
         grid.innerHTML = '';
+        const visible = getVisible();
         const term = iconSearchTerm.trim().toLowerCase();
         const filtered = term
             ? visible.filter(ic => ic.label.toLowerCase().includes(term))
             : visible;
-        const allIcons: Array<{ id: string | null; label: string; svg: string }> = [
+        const allIcons: Array<{ id: string | null; label: string; svg: string; source?: string }> = [
             { id: null, label: 'No icon', svg: NO_ICON_SVG },
-            ...filtered.map(ic => ({ id: ic.id, label: ic.label, svg: ic.svg })),
+            ...filtered.map(ic => ({ id: ic.id, label: ic.label, svg: ic.svg, source: ic.source })),
         ];
         for (const icon of allIcons) {
             const btn = document.createElement('button');
@@ -806,8 +805,69 @@ function buildIconContent(container: HTMLElement) {
                 applyIconToCurrentShape();
             });
 
+            if (icon.source === 'uploaded') {
+                btn.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    if (confirm(`Remove uploaded icon "${icon.label}"?`)) {
+                        removeUploadedIcon(icon.id!);
+                        if (selectedIcon === icon.id) {
+                            selectedIcon = null;
+                            applyIconToCurrentShape();
+                        }
+                        renderGrid();
+                    }
+                });
+            }
+
             grid.appendChild(btn);
         }
+
+        // Upload button at the end of the grid
+        const uploadBtn = document.createElement('button');
+        uploadBtn.type = 'button';
+        uploadBtn.className = 'nr-sd-icon-btn nr-sd-icon-btn--upload';
+        uploadBtn.setAttribute('title', 'Upload icon');
+        uploadBtn.setAttribute('aria-label', 'Upload icon');
+        uploadBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor"><path d="M16 7l-6 6 1.41 1.41L15 10.83V24h2V10.83l3.59 3.58L22 13l-6-6z"/><path d="M6 28h20v-6h-2v4H8v-4H6v6z"/></svg>`;
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.svg,image/svg+xml,.png,image/png';
+        fileInput.style.display = 'none';
+
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files?.[0];
+            if (!file) return;
+            const label = file.name.replace(/\.[^.]+$/, '');
+
+            if (file.type === 'image/svg+xml' || file.name.endsWith('.svg')) {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const svgText = reader.result as string;
+                    const id = addUploadedIcon(label, svgText);
+                    selectedIcon = id;
+                    applyIconToCurrentShape();
+                    renderGrid();
+                };
+                reader.readAsText(file);
+            } else {
+                const reader = new FileReader();
+                reader.onload = () => {
+                    const dataUri = reader.result as string;
+                    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><image href="${dataUri}" width="32" height="32"/></svg>`;
+                    const id = addUploadedIcon(label, svg);
+                    selectedIcon = id;
+                    applyIconToCurrentShape();
+                    renderGrid();
+                };
+                reader.readAsDataURL(file);
+            }
+            fileInput.value = '';
+        });
+
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        grid.appendChild(fileInput);
+        grid.appendChild(uploadBtn);
     };
 
     searchInput.addEventListener('input', () => {
@@ -3110,6 +3170,56 @@ function buildPalettePanel() {
 
     paletteEl.appendChild(buildCollapsibleSection('User Defined', list, false));
 
+    // ── General Shapes (server-published) ────────────────────────────────────
+    const serverList = document.createElement('ul');
+    serverList.className = 'nr-palette-list';
+    serverList.setAttribute('role', 'listbox');
+    serverList.setAttribute('aria-label', 'General Shapes');
+
+    for (const entry of getServerShapes()) {
+        const sid = entry.id;
+        const def = entry.defaults;
+        const li = document.createElement('li');
+        li.setAttribute('role', 'option');
+        li.setAttribute('aria-selected', String(sid === currentShapeId));
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-palette-item' + (sid === currentShapeId ? ' nr-palette-item--selected' : '');
+        btn.dataset.shapeId = sid;
+
+        const iconId  = def.icon;
+        const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
+        if (iconSvg) {
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'nr-palette-item-icon';
+            iconSpan.innerHTML = iconSvg;
+            iconSpan.setAttribute('aria-hidden', 'true');
+            btn.appendChild(iconSpan);
+        }
+        const labelSpan = document.createElement('span');
+        labelSpan.className = 'nr-palette-item-label';
+        labelSpan.textContent = def.displayName ?? formatLabel(sid);
+        btn.appendChild(labelSpan);
+
+        btn.addEventListener('click', () => {
+            if (!ShapeRegistry[sid]) {
+                addShape(sid, { ...def });
+            }
+            paletteEl.querySelectorAll<HTMLButtonElement>('.nr-palette-item').forEach(b => {
+                b.classList.toggle('nr-palette-item--selected', b === btn);
+                b.closest('li')?.setAttribute('aria-selected', String(b === btn));
+            });
+            currentShapeId = sid;
+            loadShapeIntoCanvas(sid);
+        });
+
+        li.appendChild(btn);
+        serverList.appendChild(li);
+    }
+
+    paletteEl.appendChild(buildCollapsibleSection('General Shapes', serverList, true));
+
     // ── Vendor sections (empty placeholders) ─────────────────────────────────
     const VENDOR_SECTIONS = ['Oracle', 'NetApp'];
     for (const vendor of VENDOR_SECTIONS) {
@@ -3260,6 +3370,14 @@ paper.on('element:pointerup', (elementView: dia.ElementView) => {
 export const panel = {
     hide: () => { /* nothing to collapse in the Shape Designer */ },
 };
+
+export function selectShape(id: string): void {
+    if (!ShapeRegistry[id]) return;
+    currentShapeId = id;
+    buildPalettePanel();
+    buildInspectorPanel();
+    loadShapeIntoCanvas(id);
+}
 
 // ── Initialise ────────────────────────────────────────────────────────────────
 

@@ -36,7 +36,7 @@ import k8sWorkerNodeSvg from '../assets/kubernetes--worker-node.svg';
 
 import { CARBON_ICONS } from './carbon-icons-all';
 
-export type IconSource = 'custom' | 'carbon';
+export type IconSource = 'custom' | 'carbon' | 'uploaded';
 
 export interface IconCatalogEntry {
     id: string;
@@ -91,12 +91,79 @@ const CARBON_ENTRIES: ReadonlyArray<IconCatalogEntry> = CARBON_ICONS.map(ic => (
     source: 'carbon' as const,
 }));
 
-export const ICON_CATALOG: ReadonlyArray<IconCatalogEntry> = [...CUSTOM_ICONS, ...CARBON_ENTRIES];
+const STATIC_CATALOG: ReadonlyArray<IconCatalogEntry> = [...CUSTOM_ICONS, ...CARBON_ENTRIES];
 
-// Fast lookup map, built once — 2.5k+ icons with .find() per call is wasteful.
-const ICON_BY_ID: Map<string, IconCatalogEntry> = new Map(
-    ICON_CATALOG.map(i => [i.id, i])
-);
+// ── Uploaded icons (persisted in localStorage) ────────────────────────────────
+
+const UPLOADED_STORAGE_KEY = 'nr-uploaded-icons-v1';
+
+interface StoredUploadedIcon {
+    id: string;
+    label: string;
+    svg: string;
+}
+
+function readUploadedIcons(): StoredUploadedIcon[] {
+    try {
+        const raw = localStorage.getItem(UPLOADED_STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeUploadedIcons(icons: StoredUploadedIcon[]): void {
+    try {
+        localStorage.setItem(UPLOADED_STORAGE_KEY, JSON.stringify(icons));
+    } catch (e) {
+        console.error('[nextrack] Failed to save uploaded icons:', e);
+    }
+}
+
+type CatalogListener = () => void;
+const catalogListeners = new Set<CatalogListener>();
+
+function rebuildCatalog(): void {
+    const uploaded: IconCatalogEntry[] = readUploadedIcons().map(u => ({
+        id: u.id,
+        label: u.label,
+        svg: u.svg,
+        source: 'uploaded' as const,
+    }));
+    ICON_CATALOG.length = 0;
+    ICON_CATALOG.push(...STATIC_CATALOG, ...uploaded);
+    ICON_BY_ID.clear();
+    for (const i of ICON_CATALOG) ICON_BY_ID.set(i.id, i);
+    catalogListeners.forEach(l => l());
+}
+
+export function addUploadedIcon(label: string, svg: string): string {
+    const id = `uploaded:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const stored = readUploadedIcons();
+    stored.push({ id, label, svg });
+    writeUploadedIcons(stored);
+    rebuildCatalog();
+    return id;
+}
+
+export function removeUploadedIcon(id: string): void {
+    const stored = readUploadedIcons().filter(u => u.id !== id);
+    writeUploadedIcons(stored);
+    rebuildCatalog();
+}
+
+export function onCatalogChange(listener: CatalogListener): () => void {
+    catalogListeners.add(listener);
+    return () => catalogListeners.delete(listener);
+}
+
+// ── Public catalog + lookup ───────────────────────────────────────────────────
+
+export const ICON_CATALOG: IconCatalogEntry[] = [];
+const ICON_BY_ID: Map<string, IconCatalogEntry> = new Map();
+rebuildCatalog();
 
 export function getIconById(id: string): IconCatalogEntry | undefined {
     return ICON_BY_ID.get(id);

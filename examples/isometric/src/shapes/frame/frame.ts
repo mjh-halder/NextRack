@@ -20,8 +20,9 @@ const defaultSize = {
 })
 export class Frame extends IsometricShape {
 
-    // Frames are not connection endpoints — disable the connect tools from the parent class
+    // Frames are not connection endpoints — disable tools and ports.
     override tools = {};
+    protected override usePorts(): boolean { return false; }
 
     override addTools(paper: dia.Paper, _view: View) {
         const toolView = new dia.ToolsView({

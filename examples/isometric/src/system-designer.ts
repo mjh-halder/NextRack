@@ -1,4 +1,4 @@
-import { g, dia, V, highlighters } from '@joint/core';
+import { g, dia, V, highlighters, routers } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View } from './shapes/isometric-shape';
 import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, Frame, cellNamespace } from './shapes';
@@ -14,6 +14,7 @@ import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
 import BringToFront16 from '@carbon/icons/es/bring-to-front/16.js';
 import SendToBack16 from '@carbon/icons/es/send-to-back/16.js';
+import ConnectionSignalOff16 from '@carbon/icons/es/connection-signal--off/16.js';
 
 // Inline Carbon SVG icons (16 × 16) used in the menu components
 const CDS_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 4.7l-.7-.7L8 7.3 4.7 4l-.7.7L7.3 8 4 11.3l.7.7L8 8.7l3.3 3.3.7-.7L8.7 8z"/></svg>`;
@@ -64,7 +65,7 @@ function duplicateSelected() {
     for (const cc of clonedChildren) clone.embed(cc);
 
     paper.removeTools();
-    clone.addTools(paper, currentView, ['connect']);
+    clone.addTools(paper, currentView, []);
     panel.show(clone);
     currentCell = clone;
     if (currentView === View.Isometric) sortElements(graph);
@@ -139,6 +140,18 @@ function resolveComponentBase(cell: dia.Element): dia.Element {
     return cell;
 }
 
+// Outward direction vector per port — used by the short-distance router to
+// add orthogonal approach/departure points so links never run along edges.
+function portDirection(portId: string): { dx: number; dy: number } {
+    switch (portId) {
+        case 'front': return { dx:  0, dy:  1 };
+        case 'back':  return { dx:  0, dy: -1 };
+        case 'right': return { dx:  1, dy:  0 };
+        case 'left':  return { dx: -1, dy:  0 };
+        default:      return { dx:  0, dy:  0 };
+    }
+}
+
 const paper = new dia.Paper({
     el: canvasEl,
     model: graph,
@@ -174,36 +187,47 @@ const paper = new dia.Paper({
     async: true,
     autoFreeze: true,
     defaultConnectionPoint: {
-        name: 'boundary',
-        args: {
-            offset: GRID_SIZE / 2,
-            // It's important to set selector to false, and determine the magnet
-            // with `magnet-selector` attribute on the element.
-            // Otherwise, the element bounding box would contain the isometric part of the element
-            // and the connection would be created to the wrong point.
-            selector: false
-        }
+        name: 'anchor',
+        args: { offset: 4 },
     },
-    defaultRouter: {
-        name: 'manhattan',
-        args: {
+    defaultRouter: (vertices, args, linkView) => {
+        const manhattanArgs = {
             step: GRID_SIZE / 2,
             startDirections: ['top', 'bottom', 'left', 'right'],
             endDirections:   ['top', 'bottom', 'left', 'right'],
-            isPointObstacle: (point: g.Point) => {
-                const x = Math.floor(point.x / GRID_SIZE) * GRID_SIZE - GRID_SIZE;
-                const y = Math.floor(point.y / GRID_SIZE) * GRID_SIZE - GRID_SIZE;
-                const rect = new g.Rect(x, y, GRID_SIZE * 3, GRID_SIZE * 2);
+            isPointObstacle: (point) => {
+                const x = Math.floor(point.x / GRID_SIZE) * GRID_SIZE - GRID_SIZE / 2;
+                const y = Math.floor(point.y / GRID_SIZE) * GRID_SIZE - GRID_SIZE / 2;
+                const rect = new g.Rect(x, y, GRID_SIZE * 2, GRID_SIZE * 1.5);
                 return !obstacles.isFree(rect);
             }
+        };
+        // Very short direct connections (≤ 2.5 GU, no user waypoints):
+        // straight line — Manhattan would kink due to overlapping obstacle zones.
+        // Everything else goes through Manhattan for clean orthogonal routing.
+        if (vertices.length === 0) {
+            const srcCenter = linkView.sourceBBox.center();
+            const tgtCenter = linkView.targetBBox.center();
+            if (srcCenter.distance(tgtCenter) <= GRID_SIZE * 2.5) {
+                return routers.normal(vertices, args, linkView);
+            }
         }
+        return routers.manhattan(vertices, manhattanArgs as any, linkView);
     },
     defaultLink: () => new Link(),
     linkPinning: false,
     overflow: true,
-    snapLinks: { radius: GRID_SIZE / 2 },
+    snapLinks: { radius: GRID_SIZE },
     cellViewNamespace: cellNamespace,
     defaultAnchor: { name: 'modelCenter' },
+    validateConnection: (_cellViewS, _magnetS, cellViewT, magnetT) => {
+        // Only allow connections that land on a port magnet — never on the
+        // element body. This prevents links from attaching to the model
+        // center when the user misses a port.
+        if (!magnetT) return false;
+        const port = cellViewT?.findAttribute('port', magnetT);
+        return !!port;
+    },
     highlighting: {
         default: {
             name: 'mask',
@@ -737,7 +761,7 @@ function setTreeHighlight(cell: IsometricShape | null) {
 
 const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape) => {
     paper.removeTools();
-    shape.addTools(paper, currentView, ['connect']);
+    shape.addTools(paper, currentView, []);
     if (shape.get('isFrame')) {
         currentCell = null;
         panel.hide();
@@ -754,7 +778,7 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
     const cell = graph.getCell(cellId);
     if (!cell || !(cell instanceof IsometricShape) || cell.get('isFrame')) return;
     paper.removeTools();
-    cell.addTools(paper, currentView, ['connect']);
+    cell.addTools(paper, currentView, []);
     currentCell = cell;
     panel.show(cell);
     setTreeHighlight(cell);
@@ -906,7 +930,7 @@ paper.on('element:pointerup', (elementView: dia.ElementView) => {
     // Click on a complex component's internal layer → act on the base instead.
     const shape = resolveComponentBase(model) as IsometricShape;
     updateZoneAssignment(shape);
-    shape.addTools(paper, currentView, ['connect']);
+    shape.addTools(paper, currentView, []);
     currentCell = shape;
     currentFrame = null;
     panel.show(shape);
@@ -939,10 +963,11 @@ document.addEventListener('contextmenu', suppressContextMenu, true);
 window.oncontextmenu   = suppressContextMenu;
 document.oncontextmenu = suppressContextMenu;
 
-const CTX_ICON_DELETE    = carbonIconToString(TrashCan16     as CarbonIcon);
-const CTX_ICON_DUPLICATE = carbonIconToString(Copy16         as CarbonIcon);
-const CTX_ICON_FRONT     = carbonIconToString(BringToFront16 as CarbonIcon);
-const CTX_ICON_BACK      = carbonIconToString(SendToBack16   as CarbonIcon);
+const CTX_ICON_DELETE       = carbonIconToString(TrashCan16            as CarbonIcon);
+const CTX_ICON_DUPLICATE   = carbonIconToString(Copy16                as CarbonIcon);
+const CTX_ICON_FRONT       = carbonIconToString(BringToFront16        as CarbonIcon);
+const CTX_ICON_BACK        = carbonIconToString(SendToBack16          as CarbonIcon);
+const CTX_ICON_DISCONNECT  = carbonIconToString(ConnectionSignalOff16 as CarbonIcon);
 
 interface CtxAction {
     label: string;
@@ -1014,9 +1039,14 @@ function buildActionsForCurrentSelection(): CtxAction[] {
             { label: 'Delete',        icon: CTX_ICON_DELETE,    run: () => { frame.remove(); } },
         );
     } else if (currentCell && !(currentCell instanceof Link)) {
+        const cell = currentCell;
         actions.push(
-            { label: 'Duplicate', icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
-            { label: 'Delete',    icon: CTX_ICON_DELETE,    run: deleteSelected    },
+            { label: 'Duplicate',          icon: CTX_ICON_DUPLICATE,  run: duplicateSelected },
+            { label: 'Delete Connections', icon: CTX_ICON_DISCONNECT, run: () => {
+                const links = graph.getConnectedLinks(cell);
+                for (const link of links) link.remove();
+            }},
+            { label: 'Delete',             icon: CTX_ICON_DELETE,     run: deleteSelected    },
         );
     } else if (currentCell instanceof Link) {
         actions.push(
@@ -1042,7 +1072,7 @@ paper.on('element:contextmenu', (elementView: dia.ElementView, evt: dia.Event) =
     } else {
         const shape = resolveComponentBase(model) as IsometricShape;
         updateZoneAssignment(shape);
-        shape.addTools(paper, currentView, ['connect']);
+        shape.addTools(paper, currentView, []);
         currentCell = shape;
         currentFrame = null;
         panel.show(shape);

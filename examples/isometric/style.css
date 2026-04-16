@@ -738,6 +738,15 @@
 .nr-sd-icon-scroll::-webkit-scrollbar-thumb { background: var(--cds-border-subtle-01, #c6c6c6); border-radius: 2px; }
 
 /* "No background" button — full-width, above swatches */
+.nr-sd-icon-btn--upload {
+    border-style: dashed;
+    color: var(--cds-text-placeholder, #a8a8a8);
+}
+.nr-sd-icon-btn--upload:hover {
+    color: var(--cds-interactive, #0f62fe);
+    border-color: var(--cds-interactive, #0f62fe);
+}
+
 .nr-sd-icon-btn--no-bg {
     width: 100%;
     aspect-ratio: unset;
@@ -2199,6 +2208,34 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
     filter: brightness(0) invert(1);
 }
 
+/* ── Connection ports on shapes (Option D: hover-reveal) ─────────────────── */
+/* Ports are invisible by default and fade in when the user hovers the
+   parent element — discoverable without cluttering the canvas. */
+.joint-port-body {
+    opacity: 0;
+    transition: opacity 0.15s, fill 0.1s;
+}
+
+.joint-element:hover .joint-port-body {
+    opacity: 1;
+}
+
+.joint-port-body:hover {
+    fill: rgba(0, 0, 0, 0.6) !important;
+}
+
+.cds--g100 .joint-port-body {
+    fill: rgba(255, 255, 255, 0.25);
+}
+
+.cds--g100 .joint-element:hover .joint-port-body {
+    opacity: 1;
+}
+
+.cds--g100 .joint-port-body:hover {
+    fill: rgba(255, 255, 255, 0.7) !important;
+}
+
 /* ── Context menu (System Designer right-click) ──────────────────────────── */
 .nr-ctx-menu {
     position: fixed;
@@ -2602,4 +2639,101 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+/* ── Admin: Shape Registry table ─────────────────────────────────────────── */
+.nr-admin__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+    line-height: 1.125rem;
+    color: var(--cds-text-primary, #161616);
+}
+.cds--g100 .nr-admin__table {
+    color: var(--cds-text-primary, #f4f4f4);
+}
+.nr-admin__table th {
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.32px;
+    text-transform: uppercase;
+    color: var(--cds-text-secondary, #525252);
+    border-bottom: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    white-space: nowrap;
+}
+.cds--g100 .nr-admin__table th {
+    color: var(--cds-text-secondary, #c6c6c6);
+    border-bottom-color: var(--cds-border-subtle-01, #393939);
+}
+.nr-admin__table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    vertical-align: middle;
+}
+.cds--g100 .nr-admin__table td {
+    border-bottom-color: var(--cds-border-subtle-01, #393939);
+}
+.nr-admin__table tbody tr:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+}
+.cds--g100 .nr-admin__table tbody tr:hover {
+    background: var(--cds-layer-hover-01, #353535);
+}
+.nr-admin__table-thumb {
+    width: 32px;
+}
+.nr-admin__table-thumb svg {
+    width: 20px;
+    height: 20px;
+    display: block;
+}
+.cds--g100 .nr-admin__table-thumb svg {
+    filter: brightness(0) invert(1);
+}
+.nr-admin__table-mono {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+}
+.nr-admin__table-actions {
+    white-space: nowrap;
+}
+.nr-admin__table-action-group {
+    display: flex;
+    gap: 2px;
+}
+.nr-admin__table-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--cds-icon-secondary, #525252);
+    cursor: pointer;
+    border-radius: 2px;
+}
+.nr-admin__table-btn:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+    color: var(--cds-icon-primary, #161616);
+}
+.cds--g100 .nr-admin__table-btn {
+    color: var(--cds-icon-secondary, #c6c6c6);
+}
+.cds--g100 .nr-admin__table-btn:hover {
+    background: var(--cds-layer-hover-01, #353535);
+    color: var(--cds-icon-primary, #f4f4f4);
+}
+.nr-admin__table-btn--danger:hover {
+    color: var(--cds-support-error, #da1e28);
+}
+.cds--g100 .nr-admin__table-btn--danger:hover {
+    color: var(--cds-support-error, #fa4d56);
+}
+.nr-admin__table-btn svg {
+    width: 16px;
+    height: 16px;
 }

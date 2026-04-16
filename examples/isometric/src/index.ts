@@ -2,7 +2,7 @@ import '../style.css';
 import '@carbon/styles/css/styles.css';
 
 import { panel, canvasEl, paletteEl, viewToggleContainerEl, designNameEl } from './system-designer';
-import { panel as cdPanel } from './component-designer';
+import { panel as cdPanel, selectShape } from './component-designer';
 import { initTopHeader } from './top-header';
 import { initAdmin } from './admin';
 import { carbonIconToString, CarbonIcon } from './icons';
@@ -91,6 +91,11 @@ function setAppView(view: AppView) {
 navGridBtn.addEventListener('click',   () => setAppView('grid'));
 navShapesBtn.addEventListener('click', () => setAppView('shapes'));
 navAdminBtn.addEventListener('click',  () => setAppView('admin'));
+
+document.addEventListener('nextrack:navigate-to-shape', ((e: CustomEvent<{ shapeId: string }>) => {
+    selectShape(e.detail.shapeId);
+    setAppView('shapes');
+}) as EventListener);
 
 // ---- Top header ----
 
