@@ -181,7 +181,7 @@ function createActionBtn(iconSvg: string, label: string, onClick: () => void, da
     return btn;
 }
 
-export const COMPONENT_COLLECTIONS = ['General', 'Oracle', 'NetApp'] as const;
+export const COMPONENT_COLLECTIONS = ['General', 'Oracle', 'NetApp', 'Dell', 'Lenovo'] as const;
 export type ComponentCollection = (typeof COMPONENT_COLLECTIONS)[number];
 
 const TABLE_COLUMNS = ['', 'ID', 'Display Name', 'Collection', 'Base Shape', 'Size (W×H)', 'Depth', 'Complex', ''];

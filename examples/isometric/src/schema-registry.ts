@@ -147,6 +147,8 @@ const BUILT_IN_TYPES: DataTypeDefinition[] = [
             { key: 'General', label: 'General', type: 'text', system: true },
             { key: 'Oracle',  label: 'Oracle',  type: 'text', system: true },
             { key: 'NetApp',  label: 'NetApp',  type: 'text', system: true },
+            { key: 'Dell',    label: 'Dell',    type: 'text', system: true },
+            { key: 'Lenovo',  label: 'Lenovo',  type: 'text', system: true },
         ],
     },
     {

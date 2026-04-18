@@ -25,14 +25,14 @@ const MENUS: MenuGroup[] = [
             { label: 'Open…',    action: 'file-open',    shortcut: '⌘O' },
             { label: 'Save',     action: 'file-save',    shortcut: '⌘S' },
             { label: 'Save As…', action: 'file-save-as', shortcut: '⇧⌘S' }, // placeholder
-            { label: 'Export…',  action: 'file-export'  },                   // placeholder
+            { label: 'Export SVG', action: 'file-export-svg' },
         ],
     },
     {
         label: 'Edit',
         items: [
-            { label: 'Undo',   action: 'edit-undo',   shortcut: '⌘Z' }, // placeholder
-            { label: 'Redo',   action: 'edit-redo',   shortcut: '⌘Y' }, // placeholder
+            { label: 'Undo',   action: 'edit-undo',   shortcut: '⌘Z' },
+            { label: 'Redo',   action: 'edit-redo',   shortcut: '⇧⌘Z' },
             { label: 'Delete', action: 'edit-delete', shortcut: '⌦'  },
         ],
     },

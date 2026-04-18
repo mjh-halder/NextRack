@@ -8,6 +8,7 @@ import { PropertyPanel, META_KEY } from './inspector';
 import { ShapeRegistry } from './shapes/shape-registry';
 import { ComponentPalette } from './palette';
 import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './persistence';
+import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
 import { ViewToggle } from './view-toggle';
 import { AreaSelect } from './area-select';
 import { carbonIconToString, CarbonIcon } from './icons';
@@ -127,6 +128,10 @@ export const graph = new dia.Graph({}, { cellNamespace });
 // Obstacles listen to changes in the graph and update their internal state
 const obstacles = new Obstacles(graph);
 graph.set('obstacles', obstacles);
+
+// Undo/redo must be initialized after obstacles to avoid capturing the
+// circular graph.set('obstacles') call in the history.
+initUndoRedo(graph);
 
 // A complex component's non-base layers ("child" role) are part of the
 // component's geometry — they must not be independently draggable, selectable,
@@ -288,6 +293,12 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
         e.preventDefault();
         duplicateSelected();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        redo();
     }
 });
 
@@ -399,6 +410,7 @@ function applyNewDesign(name: string, gridCount: number) {
     obstacles.sizeX = gridCount;
     obstacles.sizeY = gridCount;
     graph.clear();
+    clearHistory();
     // Rebuild the obstacle grid at the new size (graph is empty so this just resets it)
     obstacles.update();
 
@@ -591,6 +603,71 @@ function showNewDesignModal() {
     });
 
     nameInput.focus();
+}
+
+// ---- Export SVG ----
+
+function cleanSvgForExport(clone: SVGSVGElement): void {
+    // Remove grid and back-layer decorations
+    clone.querySelectorAll('[data-grid], .joint-back-layer').forEach(el => el.remove());
+
+    // Remove port/anchor circles
+    clone.querySelectorAll('.joint-port').forEach(el => el.remove());
+
+    // Ensure <image> href is also set as xlink:href for compatibility
+    clone.querySelectorAll('image').forEach(img => {
+        const href = img.getAttribute('href') || img.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        if (href) {
+            img.setAttribute('href', href);
+            img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
+        }
+    });
+}
+
+function downloadSvg(clone: SVGSVGElement, filename: string): void {
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+
+    const svgString = new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function exportCanvasSvg(): void {
+    const svgEl = paper.el.querySelector('svg');
+    if (!svgEl) return;
+
+    const clone = svgEl.cloneNode(true) as SVGSVGElement;
+    cleanSvgForExport(clone);
+
+    // Measure content bounding box
+    clone.style.position = 'absolute';
+    clone.style.left = '-9999px';
+    document.body.appendChild(clone);
+
+    const contentGroup = clone.querySelector('.joint-cells-layer') as SVGGElement | null;
+    const bbox = contentGroup ? contentGroup.getBBox() : clone.getBBox();
+    document.body.removeChild(clone);
+
+    if (bbox.width === 0 || bbox.height === 0) return;
+
+    const pad = 16;
+    clone.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`);
+    clone.setAttribute('width', String(Math.ceil(bbox.width + pad * 2)));
+    clone.setAttribute('height', String(Math.ceil(bbox.height + pad * 2)));
+    clone.removeAttribute('style');
+
+    const docName = designNameEl.textContent?.trim() || 'design';
+    const filename = docName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.svg';
+    downloadSvg(clone, filename);
 }
 
 // ---- Toast ----
@@ -1220,8 +1297,15 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
                 paper.removeTools();
                 currentCell = null;
                 panel.hide();
+                clearHistory();
                 switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
             });
+            break;
+        case 'edit-undo':
+            undo();
+            break;
+        case 'edit-redo':
+            redo();
             break;
         case 'edit-delete':
             deleteSelected();
@@ -1245,6 +1329,9 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             break;
         case 'model-adjust-grid':
             showAdjustGridModal();
+            break;
+        case 'file-export-svg':
+            exportCanvasSvg();
             break;
         case 'admin-set-default':
             saveDefaultDesign(graph);

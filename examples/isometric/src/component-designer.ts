@@ -1342,6 +1342,39 @@ function buildInspectorPanel() {
         }
     });
 
+    // Hide label toggle — shown directly below the name input
+    const labelHidden = currentShape?.attr('label/display') === 'none'
+        || (isComplexShape && layerShapes[0]?.attr('label/display') === 'none');
+    const hideLabelWrapper = document.createElement('div');
+    hideLabelWrapper.className = 'nr-toggle' + (labelHidden ? ' nr-toggle--checked' : '');
+
+    const hideLabelText = document.createElement('span');
+    hideLabelText.className = 'nr-toggle__label-text';
+    hideLabelText.textContent = 'Hide label';
+
+    const hideLabelTrack = document.createElement('button');
+    hideLabelTrack.type = 'button';
+    hideLabelTrack.className = 'nr-toggle__track';
+    hideLabelTrack.setAttribute('role', 'switch');
+    hideLabelTrack.setAttribute('aria-checked', labelHidden ? 'true' : 'false');
+    hideLabelTrack.setAttribute('aria-label', 'Hide label');
+    hideLabelTrack.addEventListener('click', () => {
+        const next = !hideLabelWrapper.classList.contains('nr-toggle--checked');
+        hideLabelWrapper.classList.toggle('nr-toggle--checked', next);
+        hideLabelTrack.setAttribute('aria-checked', next ? 'true' : 'false');
+        const display = next ? 'none' : null;
+        if (isComplexShape) {
+            layerShapes[0]?.attr('label/display', display);
+            layerShapes2D[0]?.attr('label/display', display);
+        } else if (currentShape) {
+            currentShape.attr('label/display', display);
+            currentShape2D?.attr('label/display', display);
+        }
+    });
+
+    hideLabelWrapper.appendChild(hideLabelText);
+    hideLabelWrapper.appendChild(hideLabelTrack);
+
     // Complex Shape toggle — shown directly below the name input
     // Uses nr-toggle: button-based, ::before thumb, no cds-- conflict.
     const complexToggleWrapper = document.createElement('div');
@@ -1370,6 +1403,7 @@ function buildInspectorPanel() {
 
     nameSection.appendChild(nameLabel);
     nameSection.appendChild(shapeNameInput);
+    nameSection.appendChild(hideLabelWrapper);
     nameSection.appendChild(complexToggleWrapper);
     inspectorEl.appendChild(nameSection);
 
@@ -1424,8 +1458,16 @@ function buildInspectorPanel() {
     deleteBtn.textContent = 'Delete Component';
     deleteBtn.addEventListener('click', () => showDeleteConfirmModal(currentShapeId));
 
+    const exportSvgBtn = document.createElement('button');
+    exportSvgBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    exportSvgBtn.type = 'button';
+    exportSvgBtn.style.width = '100%';
+    exportSvgBtn.textContent = 'Export SVG';
+    exportSvgBtn.addEventListener('click', exportShapeSvg);
+
     footer.appendChild(saveBtn);
     footer.appendChild(duplicateBtn);
+    footer.appendChild(exportSvgBtn);
     footer.appendChild(deleteBtn);
     inspectorEl.appendChild(footer);
 }
@@ -2989,6 +3031,59 @@ function showNewShapeModal() {
     });
 
     nameInput.focus();
+}
+
+function cleanSvgForExport(clone: SVGSVGElement): void {
+    clone.querySelectorAll('[data-grid], .joint-back-layer').forEach(el => el.remove());
+    clone.querySelectorAll('.joint-port').forEach(el => el.remove());
+    clone.querySelectorAll('image').forEach(img => {
+        const href = img.getAttribute('href') || img.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        if (href) {
+            img.setAttribute('href', href);
+            img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
+        }
+    });
+}
+
+function exportShapeSvg(): void {
+    const svgEl = paper.el.querySelector('svg');
+    if (!svgEl) return;
+
+    const clone = svgEl.cloneNode(true) as SVGSVGElement;
+    cleanSvgForExport(clone);
+
+    clone.style.position = 'absolute';
+    clone.style.left = '-9999px';
+    document.body.appendChild(clone);
+
+    const contentGroup = clone.querySelector('.joint-cells-layer') as SVGGElement | null;
+    const bbox = contentGroup ? contentGroup.getBBox() : clone.getBBox();
+    document.body.removeChild(clone);
+
+    if (bbox.width === 0 || bbox.height === 0) return;
+
+    const pad = 8;
+    clone.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`);
+    clone.setAttribute('width', String(Math.ceil(bbox.width + pad * 2)));
+    clone.setAttribute('height', String(Math.ceil(bbox.height + pad * 2)));
+    clone.removeAttribute('style');
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+
+    const svgString = new XMLSerializer().serializeToString(clone);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const displayName = ShapeRegistry[currentShapeId]?.displayName ?? currentShapeId;
+    const filename = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.svg';
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 function showDeleteConfirmModal(id: string) {
