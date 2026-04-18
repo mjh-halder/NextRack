@@ -2,6 +2,7 @@ import { dia } from '@joint/core';
 import IsometricShape from './shapes/isometric-shape';
 import { ShapeRegistry } from './shapes/shape-registry';
 import { PRIMARY_COLORS } from './colors';
+import { getCustomFields, FieldDefinition } from './schema-registry';
 const DEFAULT_ZONE_COLOR = '#0072c3';
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -92,12 +93,18 @@ export class PropertyPanel {
 
     private nodeInputs = {} as Record<keyof NodeMeta, HTMLInputElement | HTMLTextAreaElement>;
     private nodeLabelHiddenEl!: HTMLInputElement;
+    private nodeCustomContainer!: HTMLElement;
+    private nodeCustomInputs: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
     private zoneNameInput!: HTMLInputElement;
     private zoneLabelHiddenEl!: HTMLInputElement;
+    private zoneCustomContainer!: HTMLElement;
+    private zoneCustomInputs: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
     private zoneColorSwatchBtns: Array<{ btn: HTMLButtonElement; color: string }> = [];
     private selectedZoneColor = DEFAULT_ZONE_COLOR;
     private zoneLabelPosPicker!: LabelPositionPicker;
     private linkInputs = {} as Record<keyof LinkMeta, HTMLInputElement>;
+    private linkCustomContainer!: HTMLElement;
+    private linkCustomInputs: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
 
     constructor(el: HTMLElement, private actions: PanelActions) {
         this.el = el;
@@ -125,6 +132,9 @@ export class PropertyPanel {
         );
         this.nodeLabelHiddenEl = nodeLabelInput;
         this.nodeSection.appendChild(nodeLabelRow);
+        this.nodeCustomContainer = document.createElement('div');
+        this.nodeCustomContainer.className = 'inspector-custom-fields';
+        this.nodeSection.appendChild(this.nodeCustomContainer);
         this.el.appendChild(this.nodeSection);
 
         // ---- Zone section ----
@@ -152,6 +162,9 @@ export class PropertyPanel {
         });
 
         this.zoneSection.appendChild(this.buildZoneColorRow());
+        this.zoneCustomContainer = document.createElement('div');
+        this.zoneCustomContainer.className = 'inspector-custom-fields';
+        this.zoneSection.appendChild(this.zoneCustomContainer);
         this.el.appendChild(this.zoneSection);
 
         // ---- Link section ----
@@ -164,6 +177,9 @@ export class PropertyPanel {
             this.linkInputs[field.key] = input as HTMLInputElement;
             this.linkSection.appendChild(row);
         }
+        this.linkCustomContainer = document.createElement('div');
+        this.linkCustomContainer.className = 'inspector-custom-fields';
+        this.linkSection.appendChild(this.linkCustomContainer);
         this.el.appendChild(this.linkSection);
 
         // Auto-save: zone fields apply instantly.
@@ -378,19 +394,21 @@ export class PropertyPanel {
 
     private saveNode() {
         if (!this.currentNode) return;
-        const meta: NodeMeta = {
+        const meta: Record<string, unknown> = {
             name:   this.nodeInputs.name.value,
             kind:   this.nodeInputs.kind.value,
             vendor: this.nodeInputs.vendor.value,
             model:  this.nodeInputs.model.value,
             notes:  (this.nodeInputs.notes as HTMLTextAreaElement).value,
         };
+        for (const [key, input] of Object.entries(this.nodeCustomInputs)) {
+            meta[key] = input.value;
+        }
         this.currentNode.set(META_KEY, meta);
-        const displayLabel = meta.name.trim()
-            || ShapeRegistry[meta.kind]?.displayName
-            || meta.kind;
+        const displayLabel = (meta.name as string).trim()
+            || ShapeRegistry[meta.kind as string]?.displayName
+            || (meta.kind as string);
         this.currentNode.attr('label/text', displayLabel);
-        // null removes the display attr, restoring default visibility
         this.currentNode.attr('label/display', this.nodeLabelHiddenEl.checked ? 'none' : null);
     }
 
@@ -400,42 +418,104 @@ export class PropertyPanel {
         this.currentZone.attr('label/text', name || 'Zone');
         this.currentZone.attr('label/display', this.zoneLabelHiddenEl.checked ? 'none' : null);
 
-        // Apply color
         const color = this.selectedZoneColor;
         this.currentZone.set('zoneColor', color);
         this.currentZone.attr('body/stroke', color);
         this.currentZone.attr('body/fill', hexToRgba(color, 0.08));
         this.currentZone.attr('label/fill', color);
 
-        // Apply label position
         const selectedPos = this.zoneLabelPosPicker.getValue();
         this.currentZone.set('zoneLabelPosition', selectedPos);
         const pos = LABEL_POSITIONS[selectedPos];
         this.currentZone.attr('label/x', pos.x);
         this.currentZone.attr('label/y', pos.y);
         this.currentZone.attr('label/text-anchor', pos.textAnchor);
+
+        const zoneMeta: Record<string, unknown> = {};
+        for (const [key, input] of Object.entries(this.zoneCustomInputs)) {
+            zoneMeta[key] = input.value;
+        }
+        this.currentZone.set('zoneMeta', zoneMeta);
     }
 
     private saveLink() {
         if (!this.currentLink) return;
-        const meta: LinkMeta = {
+        const meta: Record<string, unknown> = {
             bandwidth:  this.linkInputs.bandwidth.value,
             medium:     this.linkInputs.medium.value,
             encryption: this.linkInputs.encryption.value,
         };
+        for (const [key, input] of Object.entries(this.linkCustomInputs)) {
+            meta[key] = input.value;
+        }
         this.currentLink.set(LINK_META_KEY, meta);
-        updateLinkLabel(this.currentLink, meta);
+        updateLinkLabel(this.currentLink, meta as unknown as LinkMeta);
+    }
+
+    private buildCustomFields(
+        container: HTMLElement,
+        typeId: string,
+        existingValues: Record<string, unknown>,
+        saveFn: () => void,
+    ): Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> {
+        container.innerHTML = '';
+        const fields = getCustomFields(typeId);
+        const inputs: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
+        if (fields.length === 0) return inputs;
+
+        for (const field of fields) {
+            const row = document.createElement('div');
+            row.className = 'inspector-row';
+            const label = document.createElement('label');
+            label.textContent = field.label;
+            label.htmlFor = `inspector-custom-${typeId}-${field.key}`;
+            row.appendChild(label);
+
+            let input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+
+            if (field.type === 'select' && field.options?.length) {
+                input = document.createElement('select');
+                const emptyOpt = document.createElement('option');
+                emptyOpt.value = '';
+                emptyOpt.textContent = '— select —';
+                input.appendChild(emptyOpt);
+                for (const opt of field.options) {
+                    const el = document.createElement('option');
+                    el.value = opt;
+                    el.textContent = opt;
+                    input.appendChild(el);
+                }
+            } else if (field.multiline) {
+                input = document.createElement('textarea');
+                (input as HTMLTextAreaElement).rows = 3;
+            } else {
+                input = document.createElement('input');
+                (input as HTMLInputElement).type = field.type === 'number' ? 'number' : 'text';
+            }
+
+            input.id = `inspector-custom-${typeId}-${field.key}`;
+            if (field.placeholder && 'placeholder' in input) input.placeholder = field.placeholder;
+            input.value = String(existingValues[field.key] ?? '');
+            input.addEventListener('input', saveFn);
+            row.appendChild(input);
+            container.appendChild(row);
+            inputs[field.key] = input;
+        }
+        return inputs;
     }
 
     show(cell: IsometricShape) {
         this.currentNode = cell;
         this.currentLink = null;
         this.currentZone = null;
-        const meta: NodeMeta = cell.get(META_KEY) ?? { ...EMPTY_NODE_META };
+        const meta: Record<string, unknown> = cell.get(META_KEY) ?? { ...EMPTY_NODE_META };
         for (const field of NODE_FIELDS) {
-            this.nodeInputs[field.key].value = meta[field.key];
+            this.nodeInputs[field.key].value = String(meta[field.key] ?? '');
         }
         this.nodeLabelHiddenEl.checked = cell.attr('label/display') === 'none';
+        this.nodeCustomInputs = this.buildCustomFields(
+            this.nodeCustomContainer, 'node', meta, () => this.saveNode()
+        );
         this.titleEl.textContent = 'Node Properties';
         this.nodeSection.style.display = '';
         this.zoneSection.style.display = 'none';
@@ -455,13 +535,16 @@ export class PropertyPanel {
         this.zoneNameInput.value = (frame.attr('label/text') as string | undefined) ?? '';
         this.zoneLabelHiddenEl.checked = frame.attr('label/display') === 'none';
 
-        // Restore saved color (fall back to default if never set)
         this.selectedZoneColor = (frame.get('zoneColor') as string | undefined) ?? DEFAULT_ZONE_COLOR;
         this.syncZoneColorSwatches();
 
-        // Restore label position and sync its visibility with the hide-label state
         this.zoneLabelPosPicker.setValue((frame.get('zoneLabelPosition') as string | undefined) ?? 'top-left');
         this.zoneLabelPosPicker.row.style.display = this.zoneLabelHiddenEl.checked ? 'none' : '';
+
+        const zoneMeta: Record<string, unknown> = frame.get('zoneMeta') ?? {};
+        this.zoneCustomInputs = this.buildCustomFields(
+            this.zoneCustomContainer, 'zone', zoneMeta, () => this.saveZone()
+        );
 
         this.titleEl.textContent = 'Zone Properties';
         this.nodeSection.style.display = 'none';
@@ -478,10 +561,13 @@ export class PropertyPanel {
         this.currentLink = link;
         this.currentNode = null;
         this.currentZone = null;
-        const meta: LinkMeta = link.get(LINK_META_KEY) ?? { ...EMPTY_LINK_META };
+        const meta: Record<string, unknown> = link.get(LINK_META_KEY) ?? { ...EMPTY_LINK_META };
         for (const field of LINK_FIELDS) {
-            this.linkInputs[field.key].value = meta[field.key];
+            this.linkInputs[field.key].value = String(meta[field.key] ?? '');
         }
+        this.linkCustomInputs = this.buildCustomFields(
+            this.linkCustomContainer, 'connection', meta, () => this.saveLink()
+        );
         this.titleEl.textContent = 'Connection';
         this.nodeSection.style.display = 'none';
         this.zoneSection.style.display = 'none';

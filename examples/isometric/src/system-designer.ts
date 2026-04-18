@@ -9,6 +9,7 @@ import { ShapeRegistry } from './shapes/shape-registry';
 import { ComponentPalette } from './palette';
 import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './persistence';
 import { ViewToggle } from './view-toggle';
+import { AreaSelect } from './area-select';
 import { carbonIconToString, CarbonIcon } from './icons';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
@@ -121,7 +122,7 @@ let gridVisible = true;
 let treeHighlightedCell: IsometricShape | null = null;
 let currentFrame: Frame | null = null;
 
-const graph = new dia.Graph({}, { cellNamespace });
+export const graph = new dia.Graph({}, { cellNamespace });
 
 // Obstacles listen to changes in the graph and update their internal state
 const obstacles = new Obstacles(graph);
@@ -279,7 +280,11 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     const active = document.activeElement;
     if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
     if (e.key === 'Delete' || e.key === 'Backspace') {
-        deleteSelected();
+        if (areaSelect.hasSelection) {
+            areaSelect.deleteSelection();
+        } else {
+            deleteSelected();
+        }
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
         e.preventDefault();
         duplicateSelected();
@@ -787,6 +792,31 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
 // Let the palette know which zone is selected so new components get embedded.
 palette.setActiveZoneGetter(() => currentFrame);
 
+// Area selection: Shift+Drag on blank canvas to rubber-band select multiple elements.
+const areaSelect = new AreaSelect({
+    paper,
+    graph,
+    canvasEl,
+    resolveComponentBase,
+    onSelectionChange: (cells) => {
+        if (cells.length > 0) {
+            paper.removeTools();
+            currentCell = null;
+            currentFrame = null;
+            panel.hide();
+            setTreeHighlight(null);
+        }
+    },
+    onGroupMoveEnd: (cells) => {
+        cells.forEach(cell => {
+            if (!cell.isLink() && !cell.get('isFrame')) {
+                updateZoneAssignment(cell as IsometricShape);
+            }
+        });
+        if (currentView === View.Isometric) sortElements(graph);
+    },
+});
+
 // When element-tree drag-drop targets a zone, tint the zone on the canvas
 // with the same orange used by the canvas drag highlight.
 palette.setZoneDropHighlightCallback((zoneId) => {
@@ -865,6 +895,7 @@ function updateZoneAssignment(element: IsometricShape): void {
 // Show/Hide tools on cell pointer events
 
 paper.on('link:pointerup', (linkView: dia.LinkView) => {
+    areaSelect.clear();
     const link = linkView.model as Link;
     paper.removeTools();
     link.addTools(paper);
@@ -913,8 +944,23 @@ paper.on('element:pointermove', (elementView: dia.ElementView) => {
     }
 });
 
-paper.on('element:pointerup', (elementView: dia.ElementView) => {
+paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => {
     clearZoneDropHighlight();
+
+    const resolved = resolveComponentBase(elementView.model);
+
+    if (evt.shiftKey) {
+        areaSelect.toggle(resolved);
+        paper.removeTools();
+        currentCell = null;
+        currentFrame = null;
+        panel.hide();
+        setTreeHighlight(null);
+        return;
+    }
+
+    if (areaSelect.hasSelection && areaSelect.isSelected(resolved)) return;
+    areaSelect.clear();
 
     const model = elementView.model;
     paper.removeTools();
@@ -937,7 +983,9 @@ paper.on('element:pointerup', (elementView: dia.ElementView) => {
     setTreeHighlight(shape);
 });
 
-paper.on('blank:pointerdown', () => {
+paper.on('blank:pointerdown', (_evt: dia.Event) => {
+    if (_evt.shiftKey) return;
+    areaSelect.clear();
     paper.removeTools();
     currentCell = null;
     currentFrame = null;
@@ -1120,18 +1168,22 @@ window.addEventListener('resize', hideContextMenu);
 paper.el.style.cursor = 'grab';
 
 paper.on('blank:pointerdown', (evt) => {
+    if (evt.shiftKey) return;
     evt.data = {
         scrollX: window.scrollX, clientX: evt.clientX,
-        scrollY: window.scrollY, clientY: evt.clientY
+        scrollY: window.scrollY, clientY: evt.clientY,
+        panning: true,
     };
     paper.el.style.cursor = 'grabbing';
 });
 
 paper.on('blank:pointermove', (evt) => {
+    if (!evt.data?.panning) return;
     window.scroll(evt.data.scrollX + (evt.data.clientX - evt.clientX), evt.data.scrollY + (evt.data.clientY - evt.clientY));
 });
 
-paper.on('blank:pointerup', () => {
+paper.on('blank:pointerup', (evt) => {
+    if (!evt.data?.panning) return;
     paper.el.style.cursor = 'grab';
 });
 

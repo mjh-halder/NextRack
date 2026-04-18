@@ -5,6 +5,7 @@ import { panel, canvasEl, paletteEl, viewToggleContainerEl, designNameEl } from 
 import { panel as cdPanel, selectShape } from './component-designer';
 import { initTopHeader } from './top-header';
 import { initAdmin } from './admin';
+import { initDataModel } from './data-model';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Sun20 from '@carbon/icons/es/sun/20.js';
 import Moon20 from '@carbon/icons/es/moon/20.js';
@@ -44,27 +45,33 @@ document.getElementById('nav-theme')?.addEventListener('click', () => {
 
 // ---- App-level view switching (System Designer ↔ Component Designer ↔ Admin) ----
 
-const navGridBtn   = document.getElementById('nav-grid')            as HTMLButtonElement;
-const navShapesBtn = document.getElementById('nav-shapes')          as HTMLButtonElement;
-const navAdminBtn  = document.getElementById('nav-admin')           as HTMLButtonElement;
-const cdEl         = document.getElementById('component-designer')  as HTMLDivElement;
-const adminEl      = document.getElementById('admin')               as HTMLDivElement;
+const navGridBtn      = document.getElementById('nav-grid')            as HTMLButtonElement;
+const navShapesBtn    = document.getElementById('nav-shapes')          as HTMLButtonElement;
+const navDataModelBtn = document.getElementById('nav-data-model')      as HTMLButtonElement;
+const navAdminBtn     = document.getElementById('nav-admin')           as HTMLButtonElement;
+const cdEl            = document.getElementById('component-designer')  as HTMLDivElement;
+const dataModelEl     = document.getElementById('data-model')          as HTMLDivElement;
+const adminEl         = document.getElementById('admin')               as HTMLDivElement;
 
 navAdminBtn.innerHTML = SETTINGS_SVG;
 
 initAdmin(adminEl);
+initDataModel(dataModelEl);
 
-type AppView = 'grid' | 'shapes' | 'admin';
+type AppView = 'grid' | 'shapes' | 'data-model' | 'admin';
 
 function setAppView(view: AppView) {
-    const isGrid   = view === 'grid';
-    const isShapes = view === 'shapes';
-    const isAdmin  = view === 'admin';
+    const isGrid      = view === 'grid';
+    const isShapes    = view === 'shapes';
+    const isDataModel = view === 'data-model';
+    const isAdmin     = view === 'admin';
 
     navGridBtn.classList.toggle('nr-rail-item--active', isGrid);
     navGridBtn.setAttribute('aria-current', isGrid ? 'page' : 'false');
     navShapesBtn.classList.toggle('nr-rail-item--active', isShapes);
     navShapesBtn.setAttribute('aria-current', isShapes ? 'page' : 'false');
+    navDataModelBtn.classList.toggle('nr-rail-item--active', isDataModel);
+    navDataModelBtn.setAttribute('aria-current', isDataModel ? 'page' : 'false');
     navAdminBtn.classList.toggle('nr-rail-item--active', isAdmin);
     navAdminBtn.setAttribute('aria-current', isAdmin ? 'page' : 'false');
 
@@ -79,6 +86,10 @@ function setAppView(view: AppView) {
     cdEl.setAttribute('aria-hidden', String(!isShapes));
     cdEl.style.display = isShapes ? 'flex' : 'none';
 
+    // Data Model
+    dataModelEl.setAttribute('aria-hidden', String(!isDataModel));
+    dataModelEl.style.display = isDataModel ? 'flex' : 'none';
+
     // Admin
     adminEl.setAttribute('aria-hidden', String(!isAdmin));
     adminEl.style.display = isAdmin ? 'flex' : 'none';
@@ -88,9 +99,10 @@ function setAppView(view: AppView) {
     if (!isShapes) cdPanel.hide();
 }
 
-navGridBtn.addEventListener('click',   () => setAppView('grid'));
-navShapesBtn.addEventListener('click', () => setAppView('shapes'));
-navAdminBtn.addEventListener('click',  () => setAppView('admin'));
+navGridBtn.addEventListener('click',      () => setAppView('grid'));
+navShapesBtn.addEventListener('click',    () => setAppView('shapes'));
+navDataModelBtn.addEventListener('click', () => setAppView('data-model'));
+navAdminBtn.addEventListener('click',     () => setAppView('admin'));
 
 document.addEventListener('nextrack:navigate-to-shape', ((e: CustomEvent<{ shapeId: string }>) => {
     selectShape(e.detail.shapeId);
