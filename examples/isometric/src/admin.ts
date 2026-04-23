@@ -25,7 +25,7 @@ import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, deleteShape, saveRe
 import { shapeStore } from './shape-store';
 import { componentStore, ComponentDefinition } from './component-store';
 
-type AdminView = 'icon-config' | 'component-library' | 'user-settings';
+type AdminView = 'icon-config' | 'component-library' | 'data' | 'user-settings';
 
 let rootEl: HTMLDivElement | null = null;
 let currentView: AdminView = 'icon-config';
@@ -40,6 +40,7 @@ const AVAILABLE_MAX = 300;
 const NAV_ITEMS: Array<{ id: AdminView; label: string }> = [
     { id: 'icon-config',       label: 'Icon Configuration' },
     { id: 'component-library', label: 'Component Library' },
+    { id: 'data',              label: 'Data' },
     { id: 'user-settings',     label: 'User Settings' },
 ];
 
@@ -81,12 +82,41 @@ function selectView(view: AdminView): void {
         btn.setAttribute('aria-current', active ? 'page' : 'false');
     });
 
+    // Move data-model element back to body if leaving Data view
+    const dmEl = document.getElementById('data-model');
+    if (dmEl && dmEl.parentElement?.classList.contains('nr-admin__content')) {
+        dmEl.style.display = 'none';
+        dmEl.style.position = '';
+        dmEl.style.inset = '';
+        dmEl.style.left = '';
+        dmEl.style.top = '';
+        document.body.appendChild(dmEl);
+    }
+
     const contentEl = rootEl.querySelector<HTMLDivElement>('.nr-admin__content');
     if (!contentEl) return;
     contentEl.innerHTML = '';
+    contentEl.style.padding = '';
+    contentEl.style.position = '';
+    contentEl.style.overflow = '';
     if (view === 'icon-config')       renderIconConfig(contentEl);
     if (view === 'component-library') renderComponentLibrary(contentEl);
+    if (view === 'data')              renderDataView(contentEl);
     if (view === 'user-settings')     renderUserSettings(contentEl);
+}
+
+function renderDataView(container: HTMLElement): void {
+    const dmEl = document.getElementById('data-model');
+    if (!dmEl) return;
+    container.style.position = 'relative';
+    container.style.overflow = 'hidden';
+    container.style.padding = '0';
+    dmEl.style.display = 'flex';
+    dmEl.style.position = 'absolute';
+    dmEl.style.inset = '0';
+    dmEl.style.left = '0';
+    dmEl.style.top = '0';
+    container.appendChild(dmEl);
 }
 
 function renderComponentLibrary(container: HTMLElement): void {

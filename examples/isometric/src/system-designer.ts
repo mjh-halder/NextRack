@@ -14,6 +14,7 @@ import {
 } from './canvas-store';
 import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
 import { initMinimap, updateMinimapView } from './minimap';
+import { initResourceBar, showResourceBar, hideResourceBar, showZoneHud, hideZoneHud } from './resource-bar';
 import { initWorkloadTable, showWorkloadTable, hideWorkloadTable } from './workload-table';
 import { getCanvas } from './canvas-store';
 import { ViewToggle } from './view-toggle';
@@ -437,6 +438,9 @@ initMinimap(minimapEl, graph, paper);
 
 const workloadTableEl = document.getElementById('workload-table') as HTMLDivElement;
 initWorkloadTable(workloadTableEl);
+
+const resourceBarEl = document.getElementById('resource-bar') as HTMLDivElement;
+initResourceBar(resourceBarEl, graph);
 
 // ---- New Design ----
 
@@ -949,6 +953,7 @@ function switchCanvas(id: string): void {
     paper.removeTools();
     currentCell = null;
     currentFrame = null;
+    hideZoneHud();
     if (typeof areaSelect !== 'undefined') areaSelect.clear();
     graph.clear();
     clearHistory();
@@ -962,19 +967,21 @@ function switchCanvas(id: string): void {
         canvasEl.style.display = 'none';
         viewToggleContainerEl.style.display = 'none';
         minimapEl.style.display = 'none';
+        hideResourceBar();
         hideWorkloadTable();
         showWorkloadTable(id);
-        panel.hide();
     } else {
         hideWorkloadTable();
         canvasEl.style.display = '';
         viewToggleContainerEl.style.display = '';
         minimapEl.style.display = '';
+        showResourceBar();
         loadCanvasGraph(id, graph);
         switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
         updateMinimapView(currentView, currentGridCountX);
-        panel.showLayer(id, () => palette.refreshCanvasDropdown(id), () => switchCanvas(id));
     }
+
+    panel.showLayer(id, () => palette.refreshCanvasDropdown(id), () => switchCanvas(id));
 }
 
 function buildModalOverlay(): HTMLDivElement {
@@ -1318,6 +1325,7 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
         currentCell = null;
         currentFrame = model as Frame;
         panel.showZone(model);
+        showZoneHud(model);
         setTreeHighlight(null);
         return;
     }
@@ -1328,6 +1336,7 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
     currentCell = shape;
     currentFrame = null;
     panel.show(shape);
+    hideZoneHud();
     setTreeHighlight(shape);
 });
 
@@ -1338,6 +1347,7 @@ paper.on('blank:pointerdown', (_evt: dia.Event) => {
     currentCell = null;
     currentFrame = null;
     panel.hide();
+    hideZoneHud();
     setTreeHighlight(null);
 });
 

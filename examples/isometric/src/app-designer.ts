@@ -74,6 +74,8 @@ function updatePreview(): void {
     const shapeKey = findAppShapeKey();
     const def = shapeKey ? ShapeRegistry[shapeKey] : null;
 
+    const gridCenter = (AD_GRID_COUNT * GRID_SIZE) / 2;
+
     if (def?.complexShape && def.layers?.length) {
         const baseLayer = def.layers[0];
         const cc = new ComplexComponent();
@@ -82,7 +84,7 @@ function updatePreview(): void {
         cc.set('defaultIsometricHeight', baseLayer.depth);
         cc.set('defaultSize', { width: baseLayer.width, height: baseLayer.height });
         cc.set('layers', def.layers.map(l => ({ ...l, style: { ...l.style } })));
-        cc.position(GRID_SIZE * 2, GRID_SIZE * 2);
+        cc.position(gridCenter - baseLayer.width / 2, gridCenter - baseLayer.height / 2);
 
         if (def.iconHref) {
             cc.set('iconHref', def.iconHref);
@@ -95,11 +97,13 @@ function updatePreview(): void {
         cc.toggleView(View.Isometric);
         graph.addCell(cc);
     } else {
+        const sw = GRID_SIZE * 3;
+        const sh = GRID_SIZE * 3;
         const shape = new Computer();
-        shape.resize(GRID_SIZE * 3, GRID_SIZE * 3);
+        shape.resize(sw, sh);
         shape.set('isometricHeight', GRID_SIZE * 2);
         shape.set('defaultIsometricHeight', GRID_SIZE * 2);
-        shape.position(GRID_SIZE * 2, GRID_SIZE * 2);
+        shape.position(gridCenter - sw / 2, gridCenter - sh / 2);
 
         if (def) applyRegistryDefaults(shape, def, paper);
 

@@ -3038,7 +3038,7 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
     position: absolute;
     top: 0;
     left: 208px;
-    right: 300px;
+    right: 50%;
     bottom: 0;
     overflow: hidden;
     background: var(--cds-background, #ffffff);
@@ -3074,9 +3074,9 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
 #ad-inspector {
     position: absolute;
     top: 0;
+    left: 50%;
     right: 0;
     bottom: 0;
-    width: 300px;
     background: var(--cds-layer-01, #ffffff);
     border-left: 1px solid var(--cds-border-subtle-01, #e0e0e0);
     overflow-y: auto;
@@ -3390,6 +3390,107 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
 
 .cds--g100 #workload-table {
     background: var(--cds-background, #161616);
+}
+
+/* ── Resource HUD ──────────────────────────────────────────────────────── */
+
+#resource-bar {
+    position: fixed;
+    top: calc(var(--nr-header-h) + 8px);
+    left: calc(48px + 208px + 8px);
+    z-index: 15;
+}
+
+.nr-hud {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 9999px;
+    padding: 0 4px;
+    height: 28px;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+}
+
+.cds--g100 .nr-hud {
+    background: rgba(38, 38, 38, 0.6);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.nr-hud__item {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 8px;
+    height: 100%;
+    cursor: default;
+    border-right: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.nr-hud__item:last-child {
+    border-right: none;
+}
+
+.cds--g100 .nr-hud__item {
+    border-right-color: rgba(255, 255, 255, 0.1);
+}
+
+.nr-hud__item svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    color: var(--cds-icon-secondary, #525252);
+}
+
+.cds--g100 .nr-hud__item svg {
+    color: var(--cds-icon-secondary, #c6c6c6);
+}
+
+.nr-hud__val {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--cds-text-primary, #161616);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+.cds--g100 .nr-hud__val {
+    color: var(--cds-text-primary, #f4f4f4);
+}
+
+/* Zone HUD — uses zone color */
+#zone-hud {
+    position: fixed;
+    top: calc(var(--nr-header-h) + 44px);
+    left: calc(48px + 208px + 8px);
+    z-index: 15;
+}
+
+.nr-hud--zone {
+    --zone-color: #0072c3;
+    background: color-mix(in srgb, var(--zone-color) 15%, transparent);
+    border-color: color-mix(in srgb, var(--zone-color) 35%, transparent);
+}
+
+.nr-hud--zone .nr-hud__item {
+    border-right-color: color-mix(in srgb, var(--zone-color) 25%, transparent);
+}
+
+.nr-hud--zone .nr-hud__item svg {
+    color: var(--zone-color);
+    opacity: 0.7;
+}
+
+.nr-hud--zone .nr-hud__val {
+    color: var(--cds-text-primary, #161616);
+}
+
+.cds--g100 .nr-hud--zone .nr-hud__val {
+    color: var(--cds-text-primary, #f4f4f4);
 }
 
 /* ── Minimap ───────────────────────────────────────────────────────────── */
