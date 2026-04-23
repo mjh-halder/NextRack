@@ -2,7 +2,9 @@ import { dia } from '@joint/core';
 import IsometricShape from './shapes/isometric-shape';
 import { ShapeRegistry } from './shapes/shape-registry';
 import { PRIMARY_COLORS } from './colors';
-import { getCustomFields, FieldDefinition } from './schema-registry';
+import { getCustomFields, getDataType, FieldDefinition } from './schema-registry';
+import { getProductsByType, getProduct } from './product-catalog';
+import { getCanvas, updateCanvas, CanvasRecord } from './canvas-store';
 const DEFAULT_ZONE_COLOR = '#0072c3';
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -23,23 +25,13 @@ const LABEL_POSITIONS: Record<string, { x: string | number; y: string | number; 
 
 export interface NodeMeta {
     name: string;
-    kind: string;
-    vendor: string;
-    model: string;
-    notes: string;
+    shapeType: string;
+    [key: string]: unknown;
 }
 
 export const META_KEY = 'meta';
 
-const EMPTY_NODE_META: NodeMeta = { name: '', kind: '', vendor: '', model: '', notes: '' };
-
-const NODE_FIELDS: { key: keyof NodeMeta; label: string; multiline?: boolean }[] = [
-    { key: 'name',   label: 'Name'   },
-    { key: 'kind',   label: 'Kind'   },
-    { key: 'vendor', label: 'Vendor' },
-    { key: 'model',  label: 'Model'  },
-    { key: 'notes',  label: 'Notes', multiline: true },
-];
+const EMPTY_NODE_META: NodeMeta = { name: '', shapeType: '' };
 
 // --- Link metadata ---
 
@@ -90,8 +82,11 @@ export class PropertyPanel {
     private currentNode: IsometricShape | null = null;
     private currentLink: dia.Link | null = null;
     private currentZone: dia.Element | null = null;
+    private currentLayerId: string | null = null;
 
-    private nodeInputs = {} as Record<keyof NodeMeta, HTMLInputElement | HTMLTextAreaElement>;
+    private layerSection!: HTMLElement;
+
+    private nodeInputs: Record<string, HTMLInputElement | HTMLTextAreaElement> = {};
     private nodeLabelHiddenEl!: HTMLInputElement;
     private nodeCustomContainer!: HTMLElement;
     private nodeCustomInputs: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
@@ -117,24 +112,9 @@ export class PropertyPanel {
         this.titleEl.className = 'inspector-title';
         this.el.appendChild(this.titleEl);
 
-        // ---- Node section ----
+        // ---- Node section (rebuilt dynamically per componentType in show()) ----
         this.nodeSection = document.createElement('div');
         this.nodeSection.className = 'inspector-section';
-        for (const field of NODE_FIELDS) {
-            const { row, input } = this.buildRow(
-                `node-${field.key}`, field.label, field.label, field.multiline
-            );
-            this.nodeInputs[field.key] = input as HTMLInputElement;
-            this.nodeSection.appendChild(row);
-        }
-        const { row: nodeLabelRow, input: nodeLabelInput } = this.buildCheckboxRow(
-            'node-label-hidden', 'Hide label'
-        );
-        this.nodeLabelHiddenEl = nodeLabelInput;
-        this.nodeSection.appendChild(nodeLabelRow);
-        this.nodeCustomContainer = document.createElement('div');
-        this.nodeCustomContainer.className = 'inspector-custom-fields';
-        this.nodeSection.appendChild(this.nodeCustomContainer);
         this.el.appendChild(this.nodeSection);
 
         // ---- Zone section ----
@@ -182,15 +162,14 @@ export class PropertyPanel {
         this.linkSection.appendChild(this.linkCustomContainer);
         this.el.appendChild(this.linkSection);
 
+        // ---- Layer section (rebuilt dynamically in showLayer()) ----
+        this.layerSection = document.createElement('div');
+        this.layerSection.className = 'inspector-section';
+        this.el.appendChild(this.layerSection);
+
         // Auto-save: zone fields apply instantly.
         this.zoneNameInput.addEventListener('input', () => this.saveZone());
         this.zoneLabelHiddenEl.addEventListener('change', () => this.saveZone());
-
-        // Auto-save: node fields apply instantly.
-        for (const field of NODE_FIELDS) {
-            this.nodeInputs[field.key].addEventListener('input', () => this.saveNode());
-        }
-        this.nodeLabelHiddenEl.addEventListener('change', () => this.saveNode());
 
         // Auto-save: link fields apply instantly.
         for (const field of LINK_FIELDS) {
@@ -357,6 +336,32 @@ export class PropertyPanel {
         return { row, input };
     }
 
+    private buildSelectRow(id: string, labelText: string, options: string[]): { row: HTMLElement; select: HTMLSelectElement } {
+        const row = document.createElement('div');
+        row.className = 'inspector-row';
+
+        const label = document.createElement('label');
+        label.textContent = labelText;
+        label.htmlFor = `inspector-${id}`;
+        row.appendChild(label);
+
+        const select = document.createElement('select');
+        select.id = `inspector-${id}`;
+        const emptyOpt = document.createElement('option');
+        emptyOpt.value = '';
+        emptyOpt.textContent = '— select —';
+        select.appendChild(emptyOpt);
+        for (const opt of options) {
+            const el = document.createElement('option');
+            el.value = opt;
+            el.textContent = opt;
+            select.appendChild(el);
+        }
+        row.appendChild(select);
+
+        return { row, select };
+    }
+
     private buildCheckboxRow(id: string, labelText: string): { row: HTMLElement; input: HTMLInputElement } {
         const row = document.createElement('div');
         row.className = 'inspector-row';
@@ -394,20 +399,27 @@ export class PropertyPanel {
 
     private saveNode() {
         if (!this.currentNode) return;
-        const meta: Record<string, unknown> = {
-            name:   this.nodeInputs.name.value,
-            kind:   this.nodeInputs.kind.value,
-            vendor: this.nodeInputs.vendor.value,
-            model:  this.nodeInputs.model.value,
-            notes:  (this.nodeInputs.notes as HTMLTextAreaElement).value,
-        };
+        const existing: Record<string, unknown> = this.currentNode.get(META_KEY) ?? {};
+        const meta: Record<string, unknown> = { ...existing };
+
+        if (this.nodeInputs.name) meta.name = this.nodeInputs.name.value;
+        if (this.nodeInputs.notes) meta.notes = (this.nodeInputs.notes as HTMLTextAreaElement).value;
+
+        // Only save editable (non-readonly) type fields
         for (const [key, input] of Object.entries(this.nodeCustomInputs)) {
+            if (input.classList.contains('inspector-readonly')) continue;
             meta[key] = input.value;
         }
+
         this.currentNode.set(META_KEY, meta);
-        const displayLabel = (meta.name as string).trim()
-            || ShapeRegistry[meta.kind as string]?.displayName
-            || (meta.kind as string);
+        const shapeKey = (meta.shapeType as string) || '';
+        const productId = meta.productId as string;
+        const product = productId ? getProduct(productId) : null;
+        const displayLabel = (meta.name as string || '').trim()
+            || (product ? String(product.values.name ?? '') : '')
+            || ShapeRegistry[shapeKey]?.displayName
+            || ShapeRegistry[shapeKey]?.componentType
+            || '';
         this.currentNode.attr('label/text', displayLabel);
         this.currentNode.attr('label/display', this.nodeLabelHiddenEl.checked ? 'none' : null);
     }
@@ -509,17 +521,126 @@ export class PropertyPanel {
         this.currentLink = null;
         this.currentZone = null;
         const meta: Record<string, unknown> = cell.get(META_KEY) ?? { ...EMPTY_NODE_META };
-        for (const field of NODE_FIELDS) {
-            this.nodeInputs[field.key].value = String(meta[field.key] ?? '');
+
+        const shapeKey = (meta.shapeType as string) || '';
+        const componentType = ShapeRegistry[shapeKey]?.componentType ?? '';
+        const typeId = componentType.toLowerCase().replace(/\s+/g, '-');
+        const typeDef = typeId ? getDataType(typeId) : null;
+
+        // Rebuild node section dynamically
+        this.nodeSection.innerHTML = '';
+        this.nodeInputs = {} as Record<keyof NodeMeta, HTMLInputElement | HTMLTextAreaElement>;
+        this.nodeCustomInputs = {};
+
+        // Always show Name first
+        const { row: nameRow, input: nameInput } = this.buildRow('node-name', 'Name', 'Name');
+        this.nodeInputs.name = nameInput as HTMLInputElement;
+        nameInput.value = String(meta.name ?? '');
+        nameInput.addEventListener('input', () => this.saveNode());
+        this.nodeSection.appendChild(nameRow);
+
+        // Product selector + type-specific fields
+        if (typeDef && componentType) {
+            const products = getProductsByType(componentType);
+            const selectedProductId = (meta.productId as string) || '';
+            const selectedProduct = selectedProductId ? getProduct(selectedProductId) : null;
+
+            // Product dropdown
+            if (products.length > 0 || selectedProductId) {
+                const { row: prodRow, select: prodSelect } = this.buildSelectRow(
+                    'node-product', `${componentType} Product`,
+                    products.map(p => String(p.values.name || p.id))
+                );
+                // Use product IDs as values
+                prodSelect.innerHTML = '';
+                const emptyOpt = document.createElement('option');
+                emptyOpt.value = '';
+                emptyOpt.textContent = '— none —';
+                prodSelect.appendChild(emptyOpt);
+                for (const p of products) {
+                    const opt = document.createElement('option');
+                    opt.value = p.id;
+                    opt.textContent = String(p.values.name || p.id);
+                    if (p.id === selectedProductId) opt.selected = true;
+                    prodSelect.appendChild(opt);
+                }
+                prodSelect.addEventListener('change', () => {
+                    meta.productId = prodSelect.value;
+                    this.saveNode();
+                    this.show(cell);
+                });
+                this.nodeSection.appendChild(prodRow);
+            }
+
+            // Type fields — read-only if product is selected
+            for (const field of typeDef.fields) {
+                if (field.key === 'id' || field.key === 'name') continue;
+
+                let input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+                let row: HTMLElement;
+
+                if (field.type === 'select' && field.options?.length) {
+                    const r = this.buildSelectRow(`node-type-${field.key}`, field.label, field.options);
+                    row = r.row;
+                    input = r.select;
+                } else if (field.multiline) {
+                    const r = this.buildRow(`node-type-${field.key}`, field.label, field.placeholder || field.label, true);
+                    row = r.row;
+                    input = r.input;
+                } else {
+                    const r = this.buildRow(`node-type-${field.key}`, field.label, field.placeholder || field.label);
+                    row = r.row;
+                    input = r.input;
+                    if (field.type === 'number') (input as HTMLInputElement).type = 'number';
+                }
+
+                if (selectedProduct) {
+                    input.value = String(selectedProduct.values[field.key] ?? '');
+                    if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+                        input.readOnly = true;
+                    } else {
+                        input.disabled = true;
+                    }
+                    input.classList.add('inspector-readonly');
+                } else {
+                    input.value = String(meta[field.key] ?? '');
+                    input.addEventListener('input', () => this.saveNode());
+                }
+
+                this.nodeSection.appendChild(row);
+                this.nodeCustomInputs[field.key] = input;
+            }
         }
-        this.nodeLabelHiddenEl.checked = cell.attr('label/display') === 'none';
-        this.nodeCustomInputs = this.buildCustomFields(
-            this.nodeCustomContainer, 'node', meta, () => this.saveNode()
+
+        // Notes (always shown)
+        const { row: notesRow, input: notesInput } = this.buildRow('node-notes', 'Notes', 'Notes', true);
+        this.nodeInputs.notes = notesInput as HTMLTextAreaElement;
+        notesInput.value = String(meta.notes ?? '');
+        notesInput.addEventListener('input', () => this.saveNode());
+        this.nodeSection.appendChild(notesRow);
+
+        // Hide label checkbox
+        const { row: nodeLabelRow, input: nodeLabelInput } = this.buildCheckboxRow(
+            'node-label-hidden', 'Hide label'
         );
-        this.titleEl.textContent = 'Node Properties';
+        this.nodeLabelHiddenEl = nodeLabelInput;
+        this.nodeLabelHiddenEl.checked = cell.attr('label/display') === 'none';
+        this.nodeLabelHiddenEl.addEventListener('change', () => this.saveNode());
+        this.nodeSection.appendChild(nodeLabelRow);
+
+        // Custom fields from schema registry
+        const customContainer = document.createElement('div');
+        customContainer.className = 'inspector-custom-fields';
+        this.nodeSection.appendChild(customContainer);
+        this.nodeCustomContainer = customContainer;
+        const schemaCustom = this.buildCustomFields(customContainer, 'node', meta, () => this.saveNode());
+        Object.assign(this.nodeCustomInputs, schemaCustom);
+
+        this.titleEl.textContent = componentType ? `${componentType} Properties` : 'Node Properties';
         this.nodeSection.style.display = '';
         this.zoneSection.style.display = 'none';
         this.linkSection.style.display = 'none';
+        this.layerSection.style.display = 'none';
         this.duplicateBtn.style.display = '';
         this.duplicateBtn.textContent = 'Duplicate';
         this.duplicateZoneBtn.style.display = 'none';
@@ -578,10 +699,63 @@ export class PropertyPanel {
         this.el.classList.remove('inspector-hidden');
     }
 
+    showLayer(canvasId: string, onUpdate?: () => void, onLayerTypeChange?: () => void) {
+        this.currentNode = null;
+        this.currentLink = null;
+        this.currentZone = null;
+        this.currentLayerId = canvasId;
+
+        const canvas = getCanvas(canvasId);
+        if (!canvas) { this.hide(); return; }
+
+        // Hide other sections
+        this.nodeSection.style.display = 'none';
+        this.zoneSection.style.display = 'none';
+        this.linkSection.style.display = 'none';
+        this.duplicateBtn.style.display = 'none';
+        this.duplicateZoneBtn.style.display = 'none';
+        this.deleteBtn.style.display = 'none';
+
+        // Rebuild layer section
+        this.layerSection.innerHTML = '';
+        this.layerSection.style.display = '';
+
+        // Layer title
+        const { row: nameRow, input: nameInput } = this.buildRow(
+            'layer-name', 'Layer Title', 'Layer title'
+        );
+        nameInput.value = canvas.name;
+        nameInput.addEventListener('input', () => {
+            updateCanvas(canvasId, { name: nameInput.value });
+            onUpdate?.();
+        });
+        this.layerSection.appendChild(nameRow);
+
+        // Layer type
+        const layerTypeDt = getDataType('layer-type');
+        const typeOptions = layerTypeDt
+            ? layerTypeDt.fields.map(f => f.key)
+            : ['Infrastructure', 'Workloads'];
+
+        const { row: typeRow, select: typeSelect } = this.buildSelectRow(
+            'layer-type', 'Layer Type', typeOptions
+        );
+        typeSelect.value = canvas.layerType || '';
+        typeSelect.addEventListener('change', () => {
+            updateCanvas(canvasId, { layerType: typeSelect.value });
+            onLayerTypeChange?.();
+        });
+        this.layerSection.appendChild(typeRow);
+
+        this.titleEl.textContent = 'Layer Properties';
+        this.el.classList.remove('inspector-hidden');
+    }
+
     hide() {
         this.currentNode = null;
         this.currentLink = null;
         this.currentZone = null;
+        this.currentLayerId = null;
         this.el.classList.add('inspector-hidden');
     }
 }

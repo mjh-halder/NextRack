@@ -33,9 +33,6 @@ export class Link extends shapes.standard.Link {
         this.findView(paper).addTools(new dia.ToolsView({
             name: 'link-tools',
             tools: [
-                // Drag any orthogonal segment to move the bend point
-                new linkTools.Segments(),
-                // Click a segment to add a waypoint; drag to move; double-click to remove
                 new linkTools.Vertices({ snapRadius: 10 }),
                 new TargetArrowHeadTool(),
                 new RemoveTool(),

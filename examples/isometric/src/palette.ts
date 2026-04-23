@@ -13,7 +13,15 @@ import CaretRight16 from '@carbon/icons/es/caret--right/16.js';
 import Area16 from '@carbon/icons/es/area/16.js';
 import Search16 from '@carbon/icons/es/search/16.js';
 import DragVertical16 from '@carbon/icons/es/drag--vertical/16.js';
+import Add16 from '@carbon/icons/es/add/16.js';
+import SubVolume16 from '@carbon/icons/es/watson-health/sub-volume/16.js';
+import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import { getIconById } from './icon-catalog';
+import { listCanvases, CanvasRecord } from './canvas-store';
+
+const ICON_ADD = carbonIconToString(Add16 as CarbonIcon);
+const ICON_CANVAS = carbonIconToString(SubVolume16 as CarbonIcon);
+const ICON_TRASH = carbonIconToString(TrashCan16 as CarbonIcon);
 
 const ICON_CHEVRON_DOWN = carbonIconToString(ChevronDown16 as CarbonIcon);
 // Tree toggle — filled right-pointing triangle.
@@ -68,9 +76,13 @@ export class ComponentPalette {
     // Callback fired when a zone should be highlighted in the canvas during
     // element-tree drag-drop (zoneId = highlight, null = clear).
     private onZoneDropHighlight: ((zoneId: string | null) => void) | null = null;
-    // Returns the currently selected zone (Frame) on the canvas, if any.
-    // Set by the system designer so addToGraph can embed new components.
     private getActiveZone: (() => Frame | null) | null = null;
+    private onCanvasSwitch: ((id: string) => void) | null = null;
+    private onCanvasCreate: (() => void) | null = null;
+    private onCanvasDelete: ((id: string) => void) | null = null;
+    private canvasPickerBtn: HTMLButtonElement | null = null;
+    private canvasLabelEl: HTMLSpanElement | null = null;
+    private activeCanvasId = '';
 
     constructor(
         el: HTMLElement,
@@ -113,10 +125,92 @@ export class ComponentPalette {
         this.onZoneDropHighlight = cb;
     }
 
-    /** Provide a getter that returns the currently selected zone on the canvas.
-     *  Used by addToGraph to embed new components into the active zone. */
     setActiveZoneGetter(fn: () => Frame | null): void {
         this.getActiveZone = fn;
+    }
+
+    setCanvasCallbacks(
+        onSwitch: (id: string) => void,
+        onCreate: () => void,
+        onDelete: (id: string) => void,
+    ): void {
+        this.onCanvasSwitch = onSwitch;
+        this.onCanvasCreate = onCreate;
+        this.onCanvasDelete = onDelete;
+    }
+
+    private toggleCanvasPopover(): void {
+        const existing = this.el.querySelector('.nr-canvas-popover');
+        if (existing) { existing.remove(); this.canvasPickerBtn?.setAttribute('aria-expanded', 'false'); return; }
+
+        const popover = document.createElement('div');
+        popover.className = 'nr-canvas-popover';
+        popover.setAttribute('role', 'listbox');
+
+        for (const c of listCanvases()) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'nr-canvas-popover-item';
+            if (c.id === this.activeCanvasId) item.classList.add('nr-canvas-popover-item--selected');
+            item.setAttribute('role', 'option');
+            item.setAttribute('aria-selected', String(c.id === this.activeCanvasId));
+
+            const icon = document.createElement('span');
+            icon.className = 'nr-tree-icon';
+            icon.innerHTML = ICON_CANVAS;
+            item.appendChild(icon);
+
+            const label = document.createElement('span');
+            label.className = 'nr-tree-label';
+            label.textContent = c.name;
+            item.appendChild(label);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.type = 'button';
+            deleteBtn.className = 'nr-canvas-popover-delete';
+            deleteBtn.title = `Delete ${c.name}`;
+            deleteBtn.setAttribute('aria-label', `Delete ${c.name}`);
+            deleteBtn.innerHTML = ICON_TRASH;
+            deleteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                popover.remove();
+                this.canvasPickerBtn?.setAttribute('aria-expanded', 'false');
+                this.onCanvasDelete?.(c.id);
+            });
+            item.appendChild(deleteBtn);
+
+            item.addEventListener('click', () => {
+                popover.remove();
+                this.canvasPickerBtn?.setAttribute('aria-expanded', 'false');
+                if (c.id !== this.activeCanvasId) {
+                    this.activeCanvasId = c.id;
+                    if (this.canvasLabelEl) this.canvasLabelEl.textContent = c.name;
+                    this.onCanvasSwitch?.(c.id);
+                }
+            });
+            popover.appendChild(item);
+        }
+
+        // Position below the picker button
+        this.canvasPickerBtn?.setAttribute('aria-expanded', 'true');
+        this.canvasPickerBtn?.after(popover);
+
+        // Close on click outside
+        const closeOnOutside = (e: MouseEvent) => {
+            if (!popover.contains(e.target as Node) && e.target !== this.canvasPickerBtn) {
+                popover.remove();
+                this.canvasPickerBtn?.setAttribute('aria-expanded', 'false');
+                document.removeEventListener('mousedown', closeOnOutside, true);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', closeOnOutside, true), 0);
+    }
+
+    refreshCanvasDropdown(activeId: string): void {
+        this.activeCanvasId = activeId;
+        if (!this.canvasLabelEl) return;
+        const canvas = listCanvases().find(c => c.id === activeId);
+        this.canvasLabelEl.textContent = canvas?.name ?? activeId;
     }
 
     /** Scroll the tree viewport so the given <li> is visible. */
@@ -152,16 +246,52 @@ export class ComponentPalette {
     }
 
     private build() {
-        // Panel header: product name
-        const header = document.createElement('div');
-        header.className = 'nr-panel-header';
+        // Layer section heading
+        const layerHeading = document.createElement('div');
+        layerHeading.className = 'nr-section-header nr-section-header--static';
+        const layerHeadingLabel = document.createElement('span');
+        layerHeadingLabel.textContent = 'Selected Layer';
+        layerHeading.appendChild(layerHeadingLabel);
+        this.el.appendChild(layerHeading);
 
-        const title = document.createElement('span');
-        title.className = 'nr-panel-title';
-        title.textContent = 'System Designer';
+        // Canvas picker row — looks like a tree row with a popover
+        const pickerRow = document.createElement('div');
+        pickerRow.className = 'nr-canvas-picker';
 
-        header.appendChild(title);
-        this.el.appendChild(header);
+        this.canvasPickerBtn = document.createElement('button');
+        this.canvasPickerBtn.type = 'button';
+        this.canvasPickerBtn.className = 'nr-canvas-picker-btn';
+        this.canvasPickerBtn.setAttribute('aria-haspopup', 'listbox');
+        this.canvasPickerBtn.setAttribute('aria-expanded', 'false');
+
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'nr-tree-icon';
+        iconSpan.innerHTML = ICON_CANVAS;
+        this.canvasPickerBtn.appendChild(iconSpan);
+
+        this.canvasLabelEl = document.createElement('span');
+        this.canvasLabelEl.className = 'nr-tree-label';
+        this.canvasLabelEl.textContent = 'Canvas';
+        this.canvasPickerBtn.appendChild(this.canvasLabelEl);
+
+        const chevron = document.createElement('span');
+        chevron.className = 'nr-canvas-picker-chevron';
+        chevron.innerHTML = ICON_CHEVRON_DOWN;
+        this.canvasPickerBtn.appendChild(chevron);
+
+        this.canvasPickerBtn.addEventListener('click', () => this.toggleCanvasPopover());
+        pickerRow.appendChild(this.canvasPickerBtn);
+
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'nr-canvas-add-btn';
+        addBtn.title = 'New canvas';
+        addBtn.setAttribute('aria-label', 'New canvas');
+        addBtn.innerHTML = ICON_ADD;
+        addBtn.addEventListener('click', () => { this.onCanvasCreate?.(); });
+        pickerRow.appendChild(addBtn);
+
+        this.el.appendChild(pickerRow);
 
         // Search Elements input — filters the element tree below.
         const treeSearchBox = document.createElement('div');
@@ -489,14 +619,14 @@ export class ComponentPalette {
     }
 
     private appendTreeItem(cell: dia.Element, parentUl: HTMLUListElement) {
-        const meta = cell.get('meta') as { name?: string; kind?: string } | undefined;
+        const meta = cell.get('meta') as { name?: string; shapeType?: string } | undefined;
+        const shapeKey = meta?.shapeType ?? '';
         const label = meta?.name?.trim()
             || (cell.attr('label/text') as string | undefined)
-            || meta?.kind
+            || ShapeRegistry[shapeKey]?.displayName
+            || shapeKey
             || 'Element';
-        // Tree shows the raw catalog icon (no composite background) for a
-        // cleaner, Carbon-style list appearance.
-        const iconId = meta?.kind ? ShapeRegistry[meta.kind]?.icon : undefined;
+        const iconId = shapeKey ? ShapeRegistry[shapeKey]?.icon : undefined;
         const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
 
         const li = document.createElement('li');
@@ -730,7 +860,7 @@ export class ComponentPalette {
 
         const defaults = ShapeRegistry[item.kind];
         const view = this.getView();
-        const meta: NodeMeta = { name: '', kind: item.kind, vendor: '', model: '', notes: '' };
+        const meta: NodeMeta = { name: '', shapeType: item.kind, serverId: '', notes: '' };
 
         // Complex shape: one cell (ComplexComponent) that renders all layers
         // internally. One bbox, one z, one drag target — no embedding, no

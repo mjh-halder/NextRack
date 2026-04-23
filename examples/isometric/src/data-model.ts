@@ -7,6 +7,7 @@ import {
     updateField,
     removeField,
     DataTypeDefinition,
+    DataTypeKind,
     FieldDefinition,
     FieldType,
 } from './schema-registry';
@@ -35,7 +36,7 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
     { value: 'select',  label: 'Select' },
 ];
 
-type DataTab = 'types' | 'app-data';
+type DataTab = 'types' | 'app-data' | 'option-sets';
 
 let rootEl: HTMLDivElement | null = null;
 let selectedTypeId: string | null = null;
@@ -66,6 +67,7 @@ function render(): void {
     for (const tab of [
         { id: 'types' as DataTab, label: 'Data types' },
         { id: 'app-data' as DataTab, label: 'App data' },
+        { id: 'option-sets' as DataTab, label: 'Option sets' },
     ]) {
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -90,8 +92,10 @@ function render(): void {
 
     if (activeTab === 'types') {
         renderDataTypes(body);
-    } else {
+    } else if (activeTab === 'app-data') {
         renderAppData(body);
+    } else {
+        renderOptionSets(body);
     }
 }
 
@@ -108,11 +112,11 @@ function renderDataTypes(container: HTMLElement): void {
     right.className = 'nr-dm__right';
     container.appendChild(right);
 
-    buildTypeList(left, false);
+    buildTypeList(left, { kind: 'data-type', title: 'Data Types', showRecordCount: false, showAddBtn: true });
 
     if (selectedTypeId) {
         const dt = getDataType(selectedTypeId);
-        if (dt) {
+        if (dt && dt.kind === 'data-type') {
             buildFieldList(right, dt);
         } else {
             selectedTypeId = null;
@@ -123,13 +127,20 @@ function renderDataTypes(container: HTMLElement): void {
     }
 }
 
-function buildTypeList(container: HTMLElement, showRecordCount: boolean): void {
+interface TypeListOptions {
+    kind: DataTypeKind;
+    title: string;
+    showRecordCount: boolean;
+    showAddBtn: boolean;
+}
+
+function buildTypeList(container: HTMLElement, opts: TypeListOptions): void {
     const header = document.createElement('div');
     header.className = 'nr-dm__left-header';
 
     const title = document.createElement('h2');
     title.className = 'nr-dm__left-title';
-    title.textContent = showRecordCount ? 'Entities' : 'Data Types';
+    title.textContent = opts.title;
     header.appendChild(title);
     container.appendChild(header);
 
@@ -140,7 +151,7 @@ function buildTypeList(container: HTMLElement, showRecordCount: boolean): void {
     searchInput.className = 'nr-dm__search-input';
     searchInput.placeholder = 'Filter...';
     searchInput.value = typeSearchTerm;
-    searchInput.setAttribute('aria-label', 'Filter data types');
+    searchInput.setAttribute('aria-label', `Filter ${opts.title.toLowerCase()}`);
     searchInput.addEventListener('input', () => {
         typeSearchTerm = searchInput.value;
         render();
@@ -152,7 +163,7 @@ function buildTypeList(container: HTMLElement, showRecordCount: boolean): void {
     list.className = 'nr-dm__type-list';
     list.setAttribute('role', 'listbox');
 
-    const types = getDataTypes();
+    const types = getDataTypes(opts.kind);
     const term = typeSearchTerm.toLowerCase();
     const filtered = term
         ? types.filter(t => t.label.toLowerCase().includes(term) || t.id.toLowerCase().includes(term))
@@ -178,7 +189,7 @@ function buildTypeList(container: HTMLElement, showRecordCount: boolean): void {
         label.textContent = dt.label;
         item.appendChild(label);
 
-        if (!showRecordCount && dt.system) {
+        if (!opts.showRecordCount && dt.system) {
             const badge = document.createElement('span');
             badge.className = 'nr-dm__badge nr-dm__badge--system';
             badge.textContent = 'Built-in';
@@ -187,7 +198,7 @@ function buildTypeList(container: HTMLElement, showRecordCount: boolean): void {
 
         const count = document.createElement('span');
         count.className = 'nr-dm__type-count';
-        if (showRecordCount) {
+        if (opts.showRecordCount) {
             const records = getRecords(dt.id);
             count.textContent = String(records.length);
         } else {
@@ -200,14 +211,14 @@ function buildTypeList(container: HTMLElement, showRecordCount: boolean): void {
 
     container.appendChild(list);
 
-    if (!showRecordCount) {
+    if (opts.showAddBtn) {
         const addWrap = document.createElement('div');
         addWrap.className = 'nr-dm__add-type';
         const addBtn = document.createElement('button');
         addBtn.type = 'button';
         addBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm nr-dm__add-type-btn';
-        addBtn.textContent = 'New data type';
-        addBtn.addEventListener('click', () => showNewTypeDialog());
+        addBtn.textContent = opts.kind === 'option-set' ? 'New option set' : 'New data type';
+        addBtn.addEventListener('click', () => showNewTypeDialog(opts.kind));
         addWrap.appendChild(addBtn);
         container.appendChild(addWrap);
     }
@@ -363,11 +374,11 @@ function renderAppData(container: HTMLElement): void {
     right.className = 'nr-dm__right';
     container.appendChild(right);
 
-    buildTypeList(left, true);
+    buildTypeList(left, { kind: 'data-type', title: 'Entities', showRecordCount: true, showAddBtn: false });
 
     if (selectedTypeId) {
         const dt = getDataType(selectedTypeId);
-        if (dt) {
+        if (dt && dt.kind === 'data-type') {
             buildRecordView(right, dt);
         } else {
             selectedTypeId = null;
@@ -589,25 +600,26 @@ function showNewRecordDialog(dt: DataTypeDefinition): void {
         }
     }
 
-    dialog.appendChild(form);
+    const contentEl = getDialogContent(dialog);
+    contentEl.appendChild(form);
 
     const errEl = document.createElement('div');
     errEl.className = 'nr-dm__dialog-error';
-    dialog.appendChild(errEl);
+    contentEl.appendChild(errEl);
 
     const actions = document.createElement('div');
     actions.className = 'nr-dm__dialog-actions';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.addEventListener('click', () => overlay.remove());
     actions.appendChild(cancelBtn);
 
     const createBtn = document.createElement('button');
     createBtn.type = 'button';
-    createBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+    createBtn.className = 'cds--btn cds--btn--primary';
     createBtn.textContent = 'Create';
     createBtn.addEventListener('click', () => {
         const values: Record<string, unknown> = {};
@@ -633,12 +645,219 @@ function showNewRecordDialog(dt: DataTypeDefinition): void {
 }
 
 // ========================================================================
-// DATA TYPES DIALOGS (unchanged)
+// OPTION SETS TAB
 // ========================================================================
 
-function showNewTypeDialog(): void {
+function renderOptionSets(container: HTMLElement): void {
+    const left = document.createElement('div');
+    left.className = 'nr-dm__left';
+    container.appendChild(left);
+
+    const right = document.createElement('div');
+    right.className = 'nr-dm__right';
+    container.appendChild(right);
+
+    buildTypeList(left, { kind: 'option-set', title: 'Option Sets', showRecordCount: false, showAddBtn: true });
+
+    if (selectedTypeId) {
+        const dt = getDataType(selectedTypeId);
+        if (dt && dt.kind === 'option-set') {
+            buildOptionSetView(right, dt);
+        } else {
+            selectedTypeId = null;
+            buildEmptyRight(right, 'Select an option set to view its values.');
+        }
+    } else {
+        buildEmptyRight(right, 'Select an option set to view its values.');
+    }
+}
+
+function buildOptionSetView(container: HTMLElement, dt: DataTypeDefinition): void {
+    const header = document.createElement('div');
+    header.className = 'nr-dm__right-header';
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'nr-dm__right-title-row';
+
+    const title = document.createElement('h2');
+    title.className = 'nr-dm__right-title';
+    title.textContent = dt.label;
+    titleRow.appendChild(title);
+
+    if (!dt.system) {
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'cds--btn cds--btn--danger--tertiary cds--btn--sm';
+        deleteBtn.textContent = 'Delete option set';
+        deleteBtn.addEventListener('click', () => {
+            if (!confirm(`Delete option set "${dt.label}"? This will remove all its values.`)) return;
+            removeDataType(dt.id);
+            selectedTypeId = null;
+            render();
+        });
+        titleRow.appendChild(deleteBtn);
+    }
+
+    header.appendChild(titleRow);
+
+    if (dt.description) {
+        const desc = document.createElement('p');
+        desc.className = 'nr-dm__right-desc';
+        desc.textContent = dt.description;
+        header.appendChild(desc);
+    }
+
+    container.appendChild(header);
+
+    const table = document.createElement('table');
+    table.className = 'nr-dm__field-table';
+
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    for (const col of ['Value', 'Label', 'Origin', '']) {
+        const th = document.createElement('th');
+        th.textContent = col;
+        headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    for (const field of dt.fields) {
+        const tr = document.createElement('tr');
+        if (field.system) tr.classList.add('nr-dm__field-row--system');
+
+        const tdKey = document.createElement('td');
+        tdKey.className = 'nr-dm__field-key';
+        tdKey.textContent = field.key;
+        tr.appendChild(tdKey);
+
+        const tdLabel = document.createElement('td');
+        tdLabel.textContent = field.label;
+        tr.appendChild(tdLabel);
+
+        const tdOrigin = document.createElement('td');
+        if (field.system) {
+            const badge = document.createElement('span');
+            badge.className = 'nr-dm__badge nr-dm__badge--system';
+            badge.innerHTML = ICON_LOCKED + ' System';
+            tdOrigin.appendChild(badge);
+        } else {
+            const badge = document.createElement('span');
+            badge.className = 'nr-dm__badge nr-dm__badge--user';
+            badge.textContent = 'Custom';
+            tdOrigin.appendChild(badge);
+        }
+        tr.appendChild(tdOrigin);
+
+        const tdActions = document.createElement('td');
+        tdActions.className = 'nr-dm__field-actions';
+        if (!field.system) {
+            const delBtn = document.createElement('button');
+            delBtn.type = 'button';
+            delBtn.className = 'nr-dm__icon-btn nr-dm__icon-btn--danger';
+            delBtn.title = 'Remove value';
+            delBtn.setAttribute('aria-label', `Remove ${field.label}`);
+            delBtn.innerHTML = ICON_TRASH;
+            delBtn.addEventListener('click', () => {
+                if (!confirm(`Remove value "${field.label}"?`)) return;
+                removeField(dt.id, field.key);
+                render();
+            });
+            tdActions.appendChild(delBtn);
+        }
+        tr.appendChild(tdActions);
+
+        tbody.appendChild(tr);
+    }
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+
+    const addRow = document.createElement('div');
+    addRow.className = 'nr-dm__add-field';
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    addBtn.textContent = 'Add value';
+    addBtn.addEventListener('click', () => showAddOptionValueDialog(dt.id));
+    addRow.appendChild(addBtn);
+    container.appendChild(addRow);
+}
+
+function showAddOptionValueDialog(typeId: string): void {
     const overlay = createOverlay();
-    const dialog = createDialog('New Data Type');
+    const dialog = createDialog('Add Value');
+
+    const form = document.createElement('div');
+    form.className = 'nr-dm__dialog-form';
+
+    const { row: labelRow, input: labelInput } = buildDialogField('Label', 'e.g. HPE');
+    form.appendChild(labelRow);
+
+    const { row: keyRow, input: keyInput } = buildDialogField('Key', 'e.g. hpe');
+    form.appendChild(keyRow);
+
+    labelInput.addEventListener('input', () => {
+        if (!keyInput.dataset.edited) {
+            keyInput.value = labelInput.value;
+        }
+    });
+    keyInput.addEventListener('input', () => { keyInput.dataset.edited = '1'; });
+
+    const contentEl = getDialogContent(dialog);
+    contentEl.appendChild(form);
+
+    const errEl = document.createElement('div');
+    errEl.className = 'nr-dm__dialog-error';
+    contentEl.appendChild(errEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'nr-dm__dialog-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    actions.appendChild(cancelBtn);
+
+    const createBtn = document.createElement('button');
+    createBtn.type = 'button';
+    createBtn.className = 'cds--btn cds--btn--primary';
+    createBtn.textContent = 'Add';
+    createBtn.addEventListener('click', () => {
+        const key = keyInput.value.trim();
+        const label = labelInput.value.trim();
+        if (!key || !label) {
+            errEl.textContent = 'Label and key are required.';
+            return;
+        }
+        const dt = getDataType(typeId);
+        if (dt?.fields.some(f => f.key === key)) {
+            errEl.textContent = `A value with key "${key}" already exists.`;
+            return;
+        }
+        addField(typeId, { key, label, type: 'text' });
+        overlay.remove();
+        render();
+    });
+    actions.appendChild(createBtn);
+
+    dialog.appendChild(actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    labelInput.focus();
+}
+
+// ========================================================================
+// DATA TYPES DIALOGS
+// ========================================================================
+
+function showNewTypeDialog(kind: DataTypeKind = 'data-type'): void {
+    const isOptionSet = kind === 'option-set';
+    const overlay = createOverlay();
+    const dialog = createDialog(isOptionSet ? 'New Option Set' : 'New Data Type');
 
     const form = document.createElement('div');
     form.className = 'nr-dm__dialog-form';
@@ -659,25 +878,26 @@ function showNewTypeDialog(): void {
     const { row: descRow, input: descInput } = buildDialogField('Description', 'Optional description');
     form.appendChild(descRow);
 
-    dialog.appendChild(form);
+    const contentEl = getDialogContent(dialog);
+    contentEl.appendChild(form);
 
     const errEl = document.createElement('div');
     errEl.className = 'nr-dm__dialog-error';
-    dialog.appendChild(errEl);
+    contentEl.appendChild(errEl);
 
     const actions = document.createElement('div');
     actions.className = 'nr-dm__dialog-actions';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.addEventListener('click', () => overlay.remove());
     actions.appendChild(cancelBtn);
 
     const createBtn = document.createElement('button');
     createBtn.type = 'button';
-    createBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+    createBtn.className = 'cds--btn cds--btn--primary';
     createBtn.textContent = 'Create';
     createBtn.addEventListener('click', () => {
         const id = idInput.value.trim();
@@ -690,7 +910,7 @@ function showNewTypeDialog(): void {
             errEl.textContent = `A data type with ID "${id}" already exists.`;
             return;
         }
-        addDataType(id, label, descInput.value.trim());
+        addDataType(id, label, descInput.value.trim(), kind);
         selectedTypeId = id;
         overlay.remove();
         render();
@@ -747,25 +967,26 @@ function showNewFieldDialog(typeId: string): void {
         optionsRow.style.display = typeSelect.value === 'select' ? '' : 'none';
     });
 
-    dialog.appendChild(form);
+    const contentEl = getDialogContent(dialog);
+    contentEl.appendChild(form);
 
     const errEl = document.createElement('div');
     errEl.className = 'nr-dm__dialog-error';
-    dialog.appendChild(errEl);
+    contentEl.appendChild(errEl);
 
     const actions = document.createElement('div');
     actions.className = 'nr-dm__dialog-actions';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.addEventListener('click', () => overlay.remove());
     actions.appendChild(cancelBtn);
 
     const createBtn = document.createElement('button');
     createBtn.type = 'button';
-    createBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+    createBtn.className = 'cds--btn cds--btn--primary';
     createBtn.textContent = 'Create';
     createBtn.addEventListener('click', () => {
         const key = keyInput.value.trim();
@@ -850,25 +1071,26 @@ function showEditFieldDialog(typeId: string, field: FieldDefinition): void {
         optionsRow.style.display = typeSelect.value === 'select' ? '' : 'none';
     });
 
-    dialog.appendChild(form);
+    const contentEl = getDialogContent(dialog);
+    contentEl.appendChild(form);
 
     const errEl = document.createElement('div');
     errEl.className = 'nr-dm__dialog-error';
-    dialog.appendChild(errEl);
+    contentEl.appendChild(errEl);
 
     const actions = document.createElement('div');
     actions.className = 'nr-dm__dialog-actions';
 
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
-    cancelBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
     cancelBtn.textContent = 'Cancel';
     cancelBtn.addEventListener('click', () => overlay.remove());
     actions.appendChild(cancelBtn);
 
     const saveBtn = document.createElement('button');
     saveBtn.type = 'button';
-    saveBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+    saveBtn.className = 'cds--btn cds--btn--primary';
     saveBtn.textContent = 'Save';
     saveBtn.addEventListener('click', () => {
         const label = labelInput.value.trim();
@@ -911,18 +1133,53 @@ function createOverlay(): HTMLDivElement {
     return overlay;
 }
 
-function createDialog(titleText: string): HTMLDivElement {
+function createDialog(titleText: string, options?: { danger?: boolean; label?: string }): HTMLDivElement {
     const dialog = document.createElement('div');
-    dialog.className = 'nr-dm__dialog';
+    dialog.className = 'nr-dm__dialog' + (options?.danger ? ' nr-dm__dialog--danger' : '');
     dialog.setAttribute('role', 'dialog');
     dialog.setAttribute('aria-label', titleText);
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'nr-dm__dialog-header';
+    const headerContent = document.createElement('div');
+    headerContent.className = 'nr-dm__dialog-header-content';
+
+    if (options?.label) {
+        const labelEl = document.createElement('p');
+        labelEl.className = 'nr-dm__dialog-label';
+        labelEl.textContent = options.label;
+        headerContent.appendChild(labelEl);
+    }
 
     const title = document.createElement('h3');
     title.className = 'nr-dm__dialog-title';
     title.textContent = titleText;
-    dialog.appendChild(title);
+    headerContent.appendChild(title);
+    header.appendChild(headerContent);
+    dialog.appendChild(header);
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'nr-dm__dialog-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor"><path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4 14.6 16 8 22.6 9.4 24 16 17.4 22.6 24 24 22.6 17.4 16 24 9.4z"/></svg>';
+    closeBtn.addEventListener('click', () => {
+        dialog.closest('.nr-dm__overlay')?.remove();
+    });
+    dialog.appendChild(closeBtn);
+
+    // Content wrapper
+    const content = document.createElement('div');
+    content.className = 'nr-dm__dialog-content';
+    dialog.appendChild(content);
 
     return dialog;
+}
+
+function getDialogContent(dialog: HTMLDivElement): HTMLDivElement {
+    return dialog.querySelector('.nr-dm__dialog-content') as HTMLDivElement;
 }
 
 function buildDialogField(labelText: string, placeholder: string): { row: HTMLElement; input: HTMLInputElement } {

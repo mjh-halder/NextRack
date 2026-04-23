@@ -22,7 +22,7 @@ import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.
 import { getIconById, addUploadedIcon, removeUploadedIcon } from './icon-catalog';
 import { getVisibleIcons } from './icon-config';
 import { shapeStore } from './shape-store';
-import { COMPONENT_COLLECTIONS } from './admin';
+import { getComponentCollections } from './admin';
 
 // DOM elements
 const canvasEl     = document.getElementById('cd2-canvas')                as HTMLDivElement;
@@ -235,6 +235,7 @@ paper2D.matrix(transformationMatrix(View.TwoDimensional, CD_MARGIN, 0, CD_GRID_C
 // ── Template panel ────────────────────────────────────────────────────────────
 
 let shapeNameInput: HTMLInputElement;
+let componentTypeSelect: HTMLSelectElement;
 let widthInput:   HTMLInputElement;
 let heightInput:  HTMLInputElement;
 let depthInput:   HTMLInputElement;
@@ -1342,6 +1343,31 @@ function buildInspectorPanel() {
         }
     });
 
+    // Component Type dropdown
+    const ctLabel = document.createElement('label');
+    ctLabel.className = 'cds--label';
+    ctLabel.setAttribute('for', 'sd-component-type');
+    ctLabel.textContent = 'Component Type';
+    ctLabel.style.marginTop = '8px';
+
+    componentTypeSelect = document.createElement('select');
+    const ctSelect = componentTypeSelect;
+    ctSelect.id = 'sd-component-type';
+    ctSelect.className = 'cds--text-input cds--text-input--sm';
+    const ctOptions = ['', 'Server', 'Firewall', 'Switch', 'Storage', 'NIC'];
+    for (const opt of ctOptions) {
+        const el = document.createElement('option');
+        el.value = opt;
+        el.textContent = opt || '— none —';
+        if ((ShapeRegistry[currentShapeId]?.componentType ?? '') === opt) el.selected = true;
+        ctSelect.appendChild(el);
+    }
+    ctSelect.addEventListener('change', () => {
+        if (ShapeRegistry[currentShapeId]) {
+            ShapeRegistry[currentShapeId].componentType = ctSelect.value || undefined;
+        }
+    });
+
     // Hide label toggle — shown directly below the name input
     const labelHidden = currentShape?.attr('label/display') === 'none'
         || (isComplexShape && layerShapes[0]?.attr('label/display') === 'none');
@@ -1403,6 +1429,8 @@ function buildInspectorPanel() {
 
     nameSection.appendChild(nameLabel);
     nameSection.appendChild(shapeNameInput);
+    nameSection.appendChild(ctLabel);
+    nameSection.appendChild(ctSelect);
     nameSection.appendChild(hideLabelWrapper);
     nameSection.appendChild(complexToggleWrapper);
     inspectorEl.appendChild(nameSection);
@@ -1807,6 +1835,7 @@ function onSave() {
 
     updateShapeDefinition(currentShapeId, {
         displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
+        componentType: componentTypeSelect?.value || undefined,
         defaultSize: { width: widthGU * GRID_SIZE, height: heightGU * GRID_SIZE },
         defaultIsometricHeight: depthGU * GRID_SIZE,
         baseShape: selectedBaseShape,
@@ -3301,7 +3330,7 @@ function buildPalettePanel() {
         byCollection.get(col)!.push(stored);
     }
 
-    for (const collectionName of COMPONENT_COLLECTIONS) {
+    for (const collectionName of getComponentCollections()) {
         const items = byCollection.get(collectionName) ?? [];
         const colList = document.createElement('ul');
         colList.className = 'nr-palette-list';

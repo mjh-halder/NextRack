@@ -130,7 +130,7 @@ function buildShapeRow(
     if (onCollectionChange) {
         const select = document.createElement('select');
         select.className = 'nr-admin__table-select';
-        for (const col of COMPONENT_COLLECTIONS) {
+        for (const col of getComponentCollections()) {
             const opt = document.createElement('option');
             opt.value = col;
             opt.textContent = col;
@@ -181,8 +181,15 @@ function createActionBtn(iconSvg: string, label: string, onClick: () => void, da
     return btn;
 }
 
-export const COMPONENT_COLLECTIONS = ['General', 'Oracle', 'NetApp', 'Dell', 'Lenovo'] as const;
-export type ComponentCollection = (typeof COMPONENT_COLLECTIONS)[number];
+import { getDataType } from './schema-registry';
+
+export function getComponentCollections(): string[] {
+    const dt = getDataType('component-collection');
+    if (!dt) return ['General'];
+    return dt.fields.map(f => f.key);
+}
+
+export type ComponentCollection = string;
 
 const TABLE_COLUMNS = ['', 'ID', 'Display Name', 'Collection', 'Base Shape', 'Size (W×H)', 'Depth', 'Complex', ''];
 

@@ -3,6 +3,7 @@ import { graph } from './system-designer';
 import { Computer, Frame } from './shapes';
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, addShape, deleteShape, saveRegistryToStorage } from './shapes/shape-registry';
 import { componentStore, ComponentDefinition } from './component-store';
+import { listCanvases, createCanvas, CanvasRecord } from './canvas-store';
 import { getDataType } from './schema-registry';
 import { META_KEY, LINK_META_KEY } from './inspector';
 import { GRID_SIZE } from './theme';
@@ -276,9 +277,28 @@ function enumAdapter(typeId: string): RecordAdapter {
     };
 }
 
+function canvasAdapter(): RecordAdapter {
+    return {
+        read() {
+            return listCanvases().map(c => ({
+                id: c.id,
+                values: { ...c } as Record<string, unknown>,
+            }));
+        },
+        create(values) {
+            const name = String(values.name || 'New Canvas');
+            const canvasType = (values.canvasType || 'Infra_Logical') as CanvasRecord['canvasType'];
+            const rec = createCanvas(name, canvasType);
+            return { id: rec.id, values: { ...rec } as Record<string, unknown> };
+        },
+        remove(_id) { return false; },
+    };
+}
+
 const ENUM_TYPE_IDS = new Set([
     'base-shape', 'component-category', 'component-collection',
     'icon-scope', 'icon-source', 'shape-style', 'color-token',
+    'canvas-type', 'product-category',
 ]);
 
 const adapters: Record<string, () => RecordAdapter> = {
@@ -288,6 +308,7 @@ const adapters: Record<string, () => RecordAdapter> = {
     'shape': shapeAdapter,
     'component': componentAdapter,
     'shape-layer': shapeLayerAdapter,
+    'canvas': canvasAdapter,
 };
 
 export function getRecords(typeId: string): AppRecord[] {
@@ -310,7 +331,7 @@ export function deleteRecord(typeId: string, id: string): boolean {
 }
 
 export function canCreate(typeId: string): boolean {
-    return typeId === 'node' || typeId === 'zone' || typeId === 'shape' || typeId === 'component';
+    return typeId === 'node' || typeId === 'zone' || typeId === 'shape' || typeId === 'component' || typeId === 'canvas';
 }
 
 export function canDelete(typeId: string): boolean {

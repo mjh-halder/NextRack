@@ -8,7 +8,14 @@ import { PropertyPanel, META_KEY } from './inspector';
 import { ShapeRegistry } from './shapes/shape-registry';
 import { ComponentPalette } from './palette';
 import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './persistence';
+import {
+    ensureExampleCanvas, listCanvases, createCanvas, deleteCanvas,
+    getActiveCanvasId, setActiveCanvasId, saveCanvasGraph, loadCanvasGraph, CanvasRecord,
+} from './canvas-store';
 import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
+import { initMinimap, updateMinimapView } from './minimap';
+import { initWorkloadTable, showWorkloadTable, hideWorkloadTable } from './workload-table';
+import { getCanvas } from './canvas-store';
 import { ViewToggle } from './view-toggle';
 import { AreaSelect } from './area-select';
 import { carbonIconToString, CarbonIcon } from './icons';
@@ -42,16 +49,49 @@ function deleteSelected() {
     // currentCell and panel are cleaned up by the graph 'remove' listener below
 }
 
+function cloneConnectedLinks(
+    originals: dia.Element[],
+    idMap: Map<string, string>,
+    offset: number,
+): dia.Link[] {
+    const originalIds = new Set(originals.map(el => el.id as string));
+    const seen = new Set<string>();
+    const clonedLinks: dia.Link[] = [];
+
+    for (const el of originals) {
+        for (const link of graph.getConnectedLinks(el)) {
+            const linkId = link.id as string;
+            if (seen.has(linkId)) continue;
+            seen.add(linkId);
+
+            const srcId = (link.source() as { id?: string }).id;
+            const tgtId = (link.target() as { id?: string }).id;
+            if (!srcId || !tgtId) continue;
+            if (!originalIds.has(srcId) || !originalIds.has(tgtId)) continue;
+
+            const clonedLink = link.clone() as dia.Link;
+            clonedLink.source({ ...link.source() as object, id: idMap.get(srcId) ?? srcId } as dia.Link.EndJSON);
+            clonedLink.target({ ...link.target() as object, id: idMap.get(tgtId) ?? tgtId } as dia.Link.EndJSON);
+
+            const verts = clonedLink.vertices();
+            if (verts.length) {
+                clonedLink.vertices(verts.map(v => ({ x: v.x + offset, y: v.y + offset })));
+            }
+            clonedLinks.push(clonedLink);
+        }
+    }
+    return clonedLinks;
+}
+
 function duplicateSelected() {
     if (!currentCell || currentCell instanceof Link) return;
+    graph.startBatch('duplicate');
     const offset = GRID_SIZE * 2;
     const clone = currentCell.clone() as IsometricShape;
     const { x, y } = currentCell.position();
     clone.position(x + offset, y + offset);
     clone.toggleView(currentView);
 
-    // Complex component: clone each internal layer, preserve the same offsets,
-    // re-embed them into the cloned base.
     const childLayers = currentCell.get('componentRole') === 'base'
         ? currentCell.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[]
         : [];
@@ -63,17 +103,27 @@ function duplicateSelected() {
         return cc;
     });
 
-    graph.addCells([clone, ...clonedChildren]);
+    const idMap = new Map<string, string>();
+    idMap.set(currentCell.id as string, clone.id as string);
+    for (let i = 0; i < childLayers.length; i++) {
+        idMap.set(childLayers[i].id as string, clonedChildren[i].id as string);
+    }
+
+    const clonedLinks = cloneConnectedLinks([currentCell, ...childLayers], idMap, offset);
+
+    graph.addCells([clone, ...clonedChildren, ...clonedLinks]);
     for (const cc of clonedChildren) clone.embed(cc);
 
     paper.removeTools();
     clone.addTools(paper, currentView, []);
     panel.show(clone);
     currentCell = clone;
+    graph.stopBatch('duplicate');
     if (currentView === View.Isometric) sortElements(graph);
 }
 
 function duplicateZone(frame: Frame): void {
+    graph.startBatch('duplicate');
     const offset = GRID_SIZE * 4;
     const clonedFrame = frame.clone() as Frame;
     const { x, y } = frame.position();
@@ -82,19 +132,24 @@ function duplicateZone(frame: Frame): void {
     const embeddedElements = frame.getEmbeddedCells()
         .filter(c => c instanceof IsometricShape && !c.get('isFrame')) as IsometricShape[];
 
+    const idMap = new Map<string, string>();
     const clonedChildren = embeddedElements.map(child => {
         const clone = child.clone() as IsometricShape;
         const { x: cx, y: cy } = child.position();
         clone.position(cx + offset, cy + offset);
         clone.toggleView(currentView);
+        idMap.set(child.id as string, clone.id as string);
         return clone;
     });
 
-    graph.addCells([clonedFrame, ...clonedChildren]);
+    const clonedLinks = cloneConnectedLinks(embeddedElements, idMap, offset);
+
+    graph.addCells([clonedFrame, ...clonedChildren, ...clonedLinks]);
     clonedFrame.toggleView(currentView);
     for (const child of clonedChildren) {
         clonedFrame.embed(child);
     }
+    graph.stopBatch('duplicate');
     if (currentView === View.Isometric) sortElements(graph);
 }
 
@@ -259,8 +314,10 @@ paper.setDimensions(
     GRID_SIZE * GRID_COUNT * SCALE + CANVAS_V_PAD
 );
 
-// Load default design if one has been saved, otherwise start with an empty canvas.
-loadDefaultDesign(graph);
+// Ensure the example canvas exists (migrates legacy default design on first run)
+ensureExampleCanvas();
+let activeCanvasId = getActiveCanvasId();
+loadCanvasGraph(activeCanvasId, graph);
 
 // Clean up selection when a cell is removed by any means (tool, keyboard, inspector)
 
@@ -366,11 +423,20 @@ paper.on('cell:mousewheel', (_cellView: dia.CellView, evt: dia.Event, x: number,
 
 new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     currentView = view === 'isometric' ? View.Isometric : View.TwoDimensional;
-    currentZoom = 1; // reset zoom on view switch — matrices are incompatible across views
+    currentZoom = 1;
     switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
+    updateMinimapView(currentView, currentGridCountX);
 });
 
 switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
+
+// ---- Minimap ----
+
+const minimapEl = document.getElementById('minimap') as HTMLDivElement;
+initMinimap(minimapEl, graph, paper);
+
+const workloadTableEl = document.getElementById('workload-table') as HTMLDivElement;
+initWorkloadTable(workloadTableEl);
 
 // ---- New Design ----
 
@@ -422,9 +488,9 @@ function applyNewDesign(name: string, gridCount: number) {
         GRID_SIZE * gridCount * SCALE + CANVAS_V_PAD
     );
 
-    // Set view matrix first, then scroll to center the grid in the usable area
     switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
     centerGridInViewport(currentGridCountX, currentGridCountY);
+    updateMinimapView(currentView, currentGridCountX);
 
     designNameEl.textContent = name;
     designNameEl.style.display = 'block';
@@ -701,6 +767,7 @@ function applyGridResize(newX: number, newY: number) {
 
     switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
     centerGridInViewport(currentGridCountX, currentGridCountY);
+    updateMinimapView(currentView, currentGridCountX);
 }
 
 function showAdjustGridModal() {
@@ -868,6 +935,210 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
 
 // Let the palette know which zone is selected so new components get embedded.
 palette.setActiveZoneGetter(() => currentFrame);
+
+// Canvas switching
+palette.setCanvasCallbacks(
+    (id) => switchCanvas(id),
+    () => showNewCanvasDialog(),
+    (id) => showDeleteCanvasDialog(id),
+);
+palette.refreshCanvasDropdown(activeCanvasId);
+
+function switchCanvas(id: string): void {
+    saveCanvasGraph(activeCanvasId, graph);
+    paper.removeTools();
+    currentCell = null;
+    currentFrame = null;
+    if (typeof areaSelect !== 'undefined') areaSelect.clear();
+    graph.clear();
+    clearHistory();
+    activeCanvasId = id;
+    setActiveCanvasId(id);
+
+    const canvas = getCanvas(id);
+    const isWorkload = canvas?.layerType === 'Workloads';
+
+    if (isWorkload) {
+        canvasEl.style.display = 'none';
+        viewToggleContainerEl.style.display = 'none';
+        minimapEl.style.display = 'none';
+        hideWorkloadTable();
+        showWorkloadTable(id);
+        panel.hide();
+    } else {
+        hideWorkloadTable();
+        canvasEl.style.display = '';
+        viewToggleContainerEl.style.display = '';
+        minimapEl.style.display = '';
+        loadCanvasGraph(id, graph);
+        switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+        updateMinimapView(currentView, currentGridCountX);
+        panel.showLayer(id, () => palette.refreshCanvasDropdown(id), () => switchCanvas(id));
+    }
+}
+
+function buildModalOverlay(): HTMLDivElement {
+    const overlay = document.createElement('div');
+    overlay.className = 'nr-dm__overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    return overlay;
+}
+
+function buildModalShell(titleText: string, danger = false): HTMLDivElement {
+    const dialog = document.createElement('div');
+    dialog.className = 'nr-dm__dialog' + (danger ? ' nr-dm__dialog--danger' : '');
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-label', titleText);
+
+    const header = document.createElement('div');
+    header.className = 'nr-dm__dialog-header';
+    const headerContent = document.createElement('div');
+    headerContent.className = 'nr-dm__dialog-header-content';
+    const title = document.createElement('h3');
+    title.className = 'nr-dm__dialog-title';
+    title.textContent = titleText;
+    headerContent.appendChild(title);
+    header.appendChild(headerContent);
+    dialog.appendChild(header);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'nr-dm__dialog-close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor"><path d="M24 9.4L22.6 8 16 14.6 9.4 8 8 9.4 14.6 16 8 22.6 9.4 24 16 17.4 22.6 24 24 22.6 17.4 16 24 9.4z"/></svg>';
+    closeBtn.addEventListener('click', () => { dialog.closest('.nr-dm__overlay')?.remove(); });
+    dialog.appendChild(closeBtn);
+
+    const content = document.createElement('div');
+    content.className = 'nr-dm__dialog-content';
+    dialog.appendChild(content);
+
+    return dialog;
+}
+
+function buildModalRow(labelText: string): HTMLDivElement {
+    const row = document.createElement('div');
+    row.className = 'nr-dm__dialog-row';
+    const label = document.createElement('label');
+    label.className = 'cds--label';
+    label.textContent = labelText;
+    row.appendChild(label);
+    return row;
+}
+
+function showNewCanvasDialog(): void {
+    const overlay = buildModalOverlay();
+    const dialog = buildModalShell('New Canvas');
+    const content = dialog.querySelector('.nr-dm__dialog-content')!;
+
+    const form = document.createElement('div');
+    form.className = 'nr-dm__dialog-form';
+
+    const nameRow = buildModalRow('Name');
+    const nameInput = document.createElement('input');
+    nameInput.type = 'text';
+    nameInput.className = 'nr-dm__dialog-input';
+    nameInput.placeholder = 'e.g. Production DC';
+    nameRow.appendChild(nameInput);
+    form.appendChild(nameRow);
+
+    const typeRow = buildModalRow('Type');
+    const typeSelect = document.createElement('select');
+    typeSelect.className = 'nr-dm__dialog-input';
+    for (const opt of ['Infra_Logical', 'Infra_Physical', 'App_Workload']) {
+        const el = document.createElement('option');
+        el.value = opt;
+        el.textContent = opt.replace(/_/g, ' ');
+        typeSelect.appendChild(el);
+    }
+    typeRow.appendChild(typeSelect);
+    form.appendChild(typeRow);
+
+    content.appendChild(form);
+
+    const errEl = document.createElement('div');
+    errEl.className = 'nr-dm__dialog-error';
+    content.appendChild(errEl);
+
+    const actions = document.createElement('div');
+    actions.className = 'nr-dm__dialog-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    actions.appendChild(cancelBtn);
+
+    const createBtn = document.createElement('button');
+    createBtn.type = 'button';
+    createBtn.className = 'cds--btn cds--btn--primary';
+    createBtn.textContent = 'Create';
+    createBtn.addEventListener('click', () => {
+        const name = nameInput.value.trim();
+        if (!name) { errEl.textContent = 'Name is required.'; return; }
+        const canvasType = typeSelect.value as CanvasRecord['canvasType'];
+        const rec = createCanvas(name, canvasType);
+        overlay.remove();
+        palette.refreshCanvasDropdown(rec.id);
+        switchCanvas(rec.id);
+    });
+    actions.appendChild(createBtn);
+
+    dialog.appendChild(actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+    nameInput.focus();
+}
+
+function showDeleteCanvasDialog(id: string): void {
+    const canvases = listCanvases();
+    const canvas = canvases.find(c => c.id === id);
+    if (!canvas) return;
+    if (canvases.length <= 1) {
+        showToast('Cannot delete the last canvas.');
+        return;
+    }
+
+    const overlay = buildModalOverlay();
+    const dialog = buildModalShell('Delete Canvas', true);
+    const content = dialog.querySelector('.nr-dm__dialog-content')!;
+
+    const msg = document.createElement('p');
+    msg.className = 'nr-dm__dialog-desc';
+    msg.textContent = `Are you sure you want to delete "${canvas.name}"? This will permanently remove all elements on this canvas.`;
+    content.appendChild(msg);
+
+    const actions = document.createElement('div');
+    actions.className = 'nr-dm__dialog-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    actions.appendChild(cancelBtn);
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.type = 'button';
+    confirmBtn.className = 'cds--btn cds--btn--danger';
+    confirmBtn.textContent = 'Delete';
+    confirmBtn.addEventListener('click', () => {
+        overlay.remove();
+        deleteCanvas(id);
+        if (id === activeCanvasId) {
+            const remaining = listCanvases();
+            const nextId = remaining[0]?.id ?? '';
+            switchCanvas(nextId);
+        }
+        palette.refreshCanvasDropdown(activeCanvasId);
+    });
+    actions.appendChild(confirmBtn);
+
+    dialog.appendChild(actions);
+    overlay.appendChild(dialog);
+    document.body.appendChild(overlay);
+}
 
 // Area selection: Shift+Drag on blank canvas to rubber-band select multiple elements.
 const areaSelect = new AreaSelect({
@@ -1334,8 +1605,9 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             exportCanvasSvg();
             break;
         case 'admin-set-default':
+            saveCanvasGraph(activeCanvasId, graph);
             saveDefaultDesign(graph);
-            showToast('Default design saved.');
+            showToast('Canvas saved.');
             break;
     }
 });

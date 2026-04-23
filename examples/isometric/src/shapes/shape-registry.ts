@@ -61,6 +61,8 @@ export interface ShapeDefinition {
      * the icon. Defaults to 0 (main layer) for backwards compatibility.
      */
     iconLayerIndex?: number;
+    /** Infrastructure component type this shape represents */
+    componentType?: string;
     /** Optional color overrides applied when a new instance is created */
     style?: ShapeStyle;
     /** When true, the component is composed of multiple layers instead of a single shape */

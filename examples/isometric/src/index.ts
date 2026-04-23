@@ -6,6 +6,8 @@ import { panel as cdPanel, selectShape } from './component-designer';
 import { initTopHeader } from './top-header';
 import { initAdmin } from './admin';
 import { initDataModel } from './data-model';
+import { initProductCatalog } from './product-catalog';
+import { initAppDesigner } from './app-designer';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Sun20 from '@carbon/icons/es/sun/20.js';
 import Moon20 from '@carbon/icons/es/moon/20.js';
@@ -47,9 +49,13 @@ document.getElementById('nav-theme')?.addEventListener('click', () => {
 
 const navGridBtn      = document.getElementById('nav-grid')            as HTMLButtonElement;
 const navShapesBtn    = document.getElementById('nav-shapes')          as HTMLButtonElement;
+const navAppsBtn      = document.getElementById('nav-apps')            as HTMLButtonElement;
+const navCatalogBtn   = document.getElementById('nav-catalog')         as HTMLButtonElement;
 const navDataModelBtn = document.getElementById('nav-data-model')      as HTMLButtonElement;
 const navAdminBtn     = document.getElementById('nav-admin')           as HTMLButtonElement;
 const cdEl            = document.getElementById('component-designer')  as HTMLDivElement;
+const appDesignerEl   = document.getElementById('app-designer')        as HTMLDivElement;
+const catalogEl       = document.getElementById('product-catalog')     as HTMLDivElement;
 const dataModelEl     = document.getElementById('data-model')          as HTMLDivElement;
 const adminEl         = document.getElementById('admin')               as HTMLDivElement;
 
@@ -57,12 +63,16 @@ navAdminBtn.innerHTML = SETTINGS_SVG;
 
 initAdmin(adminEl);
 initDataModel(dataModelEl);
+initProductCatalog(catalogEl);
+initAppDesigner(appDesignerEl);
 
-type AppView = 'grid' | 'shapes' | 'data-model' | 'admin';
+type AppView = 'grid' | 'shapes' | 'apps' | 'catalog' | 'data-model' | 'admin';
 
 function setAppView(view: AppView) {
     const isGrid      = view === 'grid';
     const isShapes    = view === 'shapes';
+    const isApps      = view === 'apps';
+    const isCatalog   = view === 'catalog';
     const isDataModel = view === 'data-model';
     const isAdmin     = view === 'admin';
 
@@ -70,6 +80,10 @@ function setAppView(view: AppView) {
     navGridBtn.setAttribute('aria-current', isGrid ? 'page' : 'false');
     navShapesBtn.classList.toggle('nr-rail-item--active', isShapes);
     navShapesBtn.setAttribute('aria-current', isShapes ? 'page' : 'false');
+    navAppsBtn.classList.toggle('nr-rail-item--active', isApps);
+    navAppsBtn.setAttribute('aria-current', isApps ? 'page' : 'false');
+    navCatalogBtn.classList.toggle('nr-rail-item--active', isCatalog);
+    navCatalogBtn.setAttribute('aria-current', isCatalog ? 'page' : 'false');
     navDataModelBtn.classList.toggle('nr-rail-item--active', isDataModel);
     navDataModelBtn.setAttribute('aria-current', isDataModel ? 'page' : 'false');
     navAdminBtn.classList.toggle('nr-rail-item--active', isAdmin);
@@ -79,12 +93,23 @@ function setAppView(view: AppView) {
     canvasEl.style.display      = isGrid ? '' : 'none';
     paletteEl.style.display     = isGrid ? '' : 'none';
     viewToggleContainerEl.style.display = isGrid ? '' : 'none';
-    // design-name is managed by applyNewDesign; only hide it when leaving grid view
-    if (!isGrid) designNameEl.style.display = 'none';
+    (document.getElementById('minimap') as HTMLElement).style.display = isGrid ? '' : 'none';
+    if (!isGrid) {
+        designNameEl.style.display = 'none';
+        (document.getElementById('workload-table') as HTMLElement).style.display = 'none';
+    }
 
     // Component Designer
     cdEl.setAttribute('aria-hidden', String(!isShapes));
     cdEl.style.display = isShapes ? 'flex' : 'none';
+
+    // App Designer
+    appDesignerEl.setAttribute('aria-hidden', String(!isApps));
+    appDesignerEl.style.display = isApps ? 'flex' : 'none';
+
+    // Product Catalog
+    catalogEl.setAttribute('aria-hidden', String(!isCatalog));
+    catalogEl.style.display = isCatalog ? 'flex' : 'none';
 
     // Data Model
     dataModelEl.setAttribute('aria-hidden', String(!isDataModel));
@@ -101,6 +126,8 @@ function setAppView(view: AppView) {
 
 navGridBtn.addEventListener('click',      () => setAppView('grid'));
 navShapesBtn.addEventListener('click',    () => setAppView('shapes'));
+navAppsBtn.addEventListener('click',      () => setAppView('apps'));
+navCatalogBtn.addEventListener('click',   () => setAppView('catalog'));
 navDataModelBtn.addEventListener('click', () => setAppView('data-model'));
 navAdminBtn.addEventListener('click',     () => setAppView('admin'));
 
