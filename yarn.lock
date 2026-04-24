@@ -4502,7 +4502,9 @@ __metadata:
     "@carbon/styles": "npm:^1.104.0"
     "@joint/core": "workspace:^"
     "@joint/decorators": "workspace:^"
+    "@joint/layout-directed-graph": "workspace:^"
     css-loader: "npm:^6.8.1"
+    marked: "npm:^15.0.0"
     raw-loader: "npm:^4.0.2"
     style-loader: "npm:^3.3.3"
     ts-loader: "npm:^9.2.5"
@@ -20369,6 +20371,15 @@ __metadata:
   bin:
     markdown-it: bin/markdown-it.mjs
   checksum: 10/088822c8aa9346ba4af6a205f6ee0f4baae55e3314f040dc5c28c897d57d0f979840c71872b3582a6a6e572d8c851c54e323c82f4559011dfa2e96224fc20fc2
+  languageName: node
+  linkType: hard
+
+"marked@npm:^15.0.0":
+  version: 15.0.12
+  resolution: "marked@npm:15.0.12"
+  bin:
+    marked: bin/marked.js
+  checksum: 10/deeb619405c0c46af00c99b18b3365450abeb309104b24e3658f46142344f6b7c4117608c3b5834084d8738e92f81240c19f596e6ee369260f96e52b3457eaee
   languageName: node
   linkType: hard
 

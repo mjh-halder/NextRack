@@ -11,7 +11,7 @@
 
     <!-- ISO: all visible side faces as one compound path (single fill color) -->
     <path @selector="side" @group-selector="iso"
-        :d="{{svgSideFacesPath([size, isometricHeight, normalizedVerts])}}"
+        :d="{{svgSideFacesPath([size, isometricHeight, normalizedVerts, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
@@ -19,7 +19,7 @@
 
     <!-- ISO: top face — rendered last, painted on top of all side faces -->
     <path @selector="top" @group-selector="iso"
-        :d="{{svgTopPath([size, isometricHeight, normalizedVerts])}}"
+        :d="{{svgTopPath([size, isometricHeight, normalizedVerts, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
         fill="#a8a8a8"
         stroke="#333"
         stroke-linejoin="round"

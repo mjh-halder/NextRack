@@ -62,6 +62,13 @@ let selectedCornerRadius = 0; // pixels
 
 // Chamfer state (not persisted to registry; only applies to cuboid shapes)
 let selectedChamferSize = 0; // pixels
+let selectedChamferStart = 0; // fraction 0–1
+
+// 3D modifier state
+let selectedTaper = 0;
+let selectedTwist = 0;
+let selectedScaleTopX = 1;
+let selectedScaleTopY = 1;
 
 // SVG footprint state (complex shape mode only)
 let svgParseError = '';
@@ -71,6 +78,7 @@ let selectedIconBgEnabled = true;
 let selectedIconBgColor = PRIMARY_COLORS[0].base; // Grey 70 by default
 let selectedIconBgShape: 'circle' | 'square' | 'octagon' = 'circle';
 let selectedIconBgRadius = 6;
+let selectedIconBgChamfer = 0.18;
 
 // Direct references to the swatch buttons so syncExtrasFromShape can update
 // them without relying on a DOM query that could match unrelated elements.
@@ -102,6 +110,8 @@ let iconBgCustomColorRowEl:    HTMLElement      | null = null;
 let iconBgCustomColorInputRef: HTMLInputElement | null = null;
 let iconBgCornerRadiusRowEl:   HTMLElement      | null = null;
 let iconBgCornerRadiusInputRef: HTMLInputElement | null = null;
+let iconBgChamferRowEl:        HTMLElement      | null = null;
+let iconBgChamferInputRef:     HTMLInputElement | null = null;
 
 // Adaptive icon (no-bg + complex shape only): icon color follows app theme
 let selectedIconAdaptive = false;
@@ -244,12 +254,10 @@ let heightValueEl: HTMLElement;
 let depthValueEl:  HTMLElement;
 let cornerRadiusInput:  HTMLInputElement;
 let cornerRadiusValueEl: HTMLElement;
-let cornerRadiusRowEl:  HTMLElement;
 let modifiersSvgInfoEl: HTMLElement | null = null;
 let modifiersAccordionLi: HTMLLIElement | null = null;
 let chamferSizeInput:   HTMLInputElement;
 let chamferSizeValueEl: HTMLElement;
-let chamferRowEl:       HTMLElement;
 let iconFaceRowEl:      HTMLElement;
 
 const CDS_ICON_TRASH      = carbonIconToString(TrashCan16 as CarbonIcon);
@@ -386,10 +394,6 @@ function buildModifiersContent(container: HTMLElement) {
     modifiersSvgInfoEl = svgInfo;
     container.appendChild(svgInfo);
 
-    // Corner radius — only for cuboid shapes.
-    const crRow = document.createElement('div');
-    cornerRadiusRowEl = crRow;
-    crRow.style.display = supportsCornerRadius(selectedBaseShape) ? '' : 'none';
     buildSliderField('Corner Radius', 'sd-corner-radius', 0, 30, 1,
         (el) => { cornerRadiusInput = el; el.value = String(selectedCornerRadius); },
         (el) => { cornerRadiusValueEl = el; el.textContent = `${selectedCornerRadius} px`; },
@@ -398,13 +402,8 @@ function buildModifiersContent(container: HTMLElement) {
             cornerRadiusValueEl.textContent = `${selectedCornerRadius} px`;
             applyCornerRadiusToCurrentShape();
         },
-        crRow);
-    container.appendChild(crRow);
+        container);
 
-    // Chamfer — bevels the top face corners; side faces adapt to the chamfered top edges.
-    const chRow = document.createElement('div');
-    chamferRowEl = chRow;
-    chRow.style.display = supportsCornerRadius(selectedBaseShape) ? '' : 'none';
     buildSliderField('Chamfer', 'sd-chamfer', 0, 30, 1,
         (el) => { chamferSizeInput = el; el.value = String(selectedChamferSize); },
         (el) => { chamferSizeValueEl = el; el.textContent = `${selectedChamferSize} px`; },
@@ -413,8 +412,46 @@ function buildModifiersContent(container: HTMLElement) {
             chamferSizeValueEl.textContent = `${selectedChamferSize} px`;
             applyChamferSizeToCurrentShape();
         },
-        chRow);
-    container.appendChild(chRow);
+        container);
+
+    let chamferStartInput: HTMLInputElement, chamferStartVal: HTMLElement;
+    buildSliderField('Chamfer Height', 'sd-chamfer-start', 0, 1, 0.05,
+        (el) => { chamferStartInput = el; el.value = String(selectedChamferStart); },
+        (el) => { chamferStartVal = el; el.textContent = `${Math.round(selectedChamferStart * 100)}%`; },
+        () => {
+            selectedChamferStart = parseFloat(chamferStartInput.value);
+            chamferStartVal.textContent = `${Math.round(selectedChamferStart * 100)}%`;
+            applyChamferStartToCurrentShape();
+        },
+        container);
+
+    let taperInput: HTMLInputElement, taperVal: HTMLElement;
+    buildSliderField('Taper', 'sd-taper', 0, 0.95, 0.05,
+        (el) => { taperInput = el; el.value = String(selectedTaper); },
+        (el) => { taperVal = el; el.textContent = selectedTaper.toFixed(2); },
+        () => { selectedTaper = parseFloat(taperInput.value); taperVal.textContent = selectedTaper.toFixed(2); apply3DModifiers(); },
+        container);
+
+    let twistInput: HTMLInputElement, twistVal: HTMLElement;
+    buildSliderField('Twist', 'sd-twist', -180, 180, 5,
+        (el) => { twistInput = el; el.value = String(selectedTwist); },
+        (el) => { twistVal = el; el.textContent = `${selectedTwist}°`; },
+        () => { selectedTwist = parseFloat(twistInput.value); twistVal.textContent = `${selectedTwist}°`; apply3DModifiers(); },
+        container);
+
+    let stxInput: HTMLInputElement, stxVal: HTMLElement;
+    buildSliderField('Scale Top X', 'sd-scale-top-x', 0.1, 2, 0.05,
+        (el) => { stxInput = el; el.value = String(selectedScaleTopX); },
+        (el) => { stxVal = el; el.textContent = selectedScaleTopX.toFixed(2); },
+        () => { selectedScaleTopX = parseFloat(stxInput.value); stxVal.textContent = selectedScaleTopX.toFixed(2); apply3DModifiers(); },
+        container);
+
+    let styInput: HTMLInputElement, styVal: HTMLElement;
+    buildSliderField('Scale Top Y', 'sd-scale-top-y', 0.1, 2, 0.05,
+        (el) => { styInput = el; el.value = String(selectedScaleTopY); },
+        (el) => { styVal = el; el.textContent = selectedScaleTopY.toFixed(2); },
+        () => { selectedScaleTopY = parseFloat(styInput.value); styVal.textContent = selectedScaleTopY.toFixed(2); apply3DModifiers(); },
+        container);
 }
 
 function buildPositionContent(container: HTMLElement) {
@@ -440,19 +477,19 @@ const FORM_FACTOR_PREVIEWS_SVG: Record<string, string> = {
     cuboid:    `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>`,
     cylinder:  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12a7 2.5 0 0 0 14 0V6"/></svg>`,
     pyramid:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="12,4 20,20 4,20"/></svg>`,
-    hexagonal: `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,4 16,4 20,12 16,20 8,20 4,12"/></svg>`,
     octagon:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,4 16,4 20,8 20,16 16,20 8,20 4,16 4,8"/></svg>`,
+    custom:    `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="4,8 12,4 20,10 16,20 6,18"/></svg>`,
 };
 
 function buildFormFactorContent(container: HTMLElement) {
     // proportional-cuboid is not listed here: it is a resize behavior (aspect-ratio lock),
-    // not a distinct geometry. Hexagonal and Octagon use it internally.
+    // not a distinct geometry. Octagon uses it internally.
     const options: { value: BaseShape; label: string }[] = [
         { value: 'cuboid',      label: 'Cube' },
         { value: 'cylinder',    label: 'Cylinder' },
         { value: 'pyramid',     label: 'Pyramid' },
-        { value: 'hexagonal',   label: 'Hexagonal' },
         { value: 'octagon',     label: 'Octagon' },
+        { value: 'custom',      label: 'Custom' },
     ];
 
     const tileRow = document.createElement('div');
@@ -460,10 +497,16 @@ function buildFormFactorContent(container: HTMLElement) {
 
     const tiles: Array<{ btn: HTMLButtonElement; value: BaseShape }> = [];
 
+    let veContainerRef: HTMLDivElement | null = null;
+    let onCustomSelected: (() => void) | null = null;
+
     const setSelected = (value: BaseShape) => {
         for (const { btn, value: v } of tiles) {
             btn.classList.toggle('nr-sd-swatch-btn--selected', v === value);
             btn.setAttribute('aria-pressed', String(v === value));
+        }
+        if (veContainerRef) {
+            veContainerRef.style.display = value === 'custom' ? '' : 'none';
         }
     };
 
@@ -476,8 +519,6 @@ function buildFormFactorContent(container: HTMLElement) {
         btn.setAttribute('aria-pressed', String(opt.value === selectedBaseShape));
         if (opt.value === selectedBaseShape) btn.classList.add('nr-sd-swatch-btn--selected');
         btn.innerHTML = FORM_FACTOR_PREVIEWS_SVG[opt.value] ?? '';
-        // Keep the hidden radio input so existing sync logic that queries
-        // `input[name="sd-form-factor"]` continues to find a checked option.
         const input = document.createElement('input');
         input.type = 'radio';
         input.name = 'sd-form-factor';
@@ -489,11 +530,11 @@ function buildFormFactorContent(container: HTMLElement) {
         btn.addEventListener('click', () => {
             selectedBaseShape = opt.value;
             setSelected(opt.value);
-            // Mirror into hidden radios so any code reading them stays in sync.
             tileRow.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
                 r.checked = r.value === opt.value;
             });
             applyFormFactorToCanvas();
+            if (opt.value === 'custom' && onCustomSelected) onCustomSelected();
         });
 
         tiles.push({ btn, value: opt.value });
@@ -501,6 +542,174 @@ function buildFormFactorContent(container: HTMLElement) {
     }
 
     container.appendChild(tileRow);
+
+    // ── Custom vertex editor ─────────────────────────────────────────────
+    const veContainer = document.createElement('div');
+    veContainer.className = 'nr-vertex-editor';
+    veContainer.style.display = selectedBaseShape === 'custom' ? '' : 'none';
+
+    const VE_SIZE = 160;
+    const VE_PAD = 12;
+    const VE_HANDLE = 6;
+    const VE_GRID = 8;
+    const VE_SNAP = 1 / VE_GRID;
+
+    const veSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    veSvg.setAttribute('width', String(VE_SIZE));
+    veSvg.setAttribute('height', String(VE_SIZE));
+    veSvg.setAttribute('viewBox', `0 0 ${VE_SIZE} ${VE_SIZE}`);
+    veSvg.classList.add('nr-vertex-editor__svg');
+
+    const veGridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const area = VE_SIZE - VE_PAD * 2;
+    for (let i = 0; i <= VE_GRID; i++) {
+        const pos = VE_PAD + (i / VE_GRID) * area;
+        const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        hLine.setAttribute('x1', String(VE_PAD));
+        hLine.setAttribute('y1', String(pos));
+        hLine.setAttribute('x2', String(VE_PAD + area));
+        hLine.setAttribute('y2', String(pos));
+        hLine.classList.add('nr-vertex-editor__grid-line');
+        veGridGroup.appendChild(hLine);
+        const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        vLine.setAttribute('x1', String(pos));
+        vLine.setAttribute('y1', String(VE_PAD));
+        vLine.setAttribute('x2', String(pos));
+        vLine.setAttribute('y2', String(VE_PAD + area));
+        vLine.classList.add('nr-vertex-editor__grid-line');
+        veGridGroup.appendChild(vLine);
+    }
+    veSvg.appendChild(veGridGroup);
+
+    const vePolygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    vePolygon.classList.add('nr-vertex-editor__polygon');
+    veSvg.appendChild(vePolygon);
+
+    const veHandlesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    veSvg.appendChild(veHandlesGroup);
+
+    const veEdgeHitsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    veSvg.insertBefore(veEdgeHitsGroup, veHandlesGroup);
+
+    veContainer.appendChild(veSvg);
+
+    const veHint = document.createElement('div');
+    veHint.className = 'nr-vertex-editor__hint';
+    veHint.textContent = 'Drag vertices. Double-click edge to add. Right-click vertex to remove.';
+    veContainer.appendChild(veHint);
+
+    container.appendChild(veContainer);
+
+    let customVerts: [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 1]];
+
+    function veToScreen(nx: number, ny: number): [number, number] {
+        const area = VE_SIZE - VE_PAD * 2;
+        return [VE_PAD + nx * area, VE_PAD + ny * area];
+    }
+
+    function veFromScreen(sx: number, sy: number): [number, number] {
+        const a = VE_SIZE - VE_PAD * 2;
+        const nx = Math.max(0, Math.min(1, (sx - VE_PAD) / a));
+        const ny = Math.max(0, Math.min(1, (sy - VE_PAD) / a));
+        return [
+            Math.round(nx / VE_SNAP) * VE_SNAP,
+            Math.round(ny / VE_SNAP) * VE_SNAP,
+        ];
+    }
+
+    function veRender() {
+        const pts = customVerts.map(([nx, ny]) => veToScreen(nx, ny));
+        vePolygon.setAttribute('points', pts.map(([x, y]) => `${x},${y}`).join(' '));
+
+        veHandlesGroup.innerHTML = '';
+        veEdgeHitsGroup.innerHTML = '';
+
+        for (let i = 0; i < pts.length; i++) {
+            const [x, y] = pts[i];
+            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            circle.setAttribute('cx', String(x));
+            circle.setAttribute('cy', String(y));
+            circle.setAttribute('r', String(VE_HANDLE));
+            circle.classList.add('nr-vertex-editor__handle');
+            circle.dataset.idx = String(i);
+            veHandlesGroup.appendChild(circle);
+
+            const j = (i + 1) % pts.length;
+            const [x2, y2] = pts[j];
+            const edgeLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            edgeLine.setAttribute('x1', String(x));
+            edgeLine.setAttribute('y1', String(y));
+            edgeLine.setAttribute('x2', String(x2));
+            edgeLine.setAttribute('y2', String(y2));
+            edgeLine.classList.add('nr-vertex-editor__edge-hit');
+            edgeLine.dataset.after = String(i);
+            veEdgeHitsGroup.appendChild(edgeLine);
+        }
+    }
+
+    function veApply() {
+        if (!currentShape) return;
+        currentShape.set('normalizedVerts', customVerts.map(v => [...v]));
+        if (currentShape2D) currentShape2D.set('normalizedVerts', customVerts.map(v => [...v]));
+    }
+
+    // Drag handles
+    let veDragIdx = -1;
+    veSvg.addEventListener('pointerdown', (e: PointerEvent) => {
+        const target = e.target as SVGElement;
+        if (target.classList.contains('nr-vertex-editor__handle') && target.dataset.idx) {
+            veDragIdx = parseInt(target.dataset.idx, 10);
+            veSvg.setPointerCapture(e.pointerId);
+            e.preventDefault();
+        }
+    });
+    veSvg.addEventListener('pointermove', (e: PointerEvent) => {
+        if (veDragIdx < 0) return;
+        const rect = veSvg.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        customVerts[veDragIdx] = veFromScreen(sx, sy);
+        veRender();
+        veApply();
+    });
+    veSvg.addEventListener('pointerup', () => { veDragIdx = -1; });
+
+    // Double-click edge to add vertex
+    veSvg.addEventListener('dblclick', (e: MouseEvent) => {
+        const target = e.target as SVGElement;
+        if (target.classList.contains('nr-vertex-editor__edge-hit') && target.dataset.after) {
+            const after = parseInt(target.dataset.after, 10);
+            const rect = veSvg.getBoundingClientRect();
+            const [nx, ny] = veFromScreen(e.clientX - rect.left, e.clientY - rect.top);
+            customVerts.splice(after + 1, 0, [nx, ny]);
+            veRender();
+            veApply();
+        }
+    });
+
+    // Right-click vertex to remove (min 3)
+    veSvg.addEventListener('contextmenu', (e: MouseEvent) => {
+        e.preventDefault();
+        const target = e.target as SVGElement;
+        if (target.classList.contains('nr-vertex-editor__handle') && target.dataset.idx) {
+            if (customVerts.length <= 3) return;
+            const idx = parseInt(target.dataset.idx, 10);
+            customVerts.splice(idx, 1);
+            veRender();
+            veApply();
+        }
+    });
+
+    veContainerRef = veContainer;
+    onCustomSelected = () => {
+        if (currentShape && currentShape.get('normalizedVerts')?.length >= 3) {
+            customVerts = (currentShape.get('normalizedVerts') as [number, number][]).map(v => [...v] as [number, number]);
+        }
+        veRender();
+        veApply();
+    };
+
+    if (selectedBaseShape === 'custom') veRender();
 }
 
 // Mirror the currently selected radio input into the preview-tile classes.
@@ -518,7 +727,7 @@ function syncFormFactorTiles() {
 const NO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><line x1="6" y1="16" x2="26" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 
 // Generates a composite SVG: colored background shape with icon SVG centered inside.
-function buildCompositeIconSvg(iconSvg: string, bgColor: string | null, bgShape: 'circle' | 'square' | 'octagon', applyWhiteFilter = true, bgRadius = 6): string {
+function buildCompositeIconSvg(iconSvg: string, bgColor: string | null, bgShape: 'circle' | 'square' | 'octagon', applyWhiteFilter = true, bgRadius = 6, bgChamfer = 0.18): string {
     const S = 64;
     const pad = 13; // ~20% inset on each side
     const iconInner = S - 2 * pad;
@@ -527,8 +736,7 @@ function buildCompositeIconSvg(iconSvg: string, bgColor: string | null, bgShape:
         if (bgShape === 'circle') {
             bgEl = `<circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}" fill="${bgColor}"/>`;
         } else if (bgShape === 'octagon') {
-            // Regular octagon inscribed in S×S with ~18% clip on each corner
-            const c = Math.round(S * 0.18);
+            const c = Math.round(S * bgChamfer);
             bgEl = `<polygon points="${c},0 ${S - c},0 ${S},${c} ${S},${S - c} ${S - c},${S} ${c},${S} 0,${S - c} 0,${c}" fill="${bgColor}"/>`;
         } else {
             bgEl = `<rect width="${S}" height="${S}" rx="${bgRadius}" fill="${bgColor}"/>`;
@@ -598,7 +806,8 @@ function applyIconToCurrentShape() {
         selectedIconBgEnabled ? selectedIconBgColor : null,
         selectedIconBgShape,
         !isAdaptive,  // skip white filter when adaptive CSS class takes over
-        selectedIconBgRadius
+        selectedIconBgRadius,
+        selectedIconBgChamfer
     );
     const adaptiveClass = isAdaptive ? 'nr-icon-adaptive' : '';
     const iconPx = selectedIconSize * GRID_SIZE;
@@ -1158,6 +1367,9 @@ function buildIconBackgroundContent(container: HTMLElement) {
             if (iconBgCornerRadiusRowEl) {
                 iconBgCornerRadiusRowEl.style.display = opt.value === 'square' ? '' : 'none';
             }
+            if (iconBgChamferRowEl) {
+                iconBgChamferRowEl.style.display = opt.value === 'octagon' ? '' : 'none';
+            }
             applyIconToCurrentShape();
         });
 
@@ -1208,6 +1420,47 @@ function buildIconBackgroundContent(container: HTMLElement) {
     crRow.appendChild(crLabelRow);
     crRow.appendChild(crSlider);
     container.appendChild(crRow);
+
+    // ── Octagon Cut Depth slider (octagon only) ──────────────────────────────
+    const ocRow = document.createElement('div');
+    ocRow.className = 'nr-sd-slider-row';
+    ocRow.style.display = selectedIconBgShape === 'octagon' ? '' : 'none';
+    iconBgChamferRowEl = ocRow;
+
+    const ocLabelRow = document.createElement('div');
+    ocLabelRow.className = 'nr-sd-slider-label-row';
+    const ocLbl = document.createElement('label');
+    ocLbl.className = 'cds--label';
+    ocLbl.setAttribute('for', 'sd-icon-bg-chamfer');
+    ocLbl.textContent = 'Cut Depth';
+    const ocValueEl = document.createElement('span');
+    ocValueEl.className = 'nr-sd-slider-value';
+    ocValueEl.id = 'sd-icon-bg-chamfer-value';
+    ocValueEl.textContent = `${Math.round(selectedIconBgChamfer * 100)}%`;
+    ocLabelRow.appendChild(ocLbl);
+    ocLabelRow.appendChild(ocValueEl);
+
+    const ocSlider = document.createElement('input');
+    ocSlider.type = 'range';
+    ocSlider.id = 'sd-icon-bg-chamfer';
+    ocSlider.className = 'nr-sd-slider';
+    ocSlider.min = '0.05';
+    ocSlider.max = '0.45';
+    ocSlider.step = '0.01';
+    ocSlider.value = String(selectedIconBgChamfer);
+    setSliderFill(ocSlider);
+    iconBgChamferInputRef = ocSlider;
+
+    ocSlider.addEventListener('input', () => {
+        setSliderFill(ocSlider);
+        selectedIconBgChamfer = parseFloat(ocSlider.value);
+        ocValueEl.textContent = `${Math.round(selectedIconBgChamfer * 100)}%`;
+        applyIconToCurrentShape();
+    });
+
+    ocRow.appendChild(ocLabelRow);
+    ocRow.appendChild(ocSlider);
+    container.appendChild(ocRow);
 }
 
 function buildColorContent(container: HTMLElement) {
@@ -1440,7 +1693,6 @@ function buildInspectorPanel() {
     accordion.appendChild(buildAccordionItem('Form Factor',     false, buildFormFactorContent));
     accordion.appendChild(buildAccordionItem('Dimensions',      false, buildDimensionsContent));
     modifiersAccordionLi = buildAccordionItem('Modifiers', false, buildModifiersContent);
-    modifiersAccordionLi.style.display = supportsCornerRadius(selectedBaseShape) ? '' : 'none';
     accordion.appendChild(modifiersAccordionLi);
 
     // Position section — only visible in complex shape mode
@@ -1502,7 +1754,7 @@ function buildInspectorPanel() {
 
 // All form factors except 'cuboid' require width === height (square base).
 function requiresSquareBase(baseShape: string): boolean {
-    return baseShape !== 'cuboid';
+    return baseShape !== 'cuboid' && baseShape !== 'custom';
 }
 
 // Form factors that expose the corner radius slider.
@@ -1541,6 +1793,36 @@ function applyChamferSizeToCurrentShape() {
     currentShape2D?.set('chamferSize', selectedChamferSize);
 }
 
+function applyChamferStartToCurrentShape() {
+    if (isComplexShape) {
+        layerShapes[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
+        layerShapes2D[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
+        return;
+    }
+    if (!currentShape) return;
+    currentShape.set('chamferStart', selectedChamferStart);
+    currentShape2D?.set('chamferStart', selectedChamferStart);
+}
+
+function apply3DModifiers() {
+    const attrs: Record<string, number> = {
+        taper: selectedTaper, twist: selectedTwist,
+        scaleTopX: selectedScaleTopX, scaleTopY: selectedScaleTopY,
+    };
+    if (isComplexShape) {
+        const s = layerShapes[selectedLayerIndex];
+        const s2 = layerShapes2D[selectedLayerIndex];
+        if (s) for (const [k, v] of Object.entries(attrs)) s.set(k, v);
+        if (s2) for (const [k, v] of Object.entries(attrs)) s2.set(k, v);
+        return;
+    }
+    if (!currentShape) return;
+    for (const [k, v] of Object.entries(attrs)) {
+        currentShape.set(k, v);
+        currentShape2D?.set(k, v);
+    }
+}
+
 // Enforce square-base (height = width) and pyramid min-depth constraints.
 function updateDimensionLock() {
     const locked = requiresSquareBase(selectedBaseShape);
@@ -1571,11 +1853,7 @@ function updateDimensionLock() {
     const currentSvgLayer = isComplexShape ? (layers[selectedLayerIndex] ?? null) : null;
     const hasSvgLayer     = currentSvgLayer !== null && isLayerSvg(currentSvgLayer);
     const isCuboid = supportsCornerRadius(selectedBaseShape);
-    const showEdgeControls = isCuboid && !hasSvgLayer;
-    if (cornerRadiusRowEl) cornerRadiusRowEl.style.display = showEdgeControls ? '' : 'none';
-    if (chamferRowEl)      chamferRowEl.style.display      = showEdgeControls ? '' : 'none';
-    if (iconFaceRowEl)     iconFaceRowEl.style.display     = showEdgeControls ? '' : 'none';
-    if (modifiersAccordionLi) modifiersAccordionLi.style.display = isCuboid ? '' : 'none';
+    if (iconFaceRowEl)     iconFaceRowEl.style.display     = isCuboid ? '' : 'none';
     if (modifiersSvgInfoEl) modifiersSvgInfoEl.style.display = hasSvgLayer ? '' : 'none';
 }
 
@@ -1610,12 +1888,17 @@ function syncExtrasFromShape(id: string) {
     selectedIconBgColor = defaults?.iconBgColor ?? PRIMARY_COLORS[0].base;
     selectedIconBgShape  = (defaults?.iconBgShape ?? 'circle') as 'circle' | 'square' | 'octagon';
     selectedIconBgRadius = defaults?.iconBgRadius ?? 6;
+    selectedIconBgChamfer = defaults?.iconBgChamfer ?? 0.18;
     selectedStyle     = {
         topColor:    defaults?.style?.topColor    ?? '',
         sideColor:   defaults?.style?.sideColor   ?? '',
         frontColor:  defaults?.style?.frontColor  ?? '',
         strokeColor: defaults?.style?.strokeColor ?? '',
     };
+    selectedTaper     = defaults?.taper     ?? 0;
+    selectedTwist     = defaults?.twist     ?? 0;
+    selectedScaleTopX = defaults?.scaleTopX ?? 1;
+    selectedScaleTopY = defaults?.scaleTopY ?? 1;
 
     // Sync radio buttons
     inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
@@ -1661,8 +1944,20 @@ function syncExtrasFromShape(id: string) {
     }
     if (iconBgCornerRadiusInputRef) {
         iconBgCornerRadiusInputRef.value = String(selectedIconBgRadius);
+        setSliderFill(iconBgCornerRadiusInputRef);
         const crValueEl = document.getElementById('sd-icon-bg-radius-value');
         if (crValueEl) crValueEl.textContent = `${selectedIconBgRadius}px`;
+    }
+
+    // Sync octagon cut depth slider visibility and value
+    if (iconBgChamferRowEl) {
+        iconBgChamferRowEl.style.display = selectedIconBgShape === 'octagon' ? '' : 'none';
+    }
+    if (iconBgChamferInputRef) {
+        iconBgChamferInputRef.value = String(selectedIconBgChamfer);
+        setSliderFill(iconBgChamferInputRef);
+        const ocValueEl = document.getElementById('sd-icon-bg-chamfer-value');
+        if (ocValueEl) ocValueEl.textContent = `${Math.round(selectedIconBgChamfer * 100)}%`;
     }
 
     // Sync single color input
@@ -1731,7 +2026,17 @@ function applyFormFactorToCanvas() {
 
     applyCornerRadiusToCurrentShape();
     applyChamferSizeToCurrentShape();
+    applyChamferStartToCurrentShape();
     applyIconToCurrentShape();
+
+    if (selectedBaseShape === 'custom') {
+        const defaults = ShapeRegistry[currentShapeId];
+        if (defaults?.customVerts?.length) {
+            currentShape.set('normalizedVerts', defaults.customVerts);
+            currentShape2D?.set('normalizedVerts', defaults.customVerts);
+        }
+    }
+    apply3DModifiers();
 }
 
 // Apply slider dimension values to the preview shape (grid units → px).
@@ -1789,7 +2094,7 @@ function onSave() {
     if (selectedIcon) {
         const iconEntry = getIconById(selectedIcon);
         if (iconEntry) {
-            const svg = buildCompositeIconSvg(iconEntry.svg, selectedIconBgEnabled ? selectedIconBgColor : null, selectedIconBgShape, true, selectedIconBgRadius);
+            const svg = buildCompositeIconSvg(iconEntry.svg, selectedIconBgEnabled ? selectedIconBgColor : null, selectedIconBgShape, true, selectedIconBgRadius, selectedIconBgChamfer);
             iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
         }
     }
@@ -1808,10 +2113,12 @@ function onSave() {
             iconBgColor: selectedIconBgColor,
             iconBgShape: selectedIconBgShape,
             iconBgRadius: selectedIconBgRadius,
+            iconBgChamfer: selectedIconBgChamfer,
             iconHref,
             iconLayerIndex,
             cornerRadius: selectedCornerRadius,
             chamferSize: selectedChamferSize,
+            chamferStart: selectedChamferStart || undefined,
             style: {
                 topColor:    selectedStyle.topColor    || undefined,
                 frontColor:  selectedStyle.frontColor  || undefined,
@@ -1845,9 +2152,11 @@ function onSave() {
         iconBgColor: selectedIconBgColor,
         iconBgShape: selectedIconBgShape,
         iconBgRadius: selectedIconBgRadius,
+        iconBgChamfer: selectedIconBgChamfer,
         iconHref,
         cornerRadius: selectedCornerRadius,
         chamferSize: selectedChamferSize,
+        chamferStart: selectedChamferStart || undefined,
         style: {
             topColor:    selectedStyle.topColor    || undefined,
             frontColor:  selectedStyle.frontColor  || undefined,
@@ -1856,6 +2165,13 @@ function onSave() {
         },
         complexShape: false,
         layers: undefined,
+        customVerts: selectedBaseShape === 'custom' && currentShape
+            ? (currentShape.get('normalizedVerts') as [number, number][] | undefined)
+            : undefined,
+        taper: selectedTaper || undefined,
+        twist: selectedTwist || undefined,
+        scaleTopX: selectedScaleTopX !== 1 ? selectedScaleTopX : undefined,
+        scaleTopY: selectedScaleTopY !== 1 ? selectedScaleTopY : undefined,
     });
     saveRegistryToStorage();
     document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
@@ -3411,6 +3727,7 @@ function loadShapeIntoCanvas(id: string) {
 
     selectedCornerRadius = savedDefaults?.cornerRadius ?? 0;
     selectedChamferSize  = savedDefaults?.chamferSize ?? 0;
+    selectedChamferStart = savedDefaults?.chamferStart ?? 0;
 
     if (savedDefaults?.complexShape && savedDefaults.layers?.length) {
         // ── Complex shape path ─────────────────────────────────────────────────

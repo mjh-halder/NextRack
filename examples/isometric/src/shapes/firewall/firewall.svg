@@ -14,7 +14,7 @@
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
-        :d="{{cuboidFrontPath([size, isometricHeight, cornerRadius, chamferSize])}}"
+        :d="{{cuboidFrontPath([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
     />
 
     <!-- ISO: side face (right edge V1→V2) -->
@@ -22,7 +22,7 @@
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
-        :d="{{cuboidSidePath([size, isometricHeight, cornerRadius, chamferSize])}}"
+        :d="{{cuboidSidePath([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
     />
 
     <!-- ISO: corner strips — rendered before top face -->
@@ -30,19 +30,19 @@
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
-        :d="{{cuboidCornerV1Path([size, isometricHeight, cornerRadius, chamferSize])}}"
+        :d="{{cuboidCornerV1Path([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
     />
     <path @selector="cornerV2" @group-selector="iso"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
-        :d="{{cuboidCornerV2Path([size, isometricHeight, cornerRadius, chamferSize])}}"
+        :d="{{cuboidCornerV2Path([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
     />
     <path @selector="cornerV3" @group-selector="iso"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
-        :d="{{cuboidCornerV3Path([size, isometricHeight, cornerRadius, chamferSize])}}"
+        :d="{{cuboidCornerV3Path([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
     />
 
     <!-- ISO: top face — same footprint path shifted by (-iH, -iH) -->
@@ -50,7 +50,7 @@
         fill="#a8a8a8"
         stroke="#333"
         stroke-linejoin="round"
-        :d="{{topCuboidPath([size, isometricHeight, cornerRadius, chamferSize])}}"
+        :d="{{topCuboidPath([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
     />
 
     <image @selector="topIcon" @group-selector="iso"

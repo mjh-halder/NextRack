@@ -11,13 +11,13 @@
 
     <!-- ISO: front-facing side faces (light gray) — drawn first so right faces render on top -->
     <polygon @selector="bottomLeft" @group-selector="iso"
-        :points="{{bottomLeftFacePoints([size, isometricHeight, cornerRadius])}}"
+        :points="{{bottomLeftFacePoints([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
     <polygon @selector="bottomRight" @group-selector="iso"
-        :points="{{bottomRightFacePoints([size, isometricHeight, cornerRadius])}}"
+        :points="{{bottomRightFacePoints([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
@@ -25,13 +25,13 @@
 
     <!-- ISO: right-facing side faces (medium gray) — rendered over front faces -->
     <polygon @selector="lowerRight" @group-selector="iso"
-        :points="{{lowerRightFacePoints([size, isometricHeight, cornerRadius])}}"
+        :points="{{lowerRightFacePoints([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
     />
     <polygon @selector="upperRight" @group-selector="iso"
-        :points="{{upperRightFacePoints([size, isometricHeight, cornerRadius])}}"
+        :points="{{upperRightFacePoints([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
@@ -41,31 +41,31 @@
          V5 and V4 are front-facing; V3 is the right/front transition;
          V2 and V1 are right-facing. V0 (fully hidden) is not rendered. -->
     <path @selector="cornerV5" @group-selector="iso"
-        :d="{{cornerV5Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV5Path([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
     <path @selector="cornerV4" @group-selector="iso"
-        :d="{{cornerV4Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV4Path([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
     <path @selector="cornerV3" @group-selector="iso"
-        :d="{{cornerV3Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV3Path([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
     />
     <path @selector="cornerV2" @group-selector="iso"
-        :d="{{cornerV2Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV2Path([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
     />
     <path @selector="cornerV1" @group-selector="iso"
-        :d="{{cornerV1Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV1Path([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
@@ -73,7 +73,7 @@
 
     <!-- ISO: top hexagonal face — rendered last, on top of all side faces -->
     <path @selector="top" @group-selector="iso"
-        :d="{{topHexPath([size, isometricHeight, cornerRadius])}}"
+        :d="{{topHexPath([size, isometricHeight, cornerRadius, taper, twist, skewX, skewY, scaleTopX, scaleTopY])}}"
         fill="#a8a8a8"
         stroke="#333"
         stroke-linejoin="round"

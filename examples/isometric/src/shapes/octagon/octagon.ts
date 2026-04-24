@@ -67,38 +67,23 @@ export class Octagon extends PolygonShape {
         return this.footprintPath(this.baseVertices(), this.cornerRadius);
     }
 
-    /** Isometric top face: footprint shifted by (-iH, -iH). */
     @Function()
     topOctagonPath(): string {
-        const iH = this.isometricHeight;
-        const shifted = this.baseVertices().map(([x, y]) => [x - iH, y - iH] as [number, number]);
-        return this.footprintPath(shifted, this.cornerRadius);
+        const tv = this.topVertices();
+        if (this.chamferSize > 0) return this.chamferedFootprintPath(tv, this.chamferSize);
+        return this.footprintPath(tv, this.cornerRadius);
     }
 
-    // ── Straight side faces ───────────────────────────────────────────────────
-    // Hidden: V0-V1 (top), V1-V2 (upper-right), V6-V7 (left), V7-V0 (upper-left).
+    @Function() rightFacePath(): string    { return this.chamferSize > 0 ? this.chamferedSideFacePath(2, 3) : this.straightFacePath(2, 3); }
+    @Function() frontRightFacePath(): string { return this.chamferSize > 0 ? this.chamferedSideFacePath(3, 4) : this.straightFacePath(3, 4); }
+    @Function() frontBottomFacePath(): string { return this.chamferSize > 0 ? this.chamferedSideFacePath(4, 5) : this.straightFacePath(4, 5); }
+    @Function() frontLeftFacePath(): string  { return this.chamferSize > 0 ? this.chamferedSideFacePath(5, 6) : this.straightFacePath(5, 6); }
 
-    /** V2→V3: right face (right-facing, medium gray) */
-    @Function() rightFacePoints(): string   { return this.straightFacePoints(2, 3); }
-
-    /** V3→V4: bottom-right diagonal (front-facing) */
-    @Function() frontRightPoints(): string  { return this.straightFacePoints(3, 4); }
-
-    /** V4→V5: bottom face (front-facing) */
-    @Function() frontBottomPoints(): string { return this.straightFacePoints(4, 5); }
-
-    /** V5→V6: bottom-left diagonal (front-facing) */
-    @Function() frontLeftPoints(): string   { return this.straightFacePoints(5, 6); }
-
-    // ── Corner side panels ────────────────────────────────────────────────────
-    // V7, V0, V1 are fully hidden; not rendered.
-    // V2 and V6 are boundary corners (one hidden edge, one visible).
-
-    @Function() cornerV2Path(): string { return this.cornerFacePath(2); }
-    @Function() cornerV3Path(): string { return this.cornerFacePath(3); }
-    @Function() cornerV4Path(): string { return this.cornerFacePath(4); }
-    @Function() cornerV5Path(): string { return this.cornerFacePath(5); }
-    @Function() cornerV6Path(): string { return this.cornerFacePath(6); }
+    @Function() cornerV2Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(2) : this.cornerFacePath(2); }
+    @Function() cornerV3Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(3) : this.cornerFacePath(3); }
+    @Function() cornerV4Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(4) : this.cornerFacePath(4); }
+    @Function() cornerV5Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(5) : this.cornerFacePath(5); }
+    @Function() cornerV6Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(6) : this.cornerFacePath(6); }
 
     @Function() topXPosition(): number { return this.topX; }
     @Function() topYPosition(): number { return this.topY; }

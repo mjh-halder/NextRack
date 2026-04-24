@@ -2,7 +2,7 @@ const path = require('path');
 
 module.exports = {
     resolve: {
-        extensions: ['.ts', '.tsx', '.js']
+        extensions: ['.ts', '.tsx', '.js', '.md']
     },
     devtool: 'inline-source-map',
     entry: './src/index.ts',
@@ -16,6 +16,7 @@ module.exports = {
         rules: [
             { test: /\.ts$/, loader: 'ts-loader' },
             { test: /\.svg$/, loader: 'raw-loader' },
+            { test: /\.md$/, type: 'asset/source' },
             {
                 test: /\.css$/,
                 use: [

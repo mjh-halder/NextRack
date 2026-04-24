@@ -61,12 +61,9 @@ export class Hexagonal extends PolygonShape {
         return this.footprintPath(this.baseVertices(), this.cornerRadius);
     }
 
-    /** Isometric top face: footprint shifted by (-iH, -iH). */
     @Function()
     topHexPath(): string {
-        const iH = this.isometricHeight;
-        const shifted = this.baseVertices().map(([x, y]) => [x - iH, y - iH] as [number, number]);
-        return this.footprintPath(shifted, this.cornerRadius);
+        return this.footprintPath(this.topVertices(), this.cornerRadius);
     }
 
     // ── Straight side faces ───────────────────────────────────────────────────

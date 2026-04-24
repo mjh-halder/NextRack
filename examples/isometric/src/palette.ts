@@ -5,6 +5,7 @@ import { ComplexComponent } from './shapes/complex-component';
 import { META_KEY, NodeMeta } from './inspector';
 import { GRID_SIZE } from './theme';
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
+import './shape-store';
 import { getPreviewFactory } from './shapes/shape-factories';
 import { applyRegistryDefaults } from './utils';
 import { carbonIconToString, CarbonIcon } from './icons';
@@ -77,6 +78,7 @@ export class ComponentPalette {
     // element-tree drag-drop (zoneId = highlight, null = clear).
     private onZoneDropHighlight: ((zoneId: string | null) => void) | null = null;
     private getActiveZone: (() => Frame | null) | null = null;
+    private onTreeContextMenu: ((cellId: string, clientX: number, clientY: number) => void) | null = null;
     private onCanvasSwitch: ((id: string) => void) | null = null;
     private onCanvasCreate: (() => void) | null = null;
     private onCanvasDelete: ((id: string) => void) | null = null;
@@ -127,6 +129,10 @@ export class ComponentPalette {
 
     setActiveZoneGetter(fn: () => Frame | null): void {
         this.getActiveZone = fn;
+    }
+
+    setTreeContextMenuCallback(cb: (cellId: string, clientX: number, clientY: number) => void): void {
+        this.onTreeContextMenu = cb;
     }
 
     setCanvasCallbacks(
@@ -612,6 +618,11 @@ export class ComponentPalette {
                 requestAnimationFrame(() => this.scrollTreeToItem(childrenUl.lastElementChild as HTMLElement));
             }
         });
+        row.addEventListener('contextmenu', (evt: MouseEvent) => {
+            evt.preventDefault();
+            evt.stopPropagation();
+            this.onTreeContextMenu?.(String(frame.id), evt.clientX, evt.clientY);
+        });
 
         this.attachRowDragHandlers(row, frame);
 
@@ -653,6 +664,12 @@ export class ComponentPalette {
         li.appendChild(row);
 
         row.addEventListener('click', () => this.onTreeSelect(String(cell.id)));
+        row.addEventListener('contextmenu', (evt: MouseEvent) => {
+            evt.preventDefault();
+            evt.stopPropagation();
+            this.onTreeSelect(String(cell.id));
+            this.onTreeContextMenu?.(String(cell.id), evt.clientX, evt.clientY);
+        });
 
         this.attachElementDragHandlers(row, cell);
 

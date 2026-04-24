@@ -16,4 +16,18 @@
         fill="#0072c3"
         text="Zone"
     />
+    <g @selector="badgeGroup" display="none">
+        <path @selector="badgeBg"
+            d="M 0 0 L 100 0 L 100 18 L 0 18 Z"
+            fill="#0072c3"
+        />
+        <text @selector="badge"
+            x="6"
+            y="12.5"
+            font-family="IBM Plex Sans, sans-serif"
+            font-size="9"
+            font-weight="600"
+            fill="#ffffff"
+        />
+    </g>
 </g>

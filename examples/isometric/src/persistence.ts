@@ -1,14 +1,14 @@
 import { dia } from '@joint/core';
+import { GRID_SIZE } from './theme';
 
 const FILE_NAME = 'nextrack-diagram.json';
 const DEFAULT_DESIGN_KEY = 'nextrack-default-design-v1';
 
 export function saveGraph(graph: dia.Graph): void {
-    // graph.toJSON() includes all graph-level Backbone attributes (e.g. the
-    // runtime `obstacles` instance stored via graph.set('obstacles', ...)),
-    // which contain circular references and must not be serialized.
-    // Serialize only the cells, which is the format graph.fromJSON() expects.
-    const data = { cells: graph.getCells().map(cell => cell.toJSON()) };
+    const data = {
+        meta: { gridSize: GRID_SIZE, version: 1, exportedAt: new Date().toISOString() },
+        cells: graph.getCells().map(cell => cell.toJSON()),
+    };
     const json = JSON.stringify(data, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -22,7 +22,10 @@ export function saveGraph(graph: dia.Graph): void {
 /** Persist the current graph as the startup default in localStorage. */
 export function saveDefaultDesign(graph: dia.Graph): void {
     try {
-        const data = { cells: graph.getCells().map(cell => cell.toJSON()) };
+        const data = {
+            meta: { gridSize: GRID_SIZE, version: 1 },
+            cells: graph.getCells().map(cell => cell.toJSON()),
+        };
         localStorage.setItem(DEFAULT_DESIGN_KEY, JSON.stringify(data));
     } catch (e) {
         console.error('[nextrack] Failed to save default design:', e);

@@ -150,8 +150,7 @@ export class AreaSelect {
                 if (cell.isLink() || cell === model) return;
                 if (this.isParentSelected(cell)) return;
                 const el = cell as dia.Element;
-                const p = el.position();
-                el.position(p.x + dx, p.y + dy);
+                el.translate(dx, dy);
             });
         });
 
@@ -237,9 +236,12 @@ export class AreaSelect {
     private addHighlight(cell: dia.Cell): void {
         const view = this.paper.findViewByModel(cell);
         if (!view) return;
+        const isZone = !!cell.get('isFrame');
         highlighters.mask.add(view, this.highlightSelector(cell), HIGHLIGHT_ID, {
             layer: dia.Paper.Layers.BACK,
-            attrs: { stroke: HIGHLIGHT_COLOR, 'stroke-width': 3, 'stroke-dasharray': '6,3' },
+            attrs: isZone
+                ? { stroke: HIGHLIGHT_COLOR, 'stroke-width': 1.5, 'stroke-dasharray': '4,3', 'stroke-opacity': 0.6 }
+                : { stroke: HIGHLIGHT_COLOR, 'stroke-width': 3, 'stroke-dasharray': '6,3' },
         });
     }
 }

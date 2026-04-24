@@ -5,6 +5,7 @@ import { PRIMARY_COLORS } from './colors';
 import { getCustomFields, getDataType, FieldDefinition } from './schema-registry';
 import { getProductsByType, getProduct } from './product-catalog';
 import { getCanvas, updateCanvas, CanvasRecord } from './canvas-store';
+import { GRID_SIZE } from './theme';
 const DEFAULT_ZONE_COLOR = '#0072c3';
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -21,6 +22,30 @@ const LABEL_POSITIONS: Record<string, { x: string | number; y: string | number; 
     'bottom-right': { x: 'calc(w - 8)', y: 'calc(h - 6)', textAnchor: 'end'   },
 };
 
+export const BADGE_POSITIONS: Record<string, { groupTransform: string; textAnchor: string }> = {
+    'top-left':     { groupTransform: 'translate(0, 0)',                      textAnchor: 'start' },
+    'top-right':    { groupTransform: 'translate(calc(w - 100), 0)',          textAnchor: 'start' },
+    'bottom-left':  { groupTransform: 'translate(0, calc(h - 18))',          textAnchor: 'start' },
+    'bottom-right': { groupTransform: 'translate(calc(w - 100), calc(h - 18))', textAnchor: 'start' },
+};
+
+const BADGE_W = 100;
+const BADGE_H = 18;
+const BADGE_CHAMFER = 6;
+
+export function badgeChamferPath(badgePos: string): string {
+    const w = BADGE_W;
+    const h = BADGE_H;
+    const c = BADGE_CHAMFER;
+    switch (badgePos) {
+        case 'bottom-right': return `M ${c} 0 L ${w} 0 L ${w} ${h} L 0 ${h} L 0 ${c} Z`;
+        case 'bottom-left':  return `M 0 0 L ${w - c} 0 L ${w} ${c} L ${w} ${h} L 0 ${h} Z`;
+        case 'top-right':    return `M 0 0 L ${w} 0 L ${w} ${h} L ${c} ${h} L 0 ${h - c} Z`;
+        case 'top-left':     return `M 0 0 L ${w} 0 L ${w} ${h - c} L ${w - c} ${h} L 0 ${h} Z`;
+        default:             return `M 0 0 L ${w} 0 L ${w} ${h} L 0 ${h} Z`;
+    }
+}
+
 // --- Node metadata ---
 
 export interface NodeMeta {
@@ -36,6 +61,7 @@ const EMPTY_NODE_META: NodeMeta = { name: '', shapeType: '' };
 // --- Link metadata ---
 
 export interface LinkMeta {
+    linkType: string;
     bandwidth: string;
     medium: string;
     encryption: string;
@@ -43,7 +69,9 @@ export interface LinkMeta {
 
 export const LINK_META_KEY = 'linkMeta';
 
-const EMPTY_LINK_META: LinkMeta = { bandwidth: '', medium: '', encryption: '' };
+const EMPTY_LINK_META: LinkMeta = { linkType: '', bandwidth: '', medium: '', encryption: '' };
+
+const LINK_TYPE_OPTIONS = ['Host Access', 'Cluster Link'];
 
 const LINK_FIELDS: { key: keyof LinkMeta; label: string; placeholder: string }[] = [
     { key: 'bandwidth',  label: 'Bandwidth',  placeholder: 'e.g. 10Gbps'  },
@@ -85,6 +113,10 @@ export class PropertyPanel {
     private currentLayerId: string | null = null;
 
     private layerSection!: HTMLElement;
+    private multiZoneSection!: HTMLElement;
+    private multiZoneWidthInput!: HTMLInputElement;
+    private multiZoneHeightInput!: HTMLInputElement;
+    private multiZoneTargets: dia.Element[] = [];
 
     private nodeInputs: Record<string, HTMLInputElement | HTMLTextAreaElement> = {};
     private nodeLabelHiddenEl!: HTMLInputElement;
@@ -97,6 +129,10 @@ export class PropertyPanel {
     private zoneColorSwatchBtns: Array<{ btn: HTMLButtonElement; color: string }> = [];
     private selectedZoneColor = DEFAULT_ZONE_COLOR;
     private zoneLabelPosPicker!: LabelPositionPicker;
+    private zoneBadgePosPicker!: LabelPositionPicker;
+    private zoneClusterNameInput!: HTMLInputElement;
+    private zoneClusterSection!: HTMLElement;
+    private linkTypeSelect!: HTMLSelectElement;
     private linkInputs = {} as Record<keyof LinkMeta, HTMLInputElement>;
     private linkCustomContainer!: HTMLElement;
     private linkCustomInputs: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
@@ -142,6 +178,31 @@ export class PropertyPanel {
         });
 
         this.zoneSection.appendChild(this.buildZoneColorRow());
+
+        // ---- Stretch Cluster subsection (visible only when zone is in a cluster) ----
+        this.zoneClusterSection = document.createElement('div');
+        this.zoneClusterSection.className = 'inspector-subsection';
+        this.zoneClusterSection.style.display = 'none';
+
+        const clusterHeading = document.createElement('div');
+        clusterHeading.className = 'inspector-subsection-heading';
+        clusterHeading.textContent = 'Stretch Cluster';
+        this.zoneClusterSection.appendChild(clusterHeading);
+
+        const { row: clusterNameRow, input: clusterNameInput } = this.buildRow(
+            'zone-cluster-name', 'Cluster Name', 'e.g. Stretch Cluster A'
+        );
+        this.zoneClusterNameInput = clusterNameInput as HTMLInputElement;
+        this.zoneClusterNameInput.addEventListener('input', () => this.saveZone());
+        this.zoneClusterSection.appendChild(clusterNameRow);
+
+        this.zoneBadgePosPicker = this.buildLabelPositionRow();
+        const badgePosLabel = this.zoneBadgePosPicker.row.querySelector('label');
+        if (badgePosLabel) badgePosLabel.textContent = 'Badge Position';
+        this.zoneClusterSection.appendChild(this.zoneBadgePosPicker.row);
+
+        this.zoneSection.appendChild(this.zoneClusterSection);
+
         this.zoneCustomContainer = document.createElement('div');
         this.zoneCustomContainer.className = 'inspector-custom-fields';
         this.zoneSection.appendChild(this.zoneCustomContainer);
@@ -150,6 +211,15 @@ export class PropertyPanel {
         // ---- Link section ----
         this.linkSection = document.createElement('div');
         this.linkSection.className = 'inspector-section';
+
+        // Link Type dropdown
+        const { row: ltRow, select: ltSelect } = this.buildSelectRow(
+            'link-type', 'Link Type', LINK_TYPE_OPTIONS
+        );
+        this.linkTypeSelect = ltSelect;
+        this.linkTypeSelect.addEventListener('change', () => this.saveLink());
+        this.linkSection.appendChild(ltRow);
+
         for (const field of LINK_FIELDS) {
             const { row, input } = this.buildRow(
                 `link-${field.key}`, field.label, field.placeholder
@@ -166,6 +236,26 @@ export class PropertyPanel {
         this.layerSection = document.createElement('div');
         this.layerSection.className = 'inspector-section';
         this.el.appendChild(this.layerSection);
+
+        // ---- Multi-zone section ----
+        this.multiZoneSection = document.createElement('div');
+        this.multiZoneSection.className = 'inspector-section';
+
+        const mzWidthRow = this.buildRow('mz-width', 'Width (grid units)', 'Width');
+        this.multiZoneWidthInput = mzWidthRow.input as HTMLInputElement;
+        this.multiZoneWidthInput.type = 'number';
+        this.multiZoneWidthInput.min = '1';
+        this.multiZoneWidthInput.addEventListener('input', () => this.applyMultiZoneSize());
+        this.multiZoneSection.appendChild(mzWidthRow.row);
+
+        const mzHeightRow = this.buildRow('mz-height', 'Height (grid units)', 'Height');
+        this.multiZoneHeightInput = mzHeightRow.input as HTMLInputElement;
+        this.multiZoneHeightInput.type = 'number';
+        this.multiZoneHeightInput.min = '1';
+        this.multiZoneHeightInput.addEventListener('input', () => this.applyMultiZoneSize());
+        this.multiZoneSection.appendChild(mzHeightRow.row);
+
+        this.el.appendChild(this.multiZoneSection);
 
         // Auto-save: zone fields apply instantly.
         this.zoneNameInput.addEventListener('input', () => this.saveZone());
@@ -443,6 +533,19 @@ export class PropertyPanel {
         this.currentZone.attr('label/y', pos.y);
         this.currentZone.attr('label/text-anchor', pos.textAnchor);
 
+        // Stretch Cluster badge
+        if (this.currentZone.get('stretchCluster')) {
+            const clusterName = this.zoneClusterNameInput.value.trim();
+            this.currentZone.set('clusterName', clusterName);
+            this.currentZone.attr('badge/text', clusterName || this.currentZone.get('stretchCluster'));
+
+            const badgePos = this.zoneBadgePosPicker.getValue();
+            this.currentZone.set('badgeLabelPosition', badgePos);
+            const bp = BADGE_POSITIONS[badgePos];
+            this.currentZone.attr('badgeGroup/transform', bp.groupTransform);
+            this.currentZone.attr('badgeBg/d', badgeChamferPath(badgePos));
+        }
+
         const zoneMeta: Record<string, unknown> = {};
         for (const [key, input] of Object.entries(this.zoneCustomInputs)) {
             zoneMeta[key] = input.value;
@@ -453,6 +556,7 @@ export class PropertyPanel {
     private saveLink() {
         if (!this.currentLink) return;
         const meta: Record<string, unknown> = {
+            linkType:   this.linkTypeSelect.value,
             bandwidth:  this.linkInputs.bandwidth.value,
             medium:     this.linkInputs.medium.value,
             encryption: this.linkInputs.encryption.value,
@@ -523,7 +627,8 @@ export class PropertyPanel {
         const meta: Record<string, unknown> = cell.get(META_KEY) ?? { ...EMPTY_NODE_META };
 
         const shapeKey = (meta.shapeType as string) || '';
-        const componentType = ShapeRegistry[shapeKey]?.componentType ?? '';
+        const shapeDef = ShapeRegistry[shapeKey];
+        const componentType = shapeDef?.componentType || shapeDef?.displayName || '';
         const typeId = componentType.toLowerCase().replace(/\s+/g, '-');
         const typeDef = typeId ? getDataType(typeId) : null;
 
@@ -628,6 +733,7 @@ export class PropertyPanel {
         this.nodeLabelHiddenEl.addEventListener('change', () => this.saveNode());
         this.nodeSection.appendChild(nodeLabelRow);
 
+
         // Custom fields from schema registry
         const customContainer = document.createElement('div');
         customContainer.className = 'inspector-custom-fields';
@@ -641,6 +747,7 @@ export class PropertyPanel {
         this.zoneSection.style.display = 'none';
         this.linkSection.style.display = 'none';
         this.layerSection.style.display = 'none';
+        this.multiZoneSection.style.display = 'none';
         this.duplicateBtn.style.display = '';
         this.duplicateBtn.textContent = 'Duplicate';
         this.duplicateZoneBtn.style.display = 'none';
@@ -662,6 +769,18 @@ export class PropertyPanel {
         this.zoneLabelPosPicker.setValue((frame.get('zoneLabelPosition') as string | undefined) ?? 'top-left');
         this.zoneLabelPosPicker.row.style.display = this.zoneLabelHiddenEl.checked ? 'none' : '';
 
+        // Stretch Cluster controls
+        const clusterLabel = frame.get('stretchCluster') as string | undefined;
+        const isInCluster = !!clusterLabel;
+        this.zoneClusterSection.style.display = isInCluster ? '' : 'none';
+        if (isInCluster) {
+            const customName = (frame.get('clusterName') as string | undefined) ?? '';
+            this.zoneClusterNameInput.value = customName || clusterLabel;
+            this.zoneBadgePosPicker.setValue(
+                (frame.get('badgeLabelPosition') as string | undefined) ?? 'top-right'
+            );
+        }
+
         const zoneMeta: Record<string, unknown> = frame.get('zoneMeta') ?? {};
         this.zoneCustomInputs = this.buildCustomFields(
             this.zoneCustomContainer, 'zone', zoneMeta, () => this.saveZone()
@@ -671,6 +790,7 @@ export class PropertyPanel {
         this.nodeSection.style.display = 'none';
         this.zoneSection.style.display = '';
         this.linkSection.style.display = 'none';
+        this.multiZoneSection.style.display = 'none';
         this.duplicateBtn.style.display = 'none';
         this.duplicateZoneBtn.style.display = '';
         this.deleteBtn.style.display = '';
@@ -683,16 +803,38 @@ export class PropertyPanel {
         this.currentNode = null;
         this.currentZone = null;
         const meta: Record<string, unknown> = link.get(LINK_META_KEY) ?? { ...EMPTY_LINK_META };
+
+        // Auto-detect link type based on source/target
+        let linkType = String(meta.linkType ?? '');
+        if (!linkType) {
+            const srcId = (link.source() as { id?: string }).id;
+            const tgtId = (link.target() as { id?: string }).id;
+            if (srcId && tgtId) {
+                const srcCell = link.graph?.getCell(srcId);
+                const tgtCell = link.graph?.getCell(tgtId);
+                if (srcCell?.get('isFrame') && tgtCell?.get('isFrame')) {
+                    linkType = 'Cluster Link';
+                } else {
+                    linkType = 'Host Access';
+                }
+                meta.linkType = linkType;
+                link.set(LINK_META_KEY, meta);
+            }
+        }
+        this.linkTypeSelect.value = linkType;
+
         for (const field of LINK_FIELDS) {
             this.linkInputs[field.key].value = String(meta[field.key] ?? '');
         }
         this.linkCustomInputs = this.buildCustomFields(
             this.linkCustomContainer, 'connection', meta, () => this.saveLink()
         );
-        this.titleEl.textContent = 'Connection';
+        const typeLabel = linkType || 'Connection';
+        this.titleEl.textContent = typeLabel;
         this.nodeSection.style.display = 'none';
         this.zoneSection.style.display = 'none';
         this.linkSection.style.display = '';
+        this.multiZoneSection.style.display = 'none';
         this.duplicateBtn.style.display = 'none';
         this.duplicateZoneBtn.style.display = 'none';
         this.deleteBtn.style.display = 'none';
@@ -712,6 +854,7 @@ export class PropertyPanel {
         this.nodeSection.style.display = 'none';
         this.zoneSection.style.display = 'none';
         this.linkSection.style.display = 'none';
+        this.multiZoneSection.style.display = 'none';
         this.duplicateBtn.style.display = 'none';
         this.duplicateZoneBtn.style.display = 'none';
         this.deleteBtn.style.display = 'none';
@@ -751,11 +894,52 @@ export class PropertyPanel {
         this.el.classList.remove('inspector-hidden');
     }
 
+    showMultiZone(zones: dia.Element[]) {
+        this.currentNode = null;
+        this.currentLink = null;
+        this.currentZone = null;
+        this.currentLayerId = null;
+        this.multiZoneTargets = zones;
+
+        const firstSize = zones[0].size();
+        const allSameWidth = zones.every(z => z.size().width === firstSize.width);
+        const allSameHeight = zones.every(z => z.size().height === firstSize.height);
+
+        this.multiZoneWidthInput.value = allSameWidth ? String(Math.round(firstSize.width / GRID_SIZE)) : '';
+        this.multiZoneHeightInput.value = allSameHeight ? String(Math.round(firstSize.height / GRID_SIZE)) : '';
+        this.multiZoneWidthInput.placeholder = allSameWidth ? '' : 'mixed';
+        this.multiZoneHeightInput.placeholder = allSameHeight ? '' : 'mixed';
+
+        this.titleEl.textContent = `${zones.length} Zones`;
+        this.nodeSection.style.display = 'none';
+        this.zoneSection.style.display = 'none';
+        this.linkSection.style.display = 'none';
+        this.layerSection.style.display = 'none';
+        this.multiZoneSection.style.display = '';
+        this.duplicateBtn.style.display = 'none';
+        this.duplicateZoneBtn.style.display = 'none';
+        this.deleteBtn.style.display = 'none';
+        this.el.classList.remove('inspector-hidden');
+    }
+
+    private applyMultiZoneSize() {
+        const wVal = this.multiZoneWidthInput.value.trim();
+        const hVal = this.multiZoneHeightInput.value.trim();
+        const w = wVal ? Math.max(1, parseInt(wVal, 10)) * GRID_SIZE : 0;
+        const h = hVal ? Math.max(1, parseInt(hVal, 10)) * GRID_SIZE : 0;
+        for (const zone of this.multiZoneTargets) {
+            if (!zone.graph) continue;
+            const cur = zone.size();
+            zone.resize(w || cur.width, h || cur.height);
+        }
+    }
+
     hide() {
         this.currentNode = null;
         this.currentLink = null;
         this.currentZone = null;
         this.currentLayerId = null;
+        this.multiZoneTargets = [];
         this.el.classList.add('inspector-hidden');
     }
 }

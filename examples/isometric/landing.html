@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Xyronos — Model your infrastructure, visually.</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg"/>
+  <link rel="stylesheet" href="https://1.www.s81c.com/common/carbon/plex/sans.css"/>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=view_object_track"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a0a;
+      --fg: #ededed;
+      --fg2: #a1a1a1;
+      --accent: #0f62fe;
+      --accent-hover: #0353e9;
+      --border: #1e1e1e;
+      --card-bg: #111111;
+      --card-border: #1a1a1a;
+      --section-gap: 160px;
+      --max-w: 1200px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── NAV ─────────────────────────────────────────────────────────────── */
+
+    nav {
+      position: fixed; top: 0; left: 0; right: 0;
+      height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 32px;
+      background: rgba(10,10,10,0.8);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      z-index: 100;
+    }
+
+    .logo-icon {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal;
+      font-style: normal;
+      font-size: 24px;
+      line-height: 1;
+      letter-spacing: normal;
+      text-transform: none;
+      white-space: nowrap;
+      word-wrap: normal;
+      direction: ltr;
+      -webkit-font-smoothing: antialiased;
+      color: #ffffff;
+    }
+
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      text-decoration: none;
+    }
+
+    .nav-brand .logo-icon {
+      font-size: 22px;
+    }
+
+    .nav-brand-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--fg);
+      letter-spacing: -0.01em;
+    }
+
+    .nav-links { display: flex; gap: 32px; align-items: center; }
+
+    .nav-links a {
+      font-size: 0.875rem;
+      color: var(--fg2);
+      text-decoration: none;
+      transition: color 150ms;
+    }
+
+    .nav-links a:hover { color: var(--fg); }
+
+    .nav-btn {
+      display: inline-flex; align-items: center;
+      padding: 8px 16px;
+      font-size: 0.875rem; font-weight: 500;
+      color: var(--bg);
+      background: var(--fg);
+      border: none; border-radius: 6px;
+      cursor: pointer;
+      text-decoration: none;
+      transition: opacity 150ms;
+    }
+
+    .nav-btn:hover { opacity: 0.85; }
+
+    /* ── HERO ────────────────────────────────────────────────────────────── */
+
+    .hero {
+      min-height: 100vh;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      text-align: center;
+      padding: 120px 24px 80px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 50% 30%, rgba(15,98,254,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 0;
+    }
+
+    .hero-btn-primary {
+      display: inline-flex; align-items: center;
+      height: 48px; padding: 0 28px;
+      font-family: inherit; font-size: 0.9375rem; font-weight: 500;
+      color: #fff; background: var(--accent);
+      border: none; border-radius: 6px;
+      cursor: pointer; text-decoration: none;
+      transition: background 150ms;
+    }
+
+    .hero-btn-primary:hover { background: var(--accent-hover); }
+
+    .hero-btn-secondary {
+      display: inline-flex; align-items: center;
+      height: 48px; padding: 0 28px;
+      font-family: inherit; font-size: 0.9375rem; font-weight: 500;
+      color: var(--fg); background: transparent;
+      border: 1px solid #333; border-radius: 6px;
+      cursor: pointer; text-decoration: none;
+      transition: border-color 150ms, background 150ms;
+    }
+
+    .hero-btn-secondary:hover { border-color: #555; background: rgba(255,255,255,0.04); }
+
+    .hero-badge {
+      display: inline-block;
+      padding: 4px 14px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      color: var(--accent);
+      border: 1px solid rgba(15,98,254,0.3);
+      border-radius: 9999px;
+      margin-bottom: 24px;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-weight: 600;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      max-width: 900px;
+      margin-bottom: 24px;
+    }
+
+    .hero h1 span { color: var(--fg2); }
+
+    .hero p {
+      font-size: 1.25rem;
+      color: var(--fg2);
+      max-width: 600px;
+      margin-bottom: 40px;
+      line-height: 1.6;
+    }
+
+    .hero-form {
+      display: flex; gap: 8px;
+      max-width: 440px; width: 100%;
+    }
+
+    .hero-form input {
+      flex: 1;
+      height: 48px;
+      padding: 0 16px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      color: var(--fg);
+      background: var(--card-bg);
+      border: 1px solid #333;
+      border-radius: 6px;
+      outline: none;
+    }
+
+    .hero-form input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15,98,254,0.15);
+    }
+
+    .hero-form input::placeholder { color: #555; }
+
+    .hero-form button {
+      height: 48px;
+      padding: 0 24px;
+      font-family: inherit;
+      font-size: 0.9375rem;
+      font-weight: 500;
+      color: #fff;
+      background: var(--accent);
+      border: none; border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 150ms;
+    }
+
+    .hero-form button:hover { background: var(--accent-hover); }
+
+    .hero-subtext {
+      margin-top: 12px;
+      font-size: 0.8125rem;
+      color: #555;
+    }
+
+    /* ── HERO SCREENSHOT ─────────────────────────────────────────────────── */
+
+    .hero-screenshot {
+      margin-top: 64px;
+      width: 100%;
+      max-width: var(--max-w);
+      aspect-ratio: 16 / 9;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--fg2);
+      font-size: 0.875rem;
+      text-align: center;
+      padding: 24px;
+      line-height: 1.6;
+    }
+
+    /* ── SECTIONS (shared) ───────────────────────────────────────────────── */
+
+    section {
+      padding: var(--section-gap) 24px;
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: clamp(2rem, 4vw, 3rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      max-width: 700px;
+      margin-bottom: 20px;
+    }
+
+    .section-desc {
+      font-size: 1.125rem;
+      color: var(--fg2);
+      max-width: 600px;
+      line-height: 1.6;
+      margin-bottom: 48px;
+    }
+
+    /* ── FEATURE GRID ────────────────────────────────────────────────────── */
+
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--card-border);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .feature-card {
+      background: var(--card-bg);
+      padding: 40px 32px;
+    }
+
+    .feature-card h3 {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-card p {
+      font-size: 0.9375rem;
+      color: var(--fg2);
+      line-height: 1.5;
+    }
+
+    /* ── SPLIT SECTIONS ──────────────────────────────────────────────────── */
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: center;
+    }
+
+    .split-text { max-width: 480px; }
+
+    .split-text .section-label { margin-bottom: 12px; }
+
+    .split-text h2 {
+      font-size: clamp(1.75rem, 3vw, 2.5rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin-bottom: 16px;
+    }
+
+    .split-text p {
+      font-size: 1rem;
+      color: var(--fg2);
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .split-text ul {
+      list-style: none;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+
+    .split-text ul li {
+      font-size: 0.9375rem;
+      color: var(--fg2);
+      padding-left: 20px;
+      position: relative;
+    }
+
+    .split-text ul li::before {
+      content: '→';
+      position: absolute; left: 0;
+      color: var(--accent);
+    }
+
+    .split-visual {
+      aspect-ratio: 4 / 3;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      color: var(--fg2);
+      font-size: 0.875rem;
+      text-align: center;
+      padding: 24px;
+      line-height: 1.6;
+    }
+
+    .split.reverse { direction: rtl; }
+    .split.reverse > * { direction: ltr; }
+
+    /* ── SECURITY BANNER ─────────────────────────────────────────────────── */
+
+    .security-banner {
+      margin: var(--section-gap) auto;
+      max-width: var(--max-w);
+      padding: 64px;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      text-align: center;
+    }
+
+    .security-banner h2 {
+      font-size: 2rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+
+    .security-banner p {
+      font-size: 1.0625rem;
+      color: var(--fg2);
+      max-width: 640px;
+      margin: 0 auto 32px;
+      line-height: 1.6;
+    }
+
+    .security-points {
+      display: flex;
+      justify-content: center;
+      gap: 48px;
+      flex-wrap: wrap;
+    }
+
+    .security-point {
+      text-align: center;
+      max-width: 200px;
+    }
+
+    .security-point .icon {
+      width: 48px; height: 48px;
+      margin: 0 auto 12px;
+      background: rgba(15,98,254,0.1);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.25rem;
+    }
+
+    .security-point h4 {
+      font-size: 0.9375rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .security-point p {
+      font-size: 0.8125rem;
+      color: var(--fg2);
+      margin: 0;
+    }
+
+    /* ── CTA ──────────────────────────────────────────────────────────────── */
+
+    .cta {
+      text-align: center;
+      padding: var(--section-gap) 24px;
+      max-width: var(--max-w);
+      margin: 0 auto;
+    }
+
+    .cta h2 {
+      font-size: clamp(2rem, 4vw, 3rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+
+    .cta p {
+      font-size: 1.125rem;
+      color: var(--fg2);
+      max-width: 500px;
+      margin: 0 auto 40px;
+      line-height: 1.6;
+    }
+
+    .cta-form {
+      display: flex; gap: 8px;
+      max-width: 440px;
+      margin: 0 auto;
+    }
+
+    .cta-form input { flex: 1; height: 48px; padding: 0 16px; font-family: inherit; font-size: 0.9375rem; color: var(--fg); background: var(--card-bg); border: 1px solid #333; border-radius: 6px; outline: none; }
+    .cta-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(15,98,254,0.15); }
+    .cta-form input::placeholder { color: #555; }
+    .cta-form button { height: 48px; padding: 0 24px; font-family: inherit; font-size: 0.9375rem; font-weight: 500; color: #fff; background: var(--accent); border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; transition: background 150ms; }
+    .cta-form button:hover { background: var(--accent-hover); }
+
+    /* ── FOOTER ───────────────────────────────────────────────────────────── */
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 48px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      max-width: var(--max-w);
+      margin: 0 auto;
+      font-size: 0.8125rem;
+      color: #555;
+    }
+
+    footer a { color: #555; text-decoration: none; }
+    footer a:hover { color: var(--fg2); }
+
+    .footer-links { display: flex; gap: 24px; }
+
+    /* ── RESPONSIVE ──────────────────────────────────────────────────────── */
+
+    @media (max-width: 768px) {
+      .features-grid { grid-template-columns: 1fr; }
+      .split { grid-template-columns: 1fr; gap: 40px; }
+      .split.reverse { direction: ltr; }
+      .security-points { flex-direction: column; align-items: center; }
+      .hero-form, .cta-form { flex-direction: column; }
+      .hero-form button, .cta-form button { width: 100%; }
+      nav { padding: 0 16px; }
+      .nav-links a { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── NAV ──────────────────────────────────────────────────────────────── -->
+
+<nav>
+  <a href="#" class="nav-brand">
+    <span class="logo-icon">view_object_track</span>
+    <span class="nav-brand-name">Xyronos</span>
+  </a>
+  <div class="nav-links">
+    <a href="#features">Features</a>
+    <a href="#modeling">Modeling</a>
+    <a href="#capacity">Capacity</a>
+    <a href="#security">Security</a>
+    <a href="index.html" class="nav-btn">Open Editor</a>
+  </div>
+</nav>
+
+<!-- ── HERO ─────────────────────────────────────────────────────────────── -->
+
+<div class="hero">
+  <span class="hero-badge">Now in early access</span>
+  <h1>Model your infrastructure.<br/><span>Ship with confidence.</span></h1>
+  <p>The visual infrastructure editor for data centers, colocation, cloud, and server rooms. Design, calculate, and document — all in your browser.</p>
+
+  <div class="hero-buttons">
+    <a href="index.html" class="hero-btn-primary">Open Editor</a>
+    <a href="#features" class="hero-btn-secondary">Show Demo ↓</a>
+  </div>
+
+  <div class="hero-screenshot">
+    [Screenshot: Full System Designer view showing an isometric data center layout with servers, switches, and zones. Multiple components connected with links. HUD showing aggregated power, cores, RAM. Minimap visible in the corner.]
+  </div>
+</div>
+
+<!-- ── FEATURES GRID ───────────────────────────────────────────────────── -->
+
+<section id="features">
+  <div class="section-label">Features</div>
+  <h2 class="section-title">Everything you need to model IT infrastructure end-to-end.</h2>
+  <p class="section-desc">From the physical rack to the application workload. One tool, one source of truth.</p>
+
+  <div class="features-grid">
+    <div class="feature-card">
+      <h3>Visual Modeling</h3>
+      <p>Drag and drop servers, switches, firewalls, and storage into an isometric canvas. Connect them visually. Make infrastructure understandable at a glance.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Capacity Planning</h3>
+      <p>See aggregated power, CPU cores, RAM, and storage in real time. Per zone, per cluster, or across the entire setup. Always know what you have and what you need.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Workload Views</h3>
+      <p>Define applications and map them to infrastructure layers. See where workloads run, what they consume, and how replication affects your resource footprint.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Product Catalog</h3>
+      <p>Build a catalog of server models, NICs, and components with real specs. Assign them to nodes on the canvas and auto-populate hardware details.</p>
+    </div>
+    <div class="feature-card">
+      <h3>Compatibility Checks</h3>
+      <p>Validate component combinations. Catch mismatches between hardware, form factors, and requirements before they become costly mistakes in the data center.</p>
+    </div>
+    <div class="feature-card">
+      <h3>BOM Management</h3>
+      <p>Generate hardware and software bills of materials from your designs. Export what you need for procurement, audits, and documentation.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ── SPLIT: VISUAL MODELING ─────────────────────────────────────────── -->
+
+<section id="modeling">
+  <div class="split">
+    <div class="split-text">
+      <div class="section-label">Visual Modeling</div>
+      <h2>Draw infrastructure like you think about it.</h2>
+      <p>Stop using spreadsheets and Visio to describe what a data center looks like. Xyronos gives you an isometric canvas where every component has real meaning.</p>
+      <ul>
+        <li>Isometric and 2D views with one click</li>
+        <li>Zones for racks, rooms, and security boundaries</li>
+        <li>Automatic link routing between components</li>
+        <li>Custom component shapes with your own icons</li>
+      </ul>
+    </div>
+    <div class="split-visual">
+      [Screenshot: Close-up of the isometric canvas with 3–4 servers in a zone, connected to a switch. The zone has a blue border and a label. The HUD is visible showing zone-specific resource aggregation.]
+    </div>
+  </div>
+</section>
+
+<!-- ── SPLIT: CAPACITY ───────────────────────────────────────────────── -->
+
+<section id="capacity">
+  <div class="split reverse">
+    <div class="split-text">
+      <div class="section-label">Capacity Planning</div>
+      <h2>Know your numbers before you rack the hardware.</h2>
+      <p>Every component carries its specs. Xyronos aggregates power, compute, memory, and storage across your design — live, as you build.</p>
+      <ul>
+        <li>Real-time resource HUD per canvas and per zone</li>
+        <li>Product catalog with vendor specs (Dell, Lenovo, HPE…)</li>
+        <li>Override values manually when the catalog doesn't fit</li>
+        <li>Application resource requirements mapped to infra layers</li>
+      </ul>
+    </div>
+    <div class="split-visual">
+      [Screenshot: System Designer with the resource HUD visible top-left, showing "12 Nodes | 4,800W | 384 Cores | 2,048G RAM | 96,000G Storage". A zone is selected and shows its own HUD below with the zone's color.]
+    </div>
+  </div>
+</section>
+
+<!-- ── SPLIT: APPLICATIONS ───────────────────────────────────────────── -->
+
+<section>
+  <div class="split">
+    <div class="split-text">
+      <div class="section-label">Application Inventory</div>
+      <h2>From the app to the rack — one connected model.</h2>
+      <p>Define applications with their deployment model, database, OS, and storage requirements. Map them to infrastructure layers and see end-to-end where resources are consumed.</p>
+      <ul>
+        <li>Application profiles with deployment model, DB, and storage</li>
+        <li>Workload layers linked to infrastructure canvases</li>
+        <li>Replication levels and service tiers per application</li>
+        <li>Repeatable storage entries per app</li>
+      </ul>
+    </div>
+    <div class="split-visual">
+      [Screenshot: Application Designer view showing the app list on the left, an isometric preview of the "App" shape in the center, and the Application Profile form on the right with fields for deployment model, OS, application server, database, storage entries, and replication level.]
+    </div>
+  </div>
+</section>
+
+<!-- ── SPLIT: COMPONENT DESIGNER ─────────────────────────────────────── -->
+
+<section>
+  <div class="split reverse">
+    <div class="split-text">
+      <div class="section-label">Component Designer</div>
+      <h2>Build your own components. No design skills needed.</h2>
+      <p>Create custom isometric shapes for any hardware. Choose a base geometry, add icons, adjust colors, and build multi-layer complex components — all in the browser.</p>
+      <ul>
+        <li>Cuboid, cylinder, pyramid, hexagonal, octagon form factors</li>
+        <li>Multi-layer complex shapes for detailed equipment</li>
+        <li>2,500+ Carbon icons or upload your own SVGs</li>
+        <li>Export shapes as SVG files</li>
+      </ul>
+    </div>
+    <div class="split-visual">
+      [Mini-video or screenshot: Component Designer with the dual-pane canvas (2D + Isometric side by side), a custom server shape being edited with icon, color swatches, and dimension sliders. The shape preview updates in real time.]
+    </div>
+  </div>
+</section>
+
+<!-- ── SECURITY BANNER ───────────────────────────────────────────────── -->
+
+<div class="security-banner" id="security">
+  <h2>Your data never leaves your machine.</h2>
+  <p>Xyronos is a browser-based editor that stores everything locally. No cloud uploads, no accounts required for core editing, no third-party data access. Your infrastructure designs stay where they belong — with you.</p>
+
+  <div class="security-points">
+    <div class="security-point">
+      <div class="icon">🔒</div>
+      <h4>Local-first</h4>
+      <p>All data lives in your browser's local storage. Nothing is sent to a server.</p>
+    </div>
+    <div class="security-point">
+      <div class="icon">📁</div>
+      <h4>File-based export</h4>
+      <p>Save and load designs as local JSON files. Full control over your data.</p>
+    </div>
+    <div class="security-point">
+      <div class="icon">🛡️</div>
+      <h4>No telemetry</h4>
+      <p>No analytics, no tracking, no usage data collection. Private by design.</p>
+    </div>
+  </div>
+</div>
+
+<!-- ── CTA ────────────────────────────────────────────────────────────── -->
+
+<div class="cta">
+  <h2>Ready to model your infrastructure?</h2>
+  <p>Join early access and start building visual, structured, and calculable infrastructure models today.</p>
+
+  <form class="cta-form" onsubmit="return false;">
+    <input type="email" placeholder="Enter your email" aria-label="Email address"/>
+    <button type="submit">Get early access</button>
+  </form>
+</div>
+
+<!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
+
+<footer>
+  <span><span class="logo-icon" style="font-size:16px;margin-right:2px;vertical-align:middle;">view_object_track</span>Xyronos © 2026. All rights reserved.</span>
+  <div class="footer-links">
+    <a href="#">Privacy</a>
+    <a href="#">Terms</a>
+    <a href="#">GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

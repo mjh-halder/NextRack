@@ -1,8 +1,12 @@
 import IsometricShape from './isometric-shape';
 import { Computer, Database, Firewall, Switch, Router, KubernetesWorkerNode } from './index';
 import { Pyramid } from './pyramid/pyramid';
-import { Hexagonal } from './hexagonal/hexagonal';
 import { Octagon } from './octagon/octagon';
+import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape';
+
+const DEFAULT_CUSTOM_VERTS: [number, number][] = [
+    [0, 0], [1, 0], [1, 1], [0, 1],
+];
 
 /** Maps built-in shape ids to their native JointJS class factory. */
 export const SHAPE_FACTORIES: Record<string, () => IsometricShape> = {
@@ -29,8 +33,8 @@ export const FORM_FACTOR_PREVIEWS: Record<string, () => IsometricShape> = {
     'cuboid':    () => new Computer(),
     'cylinder':  () => new Database(),
     'pyramid':   () => new Pyramid(),
-    'hexagonal': () => new Hexagonal(),
     'octagon':   () => new Octagon(),
+    'custom':    () => { const s = new SvgPolygonShape(); s.set('normalizedVerts', DEFAULT_CUSTOM_VERTS); return s; },
 };
 
 /**

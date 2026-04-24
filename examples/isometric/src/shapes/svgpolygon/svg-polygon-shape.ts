@@ -92,29 +92,19 @@ export class SvgPolygonShape extends PolygonShape {
      */
     @Function()
     svgTopPath(): string {
-        const iH      = this.isometricHeight;
-        const shifted = this.baseVertices().map(
-            ([x, y]) => [x - iH, y - iH] as [number, number]
-        );
-        return this.footprintPath(shifted, 0);
+        const tv = this.topVertices();
+        if (this.chamferSize > 0) return this.chamferedFootprintPath(tv, this.chamferSize);
+        return this.footprintPath(tv, this.cornerRadius);
     }
 
-    /**
-     * Compound path of all visible side face parallelograms.
-     *
-     * For a clockwise-wound polygon (SVG y-down), the outward normal of edge
-     * i → j is (dy, -dx).  An edge is visible in isometric view when its
-     * outward normal has a positive projection onto the viewer direction (1, 1),
-     * i.e. when `normX + normY > 0`.
-     *
-     * All visible faces use the same fill (single-color side appearance).
-     * Reactive on `[size, isometricHeight, normalizedVerts]`.
-     */
     @Function()
     svgSideFacesPath(): string {
         const verts = this.baseVertices();
+        const tVerts = this.topVertices();
         const n     = verts.length;
-        const iH    = this.isometricHeight;
+        const c     = this.chamferSize;
+        const r     = this.cornerRadius;
+        const cs    = this.chamferStart;
         const parts: string[] = [];
 
         for (let i = 0; i < n; i++) {
@@ -122,21 +112,30 @@ export class SvgPolygonShape extends PolygonShape {
             const [x0, y0]  = verts[i];
             const [x1, y1]  = verts[j];
 
-            // Outward normal for CW winding: (y1−y0, −(x1−x0))
             const normX = y1 - y0;
             const normY = -(x1 - x0);
-
-            // Visible in isometric view: normal points toward (1, 1)
             if (normX + normY <= 0) continue;
 
-            // Parallelogram side face: base edge extruded upward by (-iH, -iH)
-            parts.push(
-                `M ${x0} ${y0} L ${x1} ${y1}` +
-                ` L ${x1 - iH} ${y1 - iH} L ${x0 - iH} ${y0 - iH} Z`
-            );
+            if (c > 0) {
+                parts.push(this.chamferedSideFacePath(i, j));
+                const facet = this.chamferedCornerFacetPath(j);
+                if (facet) parts.push(facet);
+            } else {
+                const [bx0, by0] = r > 0 ? this.arcExit(verts, i, r) : [x0, y0];
+                const [bx1, by1] = r > 0 ? this.arcEntry(verts, j, r) : [x1, y1];
+                const [tx0, ty0] = r > 0 ? this.arcExit(tVerts, i, r) : tVerts[i];
+                const [tx1, ty1] = r > 0 ? this.arcEntry(tVerts, j, r) : tVerts[j];
+                parts.push(
+                    `M ${bx0} ${by0} L ${bx1} ${by1}` +
+                    ` L ${tx1} ${ty1} L ${tx0} ${ty0} Z`
+                );
+                if (r > 0) {
+                    const cf = this.cornerFacePath(j);
+                    if (cf) parts.push(cf);
+                }
+            }
         }
 
-        // SVG requires a non-empty path string — 'M 0 0' renders nothing visible
         return parts.length > 0 ? parts.join(' ') : 'M 0 0';
     }
 }

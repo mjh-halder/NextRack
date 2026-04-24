@@ -27,7 +27,6 @@ import IsometricShape, {
 import { Computer } from './computer/computer';     // proxy for cuboid baseShape
 import { Database } from './database/database';     // proxy for cylinder baseShape
 import { Pyramid } from './pyramid/pyramid';
-import { Hexagonal } from './hexagonal/hexagonal';
 import { Octagon } from './octagon/octagon';
 import { KubernetesWorkerNode } from './kubernetes-worker-node/kubernetes-worker-node';
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape';
@@ -78,7 +77,6 @@ function makeProxy(layer: ShapeLayer): IsometricShape {
         switch (layer.baseShape) {
             case 'cylinder':  proxy = new Database();       break;
             case 'pyramid':   proxy = new Pyramid();        break;
-            case 'hexagonal': proxy = new Hexagonal();      break;
             case 'octagon':   proxy = new Octagon();        break;
             case 'hexahedron':
             case 'cuboid':
@@ -111,32 +109,18 @@ function isoFacesForLayer(layer: ShapeLayer): FaceDesc[] {
             { element: 'path', attrs: { d: proxy.svgTopPath(),       fill: fillFor(layer.style, 'top'),  ...commonStroke } },
         ];
     }
-    if (proxy instanceof Hexagonal) {
-        return [
-            { element: 'polygon', attrs: { points: proxy.bottomLeftFacePoints(),  fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'polygon', attrs: { points: proxy.bottomRightFacePoints(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'polygon', attrs: { points: proxy.lowerRightFacePoints(),  fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'polygon', attrs: { points: proxy.upperRightFacePoints(),  fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV5Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV4Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV3Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV2Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV1Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.topHexPath(),   fill: fillFor(layer.style, 'top'),   ...commonStroke } },
-        ];
-    }
     if (proxy instanceof Octagon) {
         return [
-            { element: 'polygon', attrs: { points: proxy.frontLeftPoints(),   fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'polygon', attrs: { points: proxy.frontBottomPoints(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'polygon', attrs: { points: proxy.frontRightPoints(),  fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'polygon', attrs: { points: proxy.rightFacePoints(),   fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV6Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV5Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV4Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV3Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.cornerV2Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.topOctagonPath(), fill: fillFor(layer.style, 'top'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.frontLeftFacePath(),   fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.frontBottomFacePath(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.frontRightFacePath(),  fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.rightFacePath(),       fill: fillFor(layer.style, 'side'),  ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.cornerV6Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.cornerV5Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.cornerV4Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.cornerV3Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.cornerV2Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.topOctagonPath(), fill: fillFor(layer.style, 'top'), ...commonStroke } },
         ];
     }
     if (proxy instanceof Pyramid) {
@@ -187,9 +171,6 @@ function twoDimFaceForLayer(layer: ShapeLayer): FaceDesc | null {
     }
     if (proxy instanceof SvgPolygonShape) {
         return { element: 'path', attrs: { d: proxy.svgBasePath(), fill, ...common } };
-    }
-    if (proxy instanceof Hexagonal) {
-        return { element: 'path', attrs: { d: proxy.baseHexPath(), fill, ...common } };
     }
     if (proxy instanceof Octagon) {
         return { element: 'path', attrs: { d: proxy.baseOctagonPath(), fill, ...common } };

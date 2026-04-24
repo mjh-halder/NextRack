@@ -1,8 +1,8 @@
 import { Model } from '@joint/decorators';
-import { dia } from '@joint/core';
+import { dia, elementTools } from '@joint/core';
 import svg from './frame.svg';
-import IsometricShape, { View } from '../isometric-shape';
-import { FrameCornerControl } from '../../tools';
+import IsometricShape, { View, CONNECT_KEY } from '../isometric-shape';
+import { FrameCornerControl, CONNECT_TOOL_PRESET } from '../../tools';
 import { GRID_SIZE } from '../../theme';
 
 const defaultSize = {
@@ -20,9 +20,9 @@ const defaultSize = {
 })
 export class Frame extends IsometricShape {
 
-    // Frames are not connection endpoints — disable tools and ports.
-    override tools = {};
-    protected override usePorts(): boolean { return false; }
+    override tools = {
+        [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
+    };
 
     override addTools(paper: dia.Paper, _view: View) {
         const toolView = new dia.ToolsView({

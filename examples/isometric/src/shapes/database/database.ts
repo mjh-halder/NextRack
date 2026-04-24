@@ -42,6 +42,16 @@ export class Database extends CylinderShape {
     topCenterY(): number {
         return this.topCenter.y;
     }
+
+    @Function()
+    topRx(): number {
+        return this.topEllipseRx;
+    }
+
+    @Function()
+    topRy(): number {
+        return this.topEllipseRy;
+    }
 }
 
 

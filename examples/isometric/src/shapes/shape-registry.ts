@@ -50,6 +50,8 @@ export interface ShapeDefinition {
     /** Background shape of the icon badge */
     iconBgShape?: 'circle' | 'square' | 'octagon';
     iconBgRadius?: number;
+    /** Octagon corner cut depth as fraction of size (0–0.45, default 0.18) */
+    iconBgChamfer?: number;
     /**
      * Pre-computed composite icon data URI (icon + coloured background).
      * Computed by the component designer at save time so the system designer
@@ -71,7 +73,13 @@ export interface ShapeDefinition {
     layers?: ShapeLayer[];
     cornerRadius?: number;
     chamferSize?: number;
+    chamferStart?: number;
     collection?: string;
+    customVerts?: [number, number][];
+    taper?: number;
+    twist?: number;
+    scaleTopX?: number;
+    scaleTopY?: number;
 }
 
 /**
@@ -83,10 +91,12 @@ const BUILT_IN_DEFAULTS: Record<string, ShapeDefinition> = {
     'firewall': {
         defaultSize: { width: GRID_SIZE * 3, height: GRID_SIZE },
         defaultIsometricHeight: GRID_SIZE * 2,
+        componentType: 'Firewall',
     },
     'switch': {
         defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
         defaultIsometricHeight: GRID_SIZE / 2,
+        componentType: 'Switch',
     },
     'router': {
         defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
@@ -95,10 +105,12 @@ const BUILT_IN_DEFAULTS: Record<string, ShapeDefinition> = {
     'computer': {
         defaultSize: { width: GRID_SIZE, height: GRID_SIZE * 2 },
         defaultIsometricHeight: GRID_SIZE * 2,
+        componentType: 'Server',
     },
     'database': {
         defaultSize: { width: GRID_SIZE, height: GRID_SIZE },
         defaultIsometricHeight: GRID_SIZE,
+        componentType: 'Storage',
     },
     'kubernetes-worker-node': {
         defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
@@ -186,12 +198,19 @@ export function loadRegistryFromStorage(): void {
             }
         }
 
-        // Defensive re-hydration: guarantee every built-in entry is always present.
-        // This repairs any stale localStorage state that may have overwritten a built-in
-        // with incomplete data, or any other unexpected corruption.
+        // Defensive re-hydration: guarantee every built-in entry has at least
+        // the canonical default values. Merges built-in defaults under the
+        // saved entry so user overrides are preserved but missing fields
+        // (e.g. componentType added after initial save) are filled in.
         for (const [id, defaults] of Object.entries(BUILT_IN_DEFAULTS)) {
             if (!ShapeRegistry[id]) {
                 ShapeRegistry[id] = defaults;
+            } else {
+                const merged = { ...defaults, ...ShapeRegistry[id] };
+                if (defaults.componentType && !merged.componentType) {
+                    merged.componentType = defaults.componentType;
+                }
+                ShapeRegistry[id] = merged;
             }
         }
     } catch (e) {

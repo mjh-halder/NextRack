@@ -20,7 +20,9 @@
     "@carbon/icons": "^11.78.0",
     "@carbon/styles": "^1.104.0",
     "@joint/core": "workspace:^",
-    "@joint/decorators": "workspace:^"
+    "@joint/decorators": "workspace:^",
+    "@joint/layout-directed-graph": "workspace:^",
+    "marked": "^15.0.0"
   },
   "devDependencies": {
     "css-loader": "^6.8.1",

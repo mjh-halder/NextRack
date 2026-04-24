@@ -4,7 +4,7 @@ import IsometricShape, { View } from './shapes/isometric-shape';
 import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, Frame, cellNamespace } from './shapes';
 import { sortElements, drawGrid, switchView, applyRegistryDefaults } from './utils';
 import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
-import { PropertyPanel, META_KEY } from './inspector';
+import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath } from './inspector';
 import { ShapeRegistry } from './shapes/shape-registry';
 import { ComponentPalette } from './palette';
 import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './persistence';
@@ -14,17 +14,20 @@ import {
 } from './canvas-store';
 import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
 import { initMinimap, updateMinimapView } from './minimap';
-import { initResourceBar, showResourceBar, hideResourceBar, showZoneHud, hideZoneHud } from './resource-bar';
+import { initResourceBar, showResourceBar, hideResourceBar, showZoneHud, hideZoneHud, detectStretchClusters } from './resource-bar';
+import { initAutoLayout, showLayoutBar, hideLayoutBar } from './auto-layout';
 import { initWorkloadTable, showWorkloadTable, hideWorkloadTable } from './workload-table';
 import { getCanvas } from './canvas-store';
 import { ViewToggle } from './view-toggle';
 import { AreaSelect } from './area-select';
 import { carbonIconToString, CarbonIcon } from './icons';
+import { FrameCornerControl } from './tools';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
 import BringToFront16 from '@carbon/icons/es/bring-to-front/16.js';
 import SendToBack16 from '@carbon/icons/es/send-to-back/16.js';
 import ConnectionSignalOff16 from '@carbon/icons/es/connection-signal--off/16.js';
+import ConnectionSignal16 from '@carbon/icons/es/connection-signal/16.js';
 
 // Inline Carbon SVG icons (16 × 16) used in the menu components
 const CDS_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 4.7l-.7-.7L8 7.3 4.7 4l-.7.7L7.3 8 4 11.3l.7.7L8 8.7l3.3 3.3.7-.7L8.7 8z"/></svg>`;
@@ -84,36 +87,125 @@ function cloneConnectedLinks(
     return clonedLinks;
 }
 
-function duplicateSelected() {
-    if (!currentCell || currentCell instanceof Link) return;
-    graph.startBatch('duplicate');
-    const offset = GRID_SIZE * 2;
-    const clone = currentCell.clone() as IsometricShape;
-    const { x, y } = currentCell.position();
+function duplicateSingleElement(cell: IsometricShape, offset: number, idMap: Map<string, string>): { clone: IsometricShape; children: IsometricShape[] } {
+    const clone = cell.clone() as IsometricShape;
+    const { x, y } = cell.position();
     clone.position(x + offset, y + offset);
     clone.toggleView(currentView);
+    idMap.set(cell.id as string, clone.id as string);
 
-    const childLayers = currentCell.get('componentRole') === 'base'
-        ? currentCell.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[]
+    const childLayers = cell.get('componentRole') === 'base'
+        ? cell.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[]
         : [];
-    const clonedChildren = childLayers.map(child => {
+    const children = childLayers.map(child => {
         const cc = child.clone() as IsometricShape;
         const { x: cx, y: cy } = child.position();
         cc.position(cx + offset, cy + offset);
         cc.toggleView(currentView);
+        idMap.set(child.id as string, cc.id as string);
         return cc;
     });
 
+    return { clone, children };
+}
+
+function duplicateWithLinks() {
+    if (!currentCell || currentCell instanceof Link) return;
+    graph.startBatch('duplicate');
+    const offset = GRID_SIZE * 2;
     const idMap = new Map<string, string>();
-    idMap.set(currentCell.id as string, clone.id as string);
-    for (let i = 0; i < childLayers.length; i++) {
-        idMap.set(childLayers[i].id as string, clonedChildren[i].id as string);
+    const { clone, children } = duplicateSingleElement(currentCell, offset, idMap);
+    const origChildren = currentCell.get('componentRole') === 'base'
+        ? currentCell.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[]
+        : [];
+
+    const clonedLinks: dia.Link[] = [];
+    const seen = new Set<string>();
+    const allOrigIds = new Set([currentCell.id as string, ...origChildren.map(c => c.id as string)]);
+    for (const el of [currentCell, ...origChildren]) {
+        for (const link of graph.getConnectedLinks(el)) {
+            const linkId = link.id as string;
+            if (seen.has(linkId)) continue;
+            seen.add(linkId);
+            const srcId = (link.source() as { id?: string }).id;
+            const tgtId = (link.target() as { id?: string }).id;
+            if (!srcId || !tgtId) continue;
+            const clonedLink = link.clone() as dia.Link;
+            const newSrcId = allOrigIds.has(srcId) ? (idMap.get(srcId) ?? srcId) : srcId;
+            const newTgtId = allOrigIds.has(tgtId) ? (idMap.get(tgtId) ?? tgtId) : tgtId;
+            clonedLink.source({ ...link.source() as object, id: newSrcId } as dia.Link.EndJSON);
+            clonedLink.target({ ...link.target() as object, id: newTgtId } as dia.Link.EndJSON);
+            const verts = clonedLink.vertices();
+            if (verts.length) {
+                clonedLink.vertices(verts.map(v => ({ x: v.x + offset, y: v.y + offset })));
+            }
+            clonedLinks.push(clonedLink);
+        }
     }
 
-    const clonedLinks = cloneConnectedLinks([currentCell, ...childLayers], idMap, offset);
+    graph.addCells([clone, ...children, ...clonedLinks]);
+    for (const cc of children) clone.embed(cc);
 
-    graph.addCells([clone, ...clonedChildren, ...clonedLinks]);
-    for (const cc of clonedChildren) clone.embed(cc);
+    paper.removeTools();
+    clone.addTools(paper, currentView, []);
+    panel.show(clone);
+    currentCell = clone;
+    graph.stopBatch('duplicate');
+    if (currentView === View.Isometric) sortElements(graph);
+}
+
+function duplicateSelected() {
+    // Multi-select: duplicate all selected elements
+    if (typeof areaSelect !== 'undefined' && areaSelect.hasSelection) {
+        const cells = areaSelect.selection.filter(c => c instanceof IsometricShape && !c.get('isFrame')) as IsometricShape[];
+        if (cells.length === 0) return;
+        graph.startBatch('duplicate');
+        const offset = GRID_SIZE * 2;
+        const idMap = new Map<string, string>();
+        const allOriginals: dia.Element[] = [];
+        const allClones: dia.Cell[] = [];
+
+        for (const cell of cells) {
+            const { clone, children } = duplicateSingleElement(cell, offset, idMap);
+            allOriginals.push(cell, ...cell.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[]);
+            allClones.push(clone, ...children);
+            // Embed children after adding to graph (done below)
+        }
+
+        const clonedLinks = cloneConnectedLinks(allOriginals as IsometricShape[], idMap, offset);
+        graph.addCells([...allClones, ...clonedLinks]);
+
+        // Re-embed child layers
+        for (const cell of cells) {
+            const cloneId = idMap.get(cell.id as string);
+            if (!cloneId) continue;
+            const clone = graph.getCell(cloneId) as IsometricShape;
+            const childLayers = cell.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[];
+            for (const child of childLayers) {
+                const ccId = idMap.get(child.id as string);
+                if (ccId) clone.embed(graph.getCell(ccId));
+            }
+        }
+
+        areaSelect.clear();
+        graph.stopBatch('duplicate');
+        if (currentView === View.Isometric) sortElements(graph);
+        return;
+    }
+
+    // Single-select: duplicate current cell
+    if (!currentCell || currentCell instanceof Link) return;
+    graph.startBatch('duplicate');
+    const offset = GRID_SIZE * 2;
+    const idMap = new Map<string, string>();
+    const { clone, children } = duplicateSingleElement(currentCell, offset, idMap);
+    const origChildren = currentCell.get('componentRole') === 'base'
+        ? currentCell.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[]
+        : [];
+    const clonedLinks = cloneConnectedLinks([currentCell, ...origChildren], idMap, offset);
+
+    graph.addCells([clone, ...children, ...clonedLinks]);
+    for (const cc of children) clone.embed(cc);
 
     paper.removeTools();
     clone.addTools(paper, currentView, []);
@@ -126,30 +218,73 @@ function duplicateSelected() {
 function duplicateZone(frame: Frame): void {
     graph.startBatch('duplicate');
     const offset = GRID_SIZE * 4;
-    const clonedFrame = frame.clone() as Frame;
-    const { x, y } = frame.position();
-    clonedFrame.position(x + offset, y + offset);
-
-    const embeddedElements = frame.getEmbeddedCells()
-        .filter(c => c instanceof IsometricShape && !c.get('isFrame')) as IsometricShape[];
-
     const idMap = new Map<string, string>();
-    const clonedChildren = embeddedElements.map(child => {
-        const clone = child.clone() as IsometricShape;
-        const { x: cx, y: cy } = child.position();
-        clone.position(cx + offset, cy + offset);
-        clone.toggleView(currentView);
-        idMap.set(child.id as string, clone.id as string);
-        return clone;
-    });
+    const allCells: dia.Cell[] = [];
+    const allOrigElements: IsometricShape[] = [];
 
-    const clonedLinks = cloneConnectedLinks(embeddedElements, idMap, offset);
+    function cloneZoneRecursive(srcFrame: Frame, parentClone: Frame | null): Frame {
+        const clonedFrame = srcFrame.clone() as Frame;
+        const { x, y } = srcFrame.position();
+        clonedFrame.position(x + offset, y + offset);
+        idMap.set(srcFrame.id as string, clonedFrame.id as string);
+        allCells.push(clonedFrame);
 
-    graph.addCells([clonedFrame, ...clonedChildren, ...clonedLinks]);
-    clonedFrame.toggleView(currentView);
-    for (const child of clonedChildren) {
-        clonedFrame.embed(child);
+        const embedded = srcFrame.getEmbeddedCells();
+
+        // Clone nested zones first (recursively)
+        const childFrames = embedded.filter(c => c.get('isFrame')) as Frame[];
+        for (const childFrame of childFrames) {
+            cloneZoneRecursive(childFrame, clonedFrame);
+        }
+
+        // Clone elements (non-zone, non-link)
+        const elements = embedded.filter(c => c instanceof IsometricShape && !c.get('isFrame')) as IsometricShape[];
+        for (const el of elements) {
+            const { clone, children } = duplicateSingleElement(el, offset, idMap);
+            allCells.push(clone, ...children);
+            allOrigElements.push(el);
+
+            const childLayers = el.get('componentRole') === 'base'
+                ? el.getEmbeddedCells().filter(c => c.get('componentRole') === 'child') as IsometricShape[]
+                : [];
+            allOrigElements.push(...childLayers);
+        }
+
+        return clonedFrame;
     }
+
+    const rootClone = cloneZoneRecursive(frame, null);
+    const clonedLinks = cloneConnectedLinks(allOrigElements, idMap, offset);
+    graph.addCells([...allCells, ...clonedLinks]);
+
+    // Re-establish parent-child embedding using the id map
+    function reEmbed(srcFrame: Frame) {
+        const clonedFrameId = idMap.get(srcFrame.id as string)!;
+        const clonedFrame = graph.getCell(clonedFrameId) as Frame;
+        clonedFrame.toggleView(currentView);
+
+        for (const child of srcFrame.getEmbeddedCells()) {
+            const clonedChildId = idMap.get(child.id as string);
+            if (clonedChildId) {
+                clonedFrame.embed(graph.getCell(clonedChildId));
+            }
+            if (child.get('isFrame')) {
+                reEmbed(child as Frame);
+            }
+            // Re-embed component child layers
+            if (child instanceof IsometricShape && child.get('componentRole') === 'base') {
+                const baseCloneId = idMap.get(child.id as string);
+                if (!baseCloneId) continue;
+                const baseClone = graph.getCell(baseCloneId);
+                for (const layerChild of child.getEmbeddedCells().filter(c => c.get('componentRole') === 'child')) {
+                    const layerCloneId = idMap.get(layerChild.id as string);
+                    if (layerCloneId) baseClone.embed(graph.getCell(layerCloneId));
+                }
+            }
+        }
+    }
+    reEmbed(frame);
+
     graph.stopBatch('duplicate');
     if (currentView === View.Isometric) sortElements(graph);
 }
@@ -168,6 +303,8 @@ const SIDEBAR_INSET = 276;
 const TREE_HIGHLIGHT_ID = 'tree-selection';
 const TREE_HIGHLIGHT_COLOR = HIGHLIGHT_COLOR;
 
+let syncZoomSlider: () => void = () => {};
+
 let currentView = View.Isometric;
 let currentCell: IsometricShape | Link = null;
 let currentZoom = 1;
@@ -178,6 +315,51 @@ let gridVEl: any = null;
 let gridVisible = true;
 let treeHighlightedCell: IsometricShape | null = null;
 let currentFrame: Frame | null = null;
+
+const CONN_HIGHLIGHT_ID = 'connection-highlight';
+const CONN_LINK_COLOR = '#ffffff';
+let connHighlightedLinks: dia.Link[] = [];
+let connHighlightedNodes: dia.Element[] = [];
+
+function highlightConnections(cell: IsometricShape): void {
+    clearConnectionHighlights();
+    const links = graph.getConnectedLinks(cell);
+    for (const link of links) {
+        if (link.attr('./display') === 'none') continue;
+        link.attr('line/stroke', CONN_LINK_COLOR);
+        link.attr('line/strokeWidth', 2);
+        connHighlightedLinks.push(link);
+
+        const srcId = (link.source() as { id?: string }).id;
+        const tgtId = (link.target() as { id?: string }).id;
+        const neighborId = srcId === (cell.id as string) ? tgtId : srcId;
+        if (neighborId) {
+            const neighbor = graph.getCell(neighborId);
+            if (neighbor && !neighbor.isLink()) {
+                const view = paper.findViewByModel(neighbor);
+                if (view) {
+                    highlighters.mask.add(view, 'base', CONN_HIGHLIGHT_ID, {
+                        layer: dia.Paper.Layers.BACK,
+                        attrs: { stroke: CONN_LINK_COLOR, 'stroke-width': 2, 'stroke-opacity': 0.4 }
+                    });
+                    connHighlightedNodes.push(neighbor as dia.Element);
+                }
+            }
+        }
+    }
+}
+
+function clearConnectionHighlights(): void {
+    const hadLinks = connHighlightedLinks.length > 0;
+    connHighlightedLinks = [];
+    if (hadLinks) styleClusterLinks();
+    for (const node of connHighlightedNodes) {
+        if (!node.graph) continue;
+        const view = paper.findViewByModel(node);
+        if (view) highlighters.mask.remove(view, CONN_HIGHLIGHT_ID);
+    }
+    connHighlightedNodes = [];
+}
 
 export const graph = new dia.Graph({}, { cellNamespace });
 
@@ -229,14 +411,17 @@ const paper = new dia.Paper({
     // and from being dropped on top of other elements
     restrictTranslate: (elementView) => {
         const element = elementView.model;
-        // Frames are not tracked as obstacles; they move freely within the canvas.
+        // Frames and their embedded children move freely.
         if (element.get('isFrame')) {
+            return (x: number, y: number) => ({ x: Math.max(0, x), y: Math.max(0, y) });
+        }
+        // Elements embedded in a frame bypass obstacle checks so they
+        // translate correctly when their parent zone is dragged.
+        if (element.getParentCell()?.get('isFrame')) {
             return (x: number, y: number) => ({ x: Math.max(0, x), y: Math.max(0, y) });
         }
         const isometricEl = element as IsometricShape;
         const { width, height } = isometricEl.size();
-        // a little memory allocation optimization
-        // we don't need to create a new rect on every call, we can reuse the same one
         const newBBox = new g.Rect();
         return function(x, y) {
             newBBox.update(x, y, width, height);
@@ -282,12 +467,17 @@ const paper = new dia.Paper({
     snapLinks: { radius: GRID_SIZE },
     cellViewNamespace: cellNamespace,
     defaultAnchor: { name: 'modelCenter' },
-    validateConnection: (_cellViewS, _magnetS, cellViewT, magnetT) => {
-        // Only allow connections that land on a port magnet — never on the
-        // element body. This prevents links from attaching to the model
-        // center when the user misses a port.
+    validateConnection: (cellViewS, _magnetS, cellViewT, magnetT) => {
+        if (!cellViewT) return false;
+        const targetModel = cellViewT.model;
+        const sourceModel = cellViewS?.model;
+        // Zone-to-zone connections: allow linking frame bodies directly
+        if (targetModel.get('isFrame') && sourceModel?.get('isFrame')) {
+            return targetModel.id !== sourceModel.id;
+        }
+        // Normal element connections require a port magnet
         if (!magnetT) return false;
-        const port = cellViewT?.findAttribute('port', magnetT);
+        const port = cellViewT.findAttribute('port', magnetT);
         return !!port;
     },
     highlighting: {
@@ -308,8 +498,8 @@ gridVEl = drawGrid(paper, GRID_COUNT, GRID_SIZE);
 
 // Canvas dimensions: sidebar inset on the left + grid content + extra whitespace on
 // the right and bottom so panning feels open with room on all sides.
-const CANVAS_H_PAD = 200;
-const CANVAS_V_PAD = 200;
+const CANVAS_H_PAD = 800;
+const CANVAS_V_PAD = 800;
 paper.setDimensions(
     SIDEBAR_INSET + 2 * GRID_SIZE * GRID_COUNT * SCALE * ISOMETRIC_SCALE + CANVAS_H_PAD,
     GRID_SIZE * GRID_COUNT * SCALE + CANVAS_V_PAD
@@ -320,10 +510,35 @@ ensureExampleCanvas();
 let activeCanvasId = getActiveCanvasId();
 loadCanvasGraph(activeCanvasId, graph);
 
+function toggleHideConnections(cell: IsometricShape): void {
+    const hidden = !cell.get('hideConnections');
+    cell.set('hideConnections', hidden);
+    const links = graph.getConnectedLinks(cell);
+    for (const link of links) {
+        const srcId = (link.source() as { id?: string }).id;
+        const tgtId = (link.target() as { id?: string }).id;
+        const srcHidden = srcId ? !!graph.getCell(srcId)?.get('hideConnections') : false;
+        const tgtHidden = tgtId ? !!graph.getCell(tgtId)?.get('hideConnections') : false;
+        link.attr('./display', (srcHidden || tgtHidden) ? 'none' : null);
+    }
+}
+
+function applyHideConnections(): void {
+    for (const link of graph.getLinks()) {
+        const srcId = (link.source() as { id?: string }).id;
+        const tgtId = (link.target() as { id?: string }).id;
+        const srcHidden = srcId ? !!graph.getCell(srcId)?.get('hideConnections') : false;
+        const tgtHidden = tgtId ? !!graph.getCell(tgtId)?.get('hideConnections') : false;
+        link.attr('./display', (srcHidden || tgtHidden) ? 'none' : null);
+    }
+}
+applyHideConnections();
+
 // Clean up selection when a cell is removed by any means (tool, keyboard, inspector)
 
 graph.on('remove', (cell: dia.Cell) => {
     if (currentCell && currentCell.id === cell.id) {
+        clearConnectionHighlights();
         currentCell = null;
         panel.hide();
     }
@@ -350,7 +565,11 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
         }
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
         e.preventDefault();
-        duplicateSelected();
+        if (currentFrame) {
+            duplicateZone(currentFrame);
+        } else {
+            duplicateSelected();
+        }
     } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -360,21 +579,24 @@ document.addEventListener('keydown', (e: KeyboardEvent) => {
     }
 });
 
-// Sort cells on position and size change
-
-graph.on('change:position change:size', () => {
+// Sort cells on position and size change — debounced to avoid O(n²) work per
+// pixel during drag. Fires once after the last change settles.
+let sortTimer: ReturnType<typeof setTimeout> | null = null;
+function debouncedSort() {
     if (currentView !== View.Isometric) return;
-    sortElements(graph);
-});
+    if (sortTimer) clearTimeout(sortTimer);
+    sortTimer = setTimeout(() => { sortTimer = null; sortElements(graph); }, 80);
+}
+
+graph.on('change:position change:size', debouncedSort);
 
 // Zoom via mouse wheel (blank and cell areas)
 
 function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
     evt.preventDefault();
-    // Clamp raw delta to ±1 so large trackpad swipes don't jump multiple steps.
-    // Use a small step (2%) for slow, precise zoom.
     const clampedDelta = Math.sign(delta) * Math.min(Math.abs(delta), 1);
-    const step = clampedDelta > 0 ? 1.02 : 1 / 1.02;
+    const pct = 0.04 + 0.06 * (1 - currentZoom / MAX_ZOOM);
+    const step = clampedDelta > 0 ? (1 + pct) : 1 / (1 + pct);
     const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * step));
     if (newZoom === currentZoom) return;
     const factor = newZoom / currentZoom;
@@ -391,6 +613,7 @@ function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
             .translate(-sx, -sy)
             .multiply(mx)
     );
+    syncZoomSlider();
 }
 
 // Zoom anchored to the centre of the usable viewport (header + sidebar excluded)
@@ -410,6 +633,7 @@ function applyMenuZoom(factor: number) {
             .translate(-sx, -sy)
             .multiply(mx)
     );
+    syncZoomSlider();
 }
 
 paper.on('blank:mousewheel', (evt: dia.Event, x: number, y: number, delta: number) => {
@@ -427,6 +651,7 @@ new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     currentZoom = 1;
     switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
     updateMinimapView(currentView, currentGridCountX);
+    syncZoomSlider();
 });
 
 switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
@@ -436,11 +661,176 @@ switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
 const minimapEl = document.getElementById('minimap') as HTMLDivElement;
 initMinimap(minimapEl, graph, paper);
 
+// ---- Zoom slider ----
+
+const zoomControlEl = document.getElementById('zoom-control') as HTMLDivElement;
+
+const zoomOutBtn = document.createElement('button');
+zoomOutBtn.type = 'button';
+zoomOutBtn.className = 'nr-zoom-btn';
+zoomOutBtn.setAttribute('aria-label', 'Zoom out');
+zoomOutBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M4 7h8v2H4z"/></svg>';
+zoomOutBtn.addEventListener('click', () => { applyMenuZoom(1 / 1.25); syncZoomSlider(); });
+
+const zoomSlider = document.createElement('input');
+zoomSlider.type = 'range';
+zoomSlider.className = 'nr-zoom-slider';
+zoomSlider.min = String(Math.log(MIN_ZOOM));
+zoomSlider.max = String(Math.log(MAX_ZOOM));
+zoomSlider.step = '0.01';
+zoomSlider.value = '0';
+zoomSlider.setAttribute('aria-label', 'Zoom');
+zoomSlider.addEventListener('input', () => {
+    const target = Math.exp(parseFloat(zoomSlider.value));
+    const factor = target / currentZoom;
+    applyMenuZoom(factor);
+    zoomLabel.textContent = Math.round(currentZoom * 100) + '%';
+});
+
+const zoomInBtn = document.createElement('button');
+zoomInBtn.type = 'button';
+zoomInBtn.className = 'nr-zoom-btn';
+zoomInBtn.setAttribute('aria-label', 'Zoom in');
+zoomInBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M11 7H9V4H7v3H4v2h3v3h2V9h3z"/></svg>';
+zoomInBtn.addEventListener('click', () => { applyMenuZoom(1.25); syncZoomSlider(); });
+
+const zoomLabel = document.createElement('span');
+zoomLabel.className = 'nr-zoom-label';
+zoomLabel.textContent = '100%';
+
+zoomControlEl.className = 'nr-zoom-control';
+zoomControlEl.appendChild(zoomOutBtn);
+zoomControlEl.appendChild(zoomSlider);
+zoomControlEl.appendChild(zoomInBtn);
+zoomControlEl.appendChild(zoomLabel);
+
+syncZoomSlider = () => {
+    zoomSlider.value = String(Math.log(currentZoom));
+    zoomLabel.textContent = Math.round(currentZoom * 100) + '%';
+};
+
 const workloadTableEl = document.getElementById('workload-table') as HTMLDivElement;
 initWorkloadTable(workloadTableEl);
 
 const resourceBarEl = document.getElementById('resource-bar') as HTMLDivElement;
 initResourceBar(resourceBarEl, graph);
+
+// ---- Stretch Cluster detection ----
+
+let lastClusters: ReturnType<typeof detectStretchClusters> = [];
+
+function refreshStretchClusters(): void {
+    lastClusters = detectStretchClusters(graph);
+    const clusterByZone = new Map<string, { label: string; color: string }>();
+
+    for (let i = 0; i < lastClusters.length; i++) {
+        const letter = String.fromCharCode(65 + (i % 26));
+        const defaultLabel = `Stretch Cluster ${letter}`;
+        const cluster = lastClusters[i];
+        for (const zoneId of cluster.zoneIds) {
+            const zone = graph.getCell(zoneId);
+            const color = (zone?.get('zoneColor') as string) || '#0072c3';
+            clusterByZone.set(zoneId, { label: defaultLabel, color });
+        }
+    }
+
+    for (const el of graph.getElements()) {
+        if (!el.get('isFrame')) continue;
+        const info = clusterByZone.get(el.id as string);
+        if (info) {
+            const customName = el.get('clusterName') as string | undefined;
+            const displayName = customName || info.label;
+            el.attr('badge/text', displayName);
+            el.attr('badge/fill', 'rgba(255,255,255,0.5)');
+            el.attr('badgeBg/fill', info.color);
+            el.attr('badgeGroup/display', null);
+            el.set('stretchCluster', info.label);
+
+            const badgePos = (el.get('badgeLabelPosition') as string) || 'top-right';
+            const bp = BADGE_POSITIONS[badgePos];
+            if (bp) {
+                el.attr('badgeGroup/transform', bp.groupTransform);
+            }
+            el.attr('badgeBg/d', badgeChamferPath(badgePos));
+        } else {
+            el.attr('badge/text', '');
+            el.attr('badgeGroup/display', 'none');
+            el.unset('stretchCluster');
+        }
+    }
+}
+
+function getStretchClusterForZone(zoneId: string): ReturnType<typeof detectStretchClusters>[0] | null {
+    for (const c of lastClusters) {
+        if (c.zoneIds.indexOf(zoneId) >= 0) return c;
+    }
+    return null;
+}
+
+function styleClusterLinks(): void {
+    for (const link of graph.getLinks()) {
+        const meta = link.get(LINK_META_KEY) as Record<string, unknown> | undefined;
+        const view = paper.findViewByModel(link);
+        if (meta?.linkType === 'Cluster Link') {
+            const srcId = (link.source() as { id?: string }).id;
+            const src = srcId ? graph.getCell(srcId) : null;
+            const color = (src?.get('zoneColor') as string) || '#0072c3';
+            link.attr('line/stroke', color);
+            link.attr('line/strokeWidth', 1.5);
+            link.attr('line/strokeDasharray', '8 4');
+            link.attr('line/targetMarker', { type: 'none' });
+            if (view) {
+                view.el.classList.add('nr-cluster-link');
+                view.el.style.setProperty('--nr-cluster-color', color);
+            }
+        } else {
+            link.attr('line/stroke', '#333333');
+            link.attr('line/strokeWidth', 1);
+            link.attr('line/strokeDasharray', null);
+            link.attr('line/targetMarker', { type: 'path', d: 'M 3 -4 L -3 0 L 3 4 z', fill: 'context-stroke', stroke: 'context-stroke' });
+            if (view) {
+                view.el.classList.remove('nr-cluster-link');
+                view.el.style.removeProperty('--nr-cluster-color');
+            }
+        }
+    }
+}
+
+graph.on('add remove change:source change:target change:linkMeta', () => {
+    refreshStretchClusters();
+    styleClusterLinks();
+});
+
+paper.on('render:done', () => {
+    styleClusterLinks();
+});
+
+// Auto-set link type when a new link's endpoints are both resolved.
+graph.on('change:source change:target', (cell: dia.Cell) => {
+    if (!cell.isLink()) return;
+    const link = cell as dia.Link;
+    const meta = link.get(LINK_META_KEY) as Record<string, unknown> | undefined;
+    if (meta?.linkType) return;
+    const srcId = (link.source() as { id?: string }).id;
+    const tgtId = (link.target() as { id?: string }).id;
+    if (!srcId || !tgtId) return;
+    const src = graph.getCell(srcId);
+    const tgt = graph.getCell(tgtId);
+    const type = (src?.get('isFrame') && tgt?.get('isFrame')) ? 'Cluster Link' : 'Host Access';
+    link.set(LINK_META_KEY, { ...(meta || {}), linkType: type });
+});
+
+const layoutBarEl = document.getElementById('layout-bar') as HTMLDivElement;
+initAutoLayout(
+    layoutBarEl,
+    graph,
+    () => currentView,
+    () => currentFrame,
+    () => (typeof areaSelect !== 'undefined' && areaSelect.hasSelection)
+        ? areaSelect.selection.filter(c => !c.isLink()) as dia.Element[]
+        : [],
+    () => ({ w: currentGridCountX, h: currentGridCountY }),
+);
 
 // ---- New Design ----
 
@@ -930,15 +1320,43 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
     // Tree item clicked — select the element on the canvas
     const cell = graph.getCell(cellId);
     if (!cell || !(cell instanceof IsometricShape) || cell.get('isFrame')) return;
+    clearConnectionHighlights();
     paper.removeTools();
     cell.addTools(paper, currentView, []);
     currentCell = cell;
     panel.show(cell);
     setTreeHighlight(cell);
+    highlightConnections(cell);
 });
 
 // Let the palette know which zone is selected so new components get embedded.
 palette.setActiveZoneGetter(() => currentFrame);
+
+// Right-click on element tree → open the same context menu as on the canvas.
+palette.setTreeContextMenuCallback((cellId, clientX, clientY) => {
+    const cell = graph.getCell(cellId);
+    if (!cell) return;
+    paper.removeTools();
+    if (cell.get('isFrame')) {
+        updateZoneAssignment(cell as Frame);
+        (cell as Frame).addTools(paper, currentView);
+        currentCell = null;
+        currentFrame = cell as Frame;
+        panel.showZone(cell as dia.Element);
+        const cluster = getStretchClusterForZone(cell.id as string);
+        showZoneHud(cell as dia.Element, cluster ? cluster.totals : undefined);
+        setTreeHighlight(null);
+    } else if (cell instanceof IsometricShape) {
+        const shape = resolveComponentBase(cell) as IsometricShape;
+        updateZoneAssignment(shape);
+        shape.addTools(paper, currentView, []);
+        currentCell = shape;
+        currentFrame = null;
+        panel.show(shape);
+        setTreeHighlight(shape);
+    }
+    showContextMenu(clientX, clientY, buildActionsForCurrentSelection());
+});
 
 // Canvas switching
 palette.setCanvasCallbacks(
@@ -968,6 +1386,7 @@ function switchCanvas(id: string): void {
         viewToggleContainerEl.style.display = 'none';
         minimapEl.style.display = 'none';
         hideResourceBar();
+        hideLayoutBar();
         hideWorkloadTable();
         showWorkloadTable(id);
     } else {
@@ -976,7 +1395,9 @@ function switchCanvas(id: string): void {
         viewToggleContainerEl.style.display = '';
         minimapEl.style.display = '';
         showResourceBar();
+        showLayoutBar();
         loadCanvasGraph(id, graph);
+        applyHideConnections();
         switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
         updateMinimapView(currentView, currentGridCountX);
     }
@@ -1154,12 +1575,22 @@ const areaSelect = new AreaSelect({
     canvasEl,
     resolveComponentBase,
     onSelectionChange: (cells) => {
-        if (cells.length > 0) {
-            paper.removeTools();
-            currentCell = null;
-            currentFrame = null;
+        paper.removeTools();
+        currentCell = null;
+        currentFrame = null;
+        setTreeHighlight(null);
+        if (cells.length === 0) {
             panel.hide();
-            setTreeHighlight(null);
+            return;
+        }
+        const zones = cells.filter(c => c.get('isFrame'));
+        if (zones.length >= 2 && zones.length === cells.length) {
+            panel.showMultiZone(zones as dia.Element[]);
+            for (const zone of zones) {
+                (zone as Frame).addTools(paper, currentView);
+            }
+        } else {
+            panel.hide();
         }
     },
     onGroupMoveEnd: (cells) => {
@@ -1171,6 +1602,13 @@ const areaSelect = new AreaSelect({
         if (currentView === View.Isometric) sortElements(graph);
     },
 });
+
+FrameCornerControl.getSiblingZones = (primary) => {
+    if (!areaSelect.hasSelection) return [];
+    const sel = areaSelect.selection;
+    if (!sel.some(c => String(c.id) === String(primary.id))) return [];
+    return sel.filter(c => c.get('isFrame') && String(c.id) !== String(primary.id)) as dia.Element[];
+};
 
 // When element-tree drag-drop targets a zone, tint the zone on the canvas
 // with the same orange used by the canvas drag highlight.
@@ -1251,6 +1689,7 @@ function updateZoneAssignment(element: IsometricShape): void {
 
 paper.on('link:pointerup', (linkView: dia.LinkView) => {
     areaSelect.clear();
+    clearConnectionHighlights();
     const link = linkView.model as Link;
     paper.removeTools();
     link.addTools(paper);
@@ -1306,16 +1745,16 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
 
     if (evt.shiftKey) {
         areaSelect.toggle(resolved);
-        paper.removeTools();
         currentCell = null;
         currentFrame = null;
-        panel.hide();
         setTreeHighlight(null);
+        clearConnectionHighlights();
         return;
     }
 
     if (areaSelect.hasSelection && areaSelect.isSelected(resolved)) return;
     areaSelect.clear();
+    clearConnectionHighlights();
 
     const model = elementView.model;
     paper.removeTools();
@@ -1325,7 +1764,8 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
         currentCell = null;
         currentFrame = model as Frame;
         panel.showZone(model);
-        showZoneHud(model);
+        const cluster = getStretchClusterForZone(model.id as string);
+        showZoneHud(model, cluster ? cluster.totals : undefined);
         setTreeHighlight(null);
         return;
     }
@@ -1338,6 +1778,7 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
     panel.show(shape);
     hideZoneHud();
     setTreeHighlight(shape);
+    highlightConnections(shape);
 });
 
 paper.on('blank:pointerdown', (_evt: dia.Event) => {
@@ -1349,6 +1790,7 @@ paper.on('blank:pointerdown', (_evt: dia.Event) => {
     panel.hide();
     hideZoneHud();
     setTreeHighlight(null);
+    clearConnectionHighlights();
 });
 
 // ── Context menu ──────────────────────────────────────────────────────────────
@@ -1374,6 +1816,7 @@ const CTX_ICON_DUPLICATE   = carbonIconToString(Copy16                as CarbonI
 const CTX_ICON_FRONT       = carbonIconToString(BringToFront16        as CarbonIcon);
 const CTX_ICON_BACK        = carbonIconToString(SendToBack16          as CarbonIcon);
 const CTX_ICON_DISCONNECT  = carbonIconToString(ConnectionSignalOff16 as CarbonIcon);
+const CTX_ICON_CONNECT     = carbonIconToString(ConnectionSignal16    as CarbonIcon);
 
 interface CtxAction {
     label: string;
@@ -1446,13 +1889,18 @@ function buildActionsForCurrentSelection(): CtxAction[] {
         );
     } else if (currentCell && !(currentCell instanceof Link)) {
         const cell = currentCell;
+        const isHidden = !!cell.get('hideConnections');
         actions.push(
-            { label: 'Duplicate',          icon: CTX_ICON_DUPLICATE,  run: duplicateSelected },
-            { label: 'Delete Connections', icon: CTX_ICON_DISCONNECT, run: () => {
+            { label: 'Duplicate',            icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
+            { label: 'Duplicate with Links', icon: CTX_ICON_DUPLICATE, run: duplicateWithLinks },
+            { label: isHidden ? 'Show Connections' : 'Hide Connections',
+              icon: isHidden ? CTX_ICON_CONNECT : CTX_ICON_DISCONNECT,
+              run: () => toggleHideConnections(cell) },
+            { label: 'Delete Connections',   icon: CTX_ICON_DISCONNECT, run: () => {
                 const links = graph.getConnectedLinks(cell);
                 for (const link of links) link.remove();
             }},
-            { label: 'Delete',             icon: CTX_ICON_DELETE,     run: deleteSelected    },
+            { label: 'Delete',               icon: CTX_ICON_DELETE,     run: deleteSelected    },
         );
     } else if (currentCell instanceof Link) {
         actions.push(
@@ -1474,6 +1922,8 @@ paper.on('element:contextmenu', (elementView: dia.ElementView, evt: dia.Event) =
         currentCell = null;
         currentFrame = model as Frame;
         panel.showZone(model);
+        const ctxCluster = getStretchClusterForZone(model.id as string);
+        showZoneHud(model, ctxCluster ? ctxCluster.totals : undefined);
         setTreeHighlight(null);
     } else {
         const shape = resolveComponentBase(model) as IsometricShape;
@@ -1600,6 +2050,7 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
         case 'view-fit':
             currentZoom = 1;
             switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
+            syncZoomSlider();
             break;
         case 'view-center':
             centerGridInViewport(currentGridCountX, currentGridCountY);

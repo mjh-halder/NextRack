@@ -28,6 +28,11 @@ export default class IsometricShape extends dia.Element<IsometricElementAttribut
 
     private currentPortView: PortView = 'isometric';
 
+    get taper(): number { return this.get('taper') ?? 0; }
+    get twist(): number { return this.get('twist') ?? 0; }
+    get scaleTopX(): number { return this.get('scaleTopX') ?? 1; }
+    get scaleTopY(): number { return this.get('scaleTopY') ?? 1; }
+
     constructor(...args: any[]) {
         super(...args);
         if (this.usePorts()) {
@@ -124,18 +129,53 @@ export abstract class PolygonShape extends IsometricShape {
         return this.get('cornerRadius') ?? 0;
     }
 
-    /**
-     * Bevel cut applied to the TOP face corners.
-     * The side faces' upper endpoints are derived from the chamfered top vertices,
-     * and short vertical rectangular facets fill the upper corner gaps.
-     * 0 = sharp corners everywhere.
-     */
     get chamferSize(): number {
         return this.get('chamferSize') ?? 0;
     }
 
+    /** Fraction (0–1) of the isometric height at which the chamfer starts.
+     *  0 = chamfer from base (legacy), 1 = chamfer only at top edge. */
+    get chamferStart(): number {
+        return this.get('chamferStart') ?? 0;
+    }
+
     /** Override in each subclass: clockwise [x, y] vertices of the 2D footprint. */
     abstract baseVertices(): Array<[number, number]>;
+
+    topVertices(): Array<[number, number]> {
+        const base = this.baseVertices();
+        const iH = this.isometricHeight;
+        const { width: w, height: h } = this.size();
+        const cx = w / 2;
+        const cy = h / 2;
+        const t = this.taper;
+        const tw = this.twist * Math.PI / 180;
+        const stx = this.scaleTopX;
+        const sty = this.scaleTopY;
+        const hasMod = t !== 0 || tw !== 0 || stx !== 1 || sty !== 1;
+
+        return base.map(([x, y]) => {
+            let tx = x - iH;
+            let ty = y - iH;
+            if (hasMod) {
+                let lx = x - cx;
+                let ly = y - cy;
+                lx *= stx * (1 - t);
+                ly *= sty * (1 - t);
+                if (tw !== 0) {
+                    const cos = Math.cos(tw);
+                    const sin = Math.sin(tw);
+                    const rx = lx * cos - ly * sin;
+                    const ry = lx * sin + ly * cos;
+                    lx = rx;
+                    ly = ry;
+                }
+                tx = cx + lx - iH;
+                ty = cy + ly - iH;
+            }
+            return [tx, ty] as [number, number];
+        });
+    }
 
     // ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -204,42 +244,39 @@ export abstract class PolygonShape extends IsometricShape {
      */
     protected straightFacePoints(i: number, j: number): string {
         const verts = this.baseVertices();
+        const tVerts = this.topVertices();
         const r  = this.cornerRadius;
-        const iH = this.isometricHeight;
         const [x0, y0] = this.arcExit(verts, i, r);
         const [x1, y1] = this.arcEntry(verts, j, r);
-        return `${x0},${y0} ${x1},${y1} ${x1 - iH},${y1 - iH} ${x0 - iH},${y0 - iH}`;
+        const [tx0, ty0] = this.arcExit(tVerts, i, r);
+        const [tx1, ty1] = this.arcEntry(tVerts, j, r);
+        return `${x0},${y0} ${x1},${y1} ${tx1},${ty1} ${tx0},${ty0}`;
     }
 
-    /**
-     * SVG path `d` for a straight parallelogram side face between edge i→j.
-     * Same geometry as straightFacePoints but as a path for use with <path d="">.
-     */
     protected straightFacePath(i: number, j: number): string {
         const verts = this.baseVertices();
+        const tVerts = this.topVertices();
         const r  = this.cornerRadius;
-        const iH = this.isometricHeight;
         const [x0, y0] = this.arcExit(verts, i, r);
         const [x1, y1] = this.arcEntry(verts, j, r);
-        return `M ${x0} ${y0} L ${x1} ${y1} L ${x1 - iH} ${y1 - iH} L ${x0 - iH} ${y0 - iH} Z`;
+        const [tx0, ty0] = this.arcExit(tVerts, i, r);
+        const [tx1, ty1] = this.arcEntry(tVerts, j, r);
+        return `M ${x0} ${y0} L ${x1} ${y1} L ${tx1} ${ty1} L ${tx0} ${ty0} Z`;
     }
 
-    /**
-     * SVG path `d` for the curved corner strip extruded from vertex i.
-     * Returns '' when r=0 — the <path> element renders nothing.
-     */
     protected cornerFacePath(i: number): string {
         const verts = this.baseVertices();
         const r  = this.cornerRadius;
         if (r <= 0) return '';
-        const iH = this.isometricHeight;
+        const tVerts = this.topVertices();
         const [ax, ay] = this.arcEntry(verts, i, r);
         const [bx, by] = this.arcExit(verts, i, r);
-        // Outline: entry → entry_top → (arc CW) → exit_top → exit → (arc CCW back) → close
+        const [tax, tay] = this.arcEntry(tVerts, i, r);
+        const [tbx, tby] = this.arcExit(tVerts, i, r);
         return [
             `M ${ax} ${ay}`,
-            `L ${ax - iH} ${ay - iH}`,
-            `A ${r} ${r} 0 0 1 ${bx - iH} ${by - iH}`,
+            `L ${tax} ${tay}`,
+            `A ${r} ${r} 0 0 1 ${tbx} ${tby}`,
             `L ${bx} ${by}`,
             `A ${r} ${r} 0 0 0 ${ax} ${ay}`,
             'Z',
@@ -283,41 +320,67 @@ export abstract class PolygonShape extends IsometricShape {
      * Top endpoints:    derived from the chamfered top face vertices, so the top
      *                   edge of each side face ends exactly at the chamfer-cut line.
      */
+    /** Intermediate vertices at chamferStart height — full cross-section shifted. */
+    private midVertices(): Array<[number, number]> {
+        const iH = this.isometricHeight;
+        const cs = this.chamferStart;
+        const shift = iH * cs;
+        return this.baseVertices().map(([x, y]) => [x - shift, y - shift] as [number, number]);
+    }
+
     protected chamferedSideFacePath(i: number, j: number): string {
         const verts = this.baseVertices();
         const c  = this.chamferSize;
         const r  = this.cornerRadius;
-        const iH = this.isometricHeight;
-        const topVerts = verts.map(([x, y]) => [x - iH, y - iH] as [number, number]);
-        const [x0, y0]   = this.arcExit(verts, i, r);
-        const [x1, y1]   = this.arcEntry(verts, j, r);
+        const cs = this.chamferStart;
+        const topVerts = this.topVertices();
         const [tx0, ty0] = this.arcExit(topVerts, i, c);
         const [tx1, ty1] = this.arcEntry(topVerts, j, c);
+
+        if (cs > 0) {
+            const midVerts = this.midVertices();
+            const [x0, y0]   = this.arcExit(verts, i, r);
+            const [x1, y1]   = this.arcEntry(verts, j, r);
+            const [mx0, my0] = this.arcExit(midVerts, i, r);
+            const [mx1, my1] = this.arcEntry(midVerts, j, r);
+            return `M ${x0} ${y0} L ${x1} ${y1} L ${mx1} ${my1} L ${tx1} ${ty1} L ${tx0} ${ty0} L ${mx0} ${my0} Z`;
+        }
+
+        const [x0, y0] = this.arcExit(verts, i, r);
+        const [x1, y1] = this.arcEntry(verts, j, r);
         return `M ${x0} ${y0} L ${x1} ${y1} L ${tx1} ${ty1} L ${tx0} ${ty0} Z`;
     }
 
-    /**
-     * SVG path for the short vertical rectangular facet at chamfered upper corner i.
-     *
-     * The two top vertices are the chamfer-cut endpoints on the top face at corner i.
-     * The two bottom vertices are those points translated DOWN by (+iH, +iH), which
-     * lands them exactly on the corresponding base-vertex clip points.
-     *
-     * Returns '' when chamferSize = 0 — the <path> renders nothing.
-     */
     protected chamferedCornerFacetPath(i: number): string {
-        const verts = this.baseVertices();
         const c = this.chamferSize;
         if (c <= 0) return '';
-        const iH = this.isometricHeight;
-        const topVerts = verts.map(([x, y]) => [x - iH, y - iH] as [number, number]);
+        const r  = this.cornerRadius;
+        const cs = this.chamferStart;
+        const topVerts = this.topVertices();
         const [ax, ay] = this.arcEntry(topVerts, i, c);
         const [bx, by] = this.arcExit(topVerts, i, c);
+
+        if (cs > 0) {
+            const midVerts = this.midVertices();
+            const [mex, mey] = this.arcEntry(midVerts, i, r);
+            const [mxx, mxy] = this.arcExit(midVerts, i, r);
+            return [
+                `M ${ax} ${ay}`,
+                `L ${bx} ${by}`,
+                `L ${mxx} ${mxy}`,
+                `L ${mex} ${mey}`,
+                'Z',
+            ].join(' ');
+        }
+
+        const verts = this.baseVertices();
+        const baseEntry = this.arcEntry(verts, i, r);
+        const baseExit = this.arcExit(verts, i, r);
         return [
             `M ${ax} ${ay}`,
             `L ${bx} ${by}`,
-            `L ${bx + iH} ${by + iH}`,
-            `L ${ax + iH} ${ay + iH}`,
+            `L ${baseExit[0]} ${baseExit[1]}`,
+            `L ${baseEntry[0]} ${baseEntry[1]}`,
             'Z',
         ].join(' ');
     }
@@ -365,10 +428,9 @@ export class CuboidShape extends PolygonShape {
      * Chamfered when chamferSize > 0; falls back to cornerRadius otherwise.
      */
     topCuboidPath(): string {
-        const iH = this.isometricHeight;
-        const shifted = this.baseVertices().map(([x, y]) => [x - iH, y - iH] as [number, number]);
-        if (this.chamferSize > 0) return this.chamferedFootprintPath(shifted, this.chamferSize);
-        return this.footprintPath(shifted, this.cornerRadius);
+        const tv = this.topVertices();
+        if (this.chamferSize > 0) return this.chamferedFootprintPath(tv, this.chamferSize);
+        return this.footprintPath(tv, this.cornerRadius);
     }
 
     /**
@@ -430,21 +492,44 @@ export class CylinderShape extends IsometricShape {
         }
     }
 
+    get topEllipseRx(): number {
+        const { width } = this.size();
+        return (width / 2) * this.scaleTopX * (1 - this.taper);
+    }
+
+    get topEllipseRy(): number {
+        const { height } = this.size();
+        return (height / 2) * this.scaleTopY * (1 - this.taper);
+    }
+
     get sideData(): string {
         const { width, height } = this.size();
-        const baseRect = new g.Rect(0, 0, width, height);
+        const iH = this.isometricHeight;
+        const cx = width / 2;
+        const cy = height / 2;
 
+        const baseRect = new g.Rect(0, 0, width, height);
         const baseDiagonal = new g.Line(baseRect.bottomLeft(), baseRect.topRight());
         const base = g.Ellipse.fromRect(baseRect);
         const [bottomLeftIntersection, bottomRightIntersection] = baseDiagonal.intersect(base);
 
-        const topLeftIntersection = bottomLeftIntersection.clone().translate(-this.isometricHeight, -this.isometricHeight);
-        const topRightIntersection = topLeftIntersection.reflection(this.topCenter);
+        const trx = this.topEllipseRx;
+        const try_ = this.topEllipseRy;
+        const tcx = cx - iH;
+        const tcy = cy - iH;
+        const topEllipse = new g.Ellipse(new g.Point(tcx, tcy), trx, try_);
+        const topDiag = new g.Line(
+            new g.Point(tcx - trx, tcy + try_),
+            new g.Point(tcx + trx, tcy - try_)
+        );
+        const topIntersections = topDiag.intersect(topEllipse);
+        const topLeft = topIntersections?.[0] ?? new g.Point(tcx - trx, tcy);
+        const topRight = topIntersections?.[1] ?? new g.Point(tcx + trx, tcy);
 
         return `
             M ${bottomLeftIntersection.x} ${bottomLeftIntersection.y}
-            L ${topLeftIntersection.x} ${topLeftIntersection.y}
-            L ${topRightIntersection.x} ${topRightIntersection.y}
+            L ${topLeft.x} ${topLeft.y}
+            L ${topRight.x} ${topRight.y}
             L ${bottomRightIntersection.x} ${bottomRightIntersection.y}
         `;
     }

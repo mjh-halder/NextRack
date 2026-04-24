@@ -11,7 +11,6 @@ import { Firewall } from './firewall/firewall'
 import { Frame } from './frame/frame'
 import { KubernetesWorkerNode } from './kubernetes-worker-node/kubernetes-worker-node'
 import { Pyramid } from './pyramid/pyramid'
-import { Hexagonal } from './hexagonal/hexagonal'
 import { Octagon } from './octagon/octagon'
 import { Hexahedron } from './hexahedron/hexahedron'
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape'
@@ -30,7 +29,6 @@ export const cellNamespace = {
     Frame,
     KubernetesWorkerNode,
     Pyramid,
-    Hexagonal,
     Octagon,
     Hexahedron,
     SvgPolygonShape,
@@ -54,7 +52,6 @@ export {
     Frame,
     KubernetesWorkerNode,
     Pyramid,
-    Hexagonal,
     Octagon,
     Hexahedron,
     SvgPolygonShape,

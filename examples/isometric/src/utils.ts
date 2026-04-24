@@ -221,6 +221,16 @@ export function applyRegistryDefaults(
     if (defaults.chamferSize != null) {
         shape.set('chamferSize', defaults.chamferSize);
     }
+    if (defaults.chamferStart != null) {
+        shape.set('chamferStart', defaults.chamferStart);
+    }
+    if (defaults.customVerts) {
+        shape.set('normalizedVerts', defaults.customVerts);
+    }
+    if (defaults.taper != null) shape.set('taper', defaults.taper);
+    if (defaults.twist != null) shape.set('twist', defaults.twist);
+    if (defaults.scaleTopX != null) shape.set('scaleTopX', defaults.scaleTopX);
+    if (defaults.scaleTopY != null) shape.set('scaleTopY', defaults.scaleTopY);
 
     // ── Label ────────────────────────────────────────────────────────────────
     // Do not overwrite a user-set name with the registry default.

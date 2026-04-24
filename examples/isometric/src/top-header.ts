@@ -201,9 +201,18 @@ export function initTopHeader(
     const left = document.createElement('div');
     left.className = 'nr-header-left';
 
-    const appName = document.createElement('span');
+    const appName = document.createElement('a');
     appName.className = 'nr-header-app-name';
-    appName.textContent = 'Xyronos';
+    appName.href = 'landing.html';
+
+    const appIcon = document.createElement('span');
+    appIcon.className = 'nr-header-app-icon';
+    appIcon.textContent = 'view_object_track';
+    appName.appendChild(appIcon);
+
+    const appLabel = document.createElement('span');
+    appLabel.textContent = 'Xyronos';
+    appName.appendChild(appLabel);
 
     const docName = document.createElement('span');
     docName.className = 'nr-header-doc-name';

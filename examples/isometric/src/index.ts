@@ -7,6 +7,7 @@ import { initTopHeader } from './top-header';
 import { initAdmin } from './admin';
 import { initDataModel } from './data-model';
 import { initProductCatalog } from './product-catalog';
+import { initKnowledgeBase, navigateToTopic } from './docs/knowledge-base';
 import { initAppDesigner } from './app-designer';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Sun20 from '@carbon/icons/es/sun/20.js';
@@ -51,10 +52,12 @@ const navGridBtn      = document.getElementById('nav-grid')            as HTMLBu
 const navShapesBtn    = document.getElementById('nav-shapes')          as HTMLButtonElement;
 const navAppsBtn      = document.getElementById('nav-apps')            as HTMLButtonElement;
 const navCatalogBtn   = document.getElementById('nav-catalog')         as HTMLButtonElement;
+const navDocsBtn      = document.getElementById('nav-docs')            as HTMLButtonElement;
 const navAdminBtn     = document.getElementById('nav-admin')           as HTMLButtonElement;
 const cdEl            = document.getElementById('component-designer')  as HTMLDivElement;
 const appDesignerEl   = document.getElementById('app-designer')        as HTMLDivElement;
 const catalogEl       = document.getElementById('product-catalog')     as HTMLDivElement;
+const kbEl            = document.getElementById('knowledge-base')      as HTMLDivElement;
 const adminEl         = document.getElementById('admin')               as HTMLDivElement;
 
 navAdminBtn.innerHTML = SETTINGS_SVG;
@@ -63,14 +66,16 @@ initAdmin(adminEl);
 initDataModel(document.getElementById('data-model') as HTMLDivElement);
 initProductCatalog(catalogEl);
 initAppDesigner(appDesignerEl);
+initKnowledgeBase(kbEl);
 
-type AppView = 'grid' | 'shapes' | 'apps' | 'catalog' | 'admin';
+type AppView = 'grid' | 'shapes' | 'apps' | 'catalog' | 'docs' | 'admin';
 
 function setAppView(view: AppView) {
     const isGrid    = view === 'grid';
     const isShapes  = view === 'shapes';
     const isApps    = view === 'apps';
     const isCatalog = view === 'catalog';
+    const isDocs    = view === 'docs';
     const isAdmin   = view === 'admin';
 
     navGridBtn.classList.toggle('nr-rail-item--active', isGrid);
@@ -81,6 +86,8 @@ function setAppView(view: AppView) {
     navAppsBtn.setAttribute('aria-current', isApps ? 'page' : 'false');
     navCatalogBtn.classList.toggle('nr-rail-item--active', isCatalog);
     navCatalogBtn.setAttribute('aria-current', isCatalog ? 'page' : 'false');
+    navDocsBtn.classList.toggle('nr-rail-item--active', isDocs);
+    navDocsBtn.setAttribute('aria-current', isDocs ? 'page' : 'false');
     navAdminBtn.classList.toggle('nr-rail-item--active', isAdmin);
     navAdminBtn.setAttribute('aria-current', isAdmin ? 'page' : 'false');
 
@@ -90,6 +97,7 @@ function setAppView(view: AppView) {
     viewToggleContainerEl.style.display = isGrid ? '' : 'none';
     (document.getElementById('minimap') as HTMLElement).style.display = isGrid ? '' : 'none';
     (document.getElementById('resource-bar') as HTMLElement).style.display = isGrid ? '' : 'none';
+    (document.getElementById('layout-bar') as HTMLElement).style.display = isGrid ? '' : 'none';
     if (!isGrid) {
         designNameEl.style.display = 'none';
         (document.getElementById('workload-table') as HTMLElement).style.display = 'none';
@@ -107,6 +115,10 @@ function setAppView(view: AppView) {
     catalogEl.setAttribute('aria-hidden', String(!isCatalog));
     catalogEl.style.display = isCatalog ? 'flex' : 'none';
 
+    // Knowledge Base
+    kbEl.setAttribute('aria-hidden', String(!isDocs));
+    kbEl.style.display = isDocs ? 'flex' : 'none';
+
     // Admin
     adminEl.setAttribute('aria-hidden', String(!isAdmin));
     adminEl.style.display = isAdmin ? 'flex' : 'none';
@@ -120,11 +132,17 @@ navGridBtn.addEventListener('click',      () => setAppView('grid'));
 navShapesBtn.addEventListener('click',    () => setAppView('shapes'));
 navAppsBtn.addEventListener('click',      () => setAppView('apps'));
 navCatalogBtn.addEventListener('click',   () => setAppView('catalog'));
+navDocsBtn.addEventListener('click',      () => setAppView('docs'));
 navAdminBtn.addEventListener('click',     () => setAppView('admin'));
 
 document.addEventListener('nextrack:navigate-to-shape', ((e: CustomEvent<{ shapeId: string }>) => {
     selectShape(e.detail.shapeId);
     setAppView('shapes');
+}) as EventListener);
+
+document.addEventListener('nextrack:open-docs', ((e: CustomEvent<{ topic: string }>) => {
+    navigateToTopic(e.detail.topic);
+    setAppView('docs');
 }) as EventListener);
 
 // ---- Top header ----

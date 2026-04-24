@@ -9,63 +9,52 @@
         stroke-linejoin="round"
     />
 
-    <!-- ISO: front-facing side faces (light gray) — drawn first -->
-    <polygon @selector="frontLeft" @group-selector="iso"
-        :points="{{frontLeftPoints([size, isometricHeight, cornerRadius])}}"
-        fill="#e0e0e0"
-        stroke="#333"
-        stroke-linejoin="round"
+    <path @selector="frontLeft" @group-selector="iso"
+        :d="{{frontLeftFacePath([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
+        fill="#e0e0e0" stroke="#333" stroke-linejoin="round"
     />
-    <polygon @selector="frontBottom" @group-selector="iso"
-        :points="{{frontBottomPoints([size, isometricHeight, cornerRadius])}}"
-        fill="#e0e0e0"
-        stroke="#333"
-        stroke-linejoin="round"
+    <path @selector="frontBottom" @group-selector="iso"
+        :d="{{frontBottomFacePath([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
+        fill="#e0e0e0" stroke="#333" stroke-linejoin="round"
     />
-    <polygon @selector="frontRight" @group-selector="iso"
-        :points="{{frontRightPoints([size, isometricHeight, cornerRadius])}}"
-        fill="#e0e0e0"
-        stroke="#333"
-        stroke-linejoin="round"
+    <path @selector="frontRight" @group-selector="iso"
+        :d="{{frontRightFacePath([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
+        fill="#e0e0e0" stroke="#333" stroke-linejoin="round"
     />
-
-    <!-- ISO: right-facing face (medium gray) — rendered over front faces -->
-    <polygon @selector="side" @group-selector="iso"
-        :points="{{rightFacePoints([size, isometricHeight, cornerRadius])}}"
-        fill="#c6c6c6"
-        stroke="#333"
-        stroke-linejoin="round"
+    <path @selector="side" @group-selector="iso"
+        :d="{{rightFacePath([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
+        fill="#c6c6c6" stroke="#333" stroke-linejoin="round"
     />
 
     <!-- ISO: corner side panels — rendered before top face.
          V5, V4, V6 are front-facing; V3 is the right/front transition;
          V2 is right-facing. V7, V0, V1 (fully hidden) are not rendered. -->
     <path @selector="cornerV6" @group-selector="iso"
-        :d="{{cornerV6Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV6Path([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
     <path @selector="cornerV5" @group-selector="iso"
-        :d="{{cornerV5Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV5Path([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
     <path @selector="cornerV4" @group-selector="iso"
-        :d="{{cornerV4Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV4Path([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
     />
     <path @selector="cornerV3" @group-selector="iso"
-        :d="{{cornerV3Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV3Path([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
     />
     <path @selector="cornerV2" @group-selector="iso"
-        :d="{{cornerV2Path([size, isometricHeight, cornerRadius])}}"
+        :d="{{cornerV2Path([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
@@ -73,7 +62,7 @@
 
     <!-- ISO: top octagonal face — rendered last, on top of all side faces -->
     <path @selector="top" @group-selector="iso"
-        :d="{{topOctagonPath([size, isometricHeight, cornerRadius])}}"
+        :d="{{topOctagonPath([size, isometricHeight, cornerRadius, chamferSize, chamferStart, taper, twist, scaleTopX, scaleTopY])}}"
         fill="#a8a8a8"
         stroke="#333"
         stroke-linejoin="round"
