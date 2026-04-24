@@ -5,7 +5,8 @@
 // Wiring: initAdmin() is called once from index.ts. show()/hide() are driven by
 // the app-level view switcher in index.ts.
 
-import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon } from './icon-catalog';
+import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon, addAwsIcons, removeAllAwsIcons, getAwsIconCount } from './icon-catalog';
+import { unzipSync } from 'fflate';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Edit16 from '@carbon/icons/es/edit/16.js';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
@@ -453,6 +454,86 @@ function renderIconConfig(container: HTMLElement): void {
     uploadRow.appendChild(uploadLabel);
     container.appendChild(uploadRow);
 
+    // AWS icon pack upload
+    const awsRow = document.createElement('div');
+    awsRow.className = 'nr-admin__upload-row';
+    awsRow.style.gap = '8px';
+
+    const awsFileInput = document.createElement('input');
+    awsFileInput.type = 'file';
+    awsFileInput.accept = '.zip,application/zip';
+    awsFileInput.style.display = 'none';
+    awsFileInput.id = 'nr-admin-aws-upload';
+
+    const awsStatus = document.createElement('span');
+    awsStatus.className = 'nr-admin__aws-status';
+    const awsCount = getAwsIconCount();
+    awsStatus.textContent = awsCount > 0 ? `${awsCount} AWS icons loaded` : '';
+
+    awsFileInput.addEventListener('change', async () => {
+        const file = awsFileInput.files?.[0];
+        if (!file) return;
+        awsStatus.textContent = 'Extracting…';
+        try {
+            const buf = await file.arrayBuffer();
+            const unzipped = unzipSync(new Uint8Array(buf));
+            const entries: Array<{ label: string; svg: string }> = [];
+            for (const [path, data] of Object.entries(unzipped)) {
+                if (!path.endsWith('.svg')) continue;
+                if (path.startsWith('__MACOSX')) continue;
+                const name = path.split('/').pop()!.replace(/\.svg$/, '');
+                let svg = new TextDecoder().decode(data);
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(svg, 'image/svg+xml');
+                const svgEl = doc.querySelector('svg');
+                if (svgEl) {
+                    if (!svgEl.getAttribute('viewBox')) {
+                        const w = svgEl.getAttribute('width') || '80';
+                        const h = svgEl.getAttribute('height') || '80';
+                        svgEl.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(h)}`);
+                    }
+                    svgEl.removeAttribute('width');
+                    svgEl.removeAttribute('height');
+                    svg = new XMLSerializer().serializeToString(svgEl);
+                }
+                entries.push({ label: name, svg });
+            }
+            const added = addAwsIcons(entries);
+            awsStatus.textContent = `${added} new icons imported (${getAwsIconCount()} total)`;
+            renderSections();
+        } catch (e) {
+            awsStatus.textContent = 'Failed to extract ZIP';
+            console.error('[nextrack] AWS ZIP import failed:', e);
+        }
+        awsFileInput.value = '';
+    });
+
+    const awsUploadLabel = document.createElement('label');
+    awsUploadLabel.className = 'nr-admin__upload-btn';
+    awsUploadLabel.setAttribute('for', 'nr-admin-aws-upload');
+    awsUploadLabel.textContent = 'Upload AWS Icons (ZIP)';
+    awsUploadLabel.setAttribute('role', 'button');
+    awsUploadLabel.tabIndex = 0;
+    awsUploadLabel.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') awsFileInput.click(); });
+
+    const awsRemoveBtn = document.createElement('button');
+    awsRemoveBtn.type = 'button';
+    awsRemoveBtn.className = 'nr-admin__upload-btn nr-admin__upload-btn--danger';
+    awsRemoveBtn.textContent = 'Remove all AWS Icons';
+    awsRemoveBtn.style.display = awsCount > 0 ? '' : 'none';
+    awsRemoveBtn.addEventListener('click', () => {
+        const removed = removeAllAwsIcons();
+        awsStatus.textContent = `${removed} AWS icons removed`;
+        awsRemoveBtn.style.display = 'none';
+        renderSections();
+    });
+
+    awsRow.appendChild(awsFileInput);
+    awsRow.appendChild(awsUploadLabel);
+    awsRow.appendChild(awsRemoveBtn);
+    awsRow.appendChild(awsStatus);
+    container.appendChild(awsRow);
+
     // Search input (sticky at the top of the content area).
     const searchWrap = document.createElement('div');
     searchWrap.className = 'nr-admin__search';
@@ -489,10 +570,13 @@ function buildSections(host: HTMLElement): void {
     const term = iconSearchTerm.trim();
 
     const general = ICON_CATALOG.filter(i =>
-        cfg[i.id] === 'general' && matchesSearch(i, term)
+        cfg[i.id] === 'general' && i.source !== 'aws' && matchesSearch(i, term)
     );
     const complexOnly = ICON_CATALOG.filter(i =>
-        cfg[i.id] === 'complex-only' && matchesSearch(i, term)
+        cfg[i.id] === 'complex-only' && i.source !== 'aws' && matchesSearch(i, term)
+    );
+    const awsIcons = ICON_CATALOG.filter(i =>
+        i.source === 'aws' && matchesSearch(i, term)
     );
 
     host.appendChild(buildSection({
@@ -512,6 +596,17 @@ function buildSections(host: HTMLElement): void {
         primaryTarget: 'general',
         showRemove: true,
     }));
+
+    if (awsIcons.length > 0 || getAwsIconCount() > 0) {
+        host.appendChild(buildSection({
+            title: `AWS Icons (${getAwsIconCount()})`,
+            helper: 'Imported from AWS icon pack. Managed separately — use "Remove all AWS Icons" above to clear.',
+            icons: awsIcons,
+            emptyText: term ? 'No AWS icons match the search.' : 'No AWS icons loaded.',
+            primaryTarget: null,
+            showRemove: false,
+        }));
+    }
 
     host.appendChild(buildAvailableSection(cfg, term));
 }
@@ -589,7 +684,7 @@ interface SectionConfig {
     helper: string;
     icons: ReadonlyArray<IconCatalogEntry>;
     emptyText: string;
-    primaryTarget: IconScope;
+    primaryTarget: IconScope | null;
     showRemove: boolean;
 }
 
@@ -629,14 +724,22 @@ function buildSection(cfg: SectionConfig): HTMLElement {
     grid.className = 'nr-admin__icon-compact-grid';
 
     for (const icon of cfg.icons) {
-        const targetLabel = cfg.primaryTarget === 'general'
-            ? 'Move to General Component Icons'
-            : 'Move to Additional Complex Shape Icons';
-        grid.appendChild(buildTile(icon, {
-            titleAction: targetLabel,
-            onClick:     () => toggleAndRerender(icon.id, cfg.primaryTarget),
-            showRemove:  cfg.showRemove,
-        }));
+        if (cfg.primaryTarget === null) {
+            grid.appendChild(buildTile(icon, {
+                titleAction: icon.label,
+                onClick:     null,
+                showRemove:  false,
+            }));
+        } else {
+            const targetLabel = cfg.primaryTarget === 'general'
+                ? 'Move to General Component Icons'
+                : 'Move to Additional Complex Shape Icons';
+            grid.appendChild(buildTile(icon, {
+                titleAction: targetLabel,
+                onClick:     () => toggleAndRerender(icon.id, cfg.primaryTarget!),
+                showRemove:  cfg.showRemove,
+            }));
+        }
     }
 
     section.appendChild(grid);
@@ -645,7 +748,7 @@ function buildSection(cfg: SectionConfig): HTMLElement {
 
 interface TileConfig {
     titleAction: string;
-    onClick:     () => void;
+    onClick:     (() => void) | null;
     showRemove:  boolean;
 }
 
@@ -669,7 +772,8 @@ function buildTile(icon: IconCatalogEntry, tcfg: TileConfig): HTMLElement {
     label.textContent = icon.label;
     tile.appendChild(label);
 
-    tile.addEventListener('click', tcfg.onClick);
+    if (tcfg.onClick) tile.addEventListener('click', tcfg.onClick);
+    else tile.style.cursor = 'default';
     wrap.appendChild(tile);
 
     if (tcfg.showRemove) {

@@ -8,7 +8,8 @@ function bakeIconHref(def: ShapeDefinition): string | undefined {
     const entry = getIconById(def.icon);
     if (!entry) return undefined;
     const S = 64;
-    const pad = 13;
+    const isAws = entry.source === 'aws';
+    const pad = isAws ? 3 : 13;
     const inner = S - 2 * pad;
     const bgColor = def.iconBgColor ?? null;
     const bgShape = def.iconBgShape ?? 'circle';
@@ -21,8 +22,10 @@ function bakeIconHref(def: ShapeDefinition): string | undefined {
         else bgEl = `<rect width="${S}" height="${S}" rx="${bgRadius}" fill="${bgColor}"/>`;
     }
     const iconDataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(entry.svg)}`;
-    const filter = `<defs><filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter></defs>`;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${filter}${bgEl}<image href="${iconDataUri}" x="${pad}" y="${pad}" width="${inner}" height="${inner}" filter="url(#nr-white)"/></svg>`;
+    const applyWhite = entry.source !== 'aws';
+    const filter = applyWhite ? `<defs><filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter></defs>` : '';
+    const filterAttr = applyWhite ? ' filter="url(#nr-white)"' : '';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${filter}${bgEl}<image href="${iconDataUri}" x="${pad}" y="${pad}" width="${inner}" height="${inner}"${filterAttr}/></svg>`;
     return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
@@ -112,12 +115,6 @@ function ensureDefaults(): void {
         if (idx < 0) {
             existing.push(d);
             changed = true;
-        } else {
-            const cur = existing[idx].definition;
-            if (!cur.icon || !cur.iconHref || !cur.iconBgColor) {
-                existing[idx] = { id: d.id, definition: { ...cur, ...d.definition } };
-                changed = true;
-            }
         }
     }
     if (changed) writeCollection('general', existing);
@@ -128,8 +125,6 @@ function syncGeneralToRegistry(): void {
     for (const stored of readCollection('general')) {
         if (!ShapeRegistry[stored.id]) {
             addShape(stored.id, { ...stored.definition });
-        } else {
-            Object.assign(ShapeRegistry[stored.id], stored.definition);
         }
     }
 }

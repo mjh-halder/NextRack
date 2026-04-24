@@ -673,9 +673,20 @@
     max-height: 100%;
 }
 
-/* Dark mode: show icon picker SVGs in white */
+/* Dark mode: show icon picker SVGs in white (except color icons like AWS) */
 .cds--g100 .nr-sd-icon-btn svg {
     filter: brightness(0) invert(1);
+}
+.cds--g100 .nr-sd-icon-btn.nr-icon-color svg,
+.nr-sd-icon-btn.nr-icon-color svg {
+    filter: none;
+    width: 100%;
+    height: 100%;
+}
+.nr-sd-icon-btn.nr-icon-color {
+    padding: 0;
+    overflow: hidden;
+    border-radius: 2px;
 }
 
 /* White-mode preview: invert icon picker SVGs */
@@ -1366,6 +1377,10 @@
 .cds--g100 .nr-palette-item-icon img {
     filter: brightness(0) invert(1);
 }
+.cds--g100 .nr-palette-item-icon.nr-icon-color svg,
+.cds--g100 .nr-palette-item-icon.nr-icon-color img {
+    filter: none;
+}
 
 .nr-palette-item-label {
     flex: 1;
@@ -1793,6 +1808,10 @@
 .cds--g100 .nr-tree-icon svg,
 .cds--g100 .nr-tree-icon img {
     filter: brightness(0) invert(1);
+}
+.cds--g100 .nr-tree-icon.nr-icon-color svg,
+.cds--g100 .nr-tree-icon.nr-icon-color img {
+    filter: none;
 }
 
 /* Label text */
@@ -5300,4 +5319,63 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
 }
 .cds--g100 .nr-vertex-editor__handle {
     stroke: #262626;
+}
+
+/* ── Icon source tabs (component designer) ─────────────────────────────── */
+
+.nr-sd-icon-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+}
+
+.nr-sd-icon-tab {
+    all: unset;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-family: 'IBM Plex Sans', sans-serif;
+    color: var(--cds-text-secondary, #525252);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.1s, border-color 0.1s;
+}
+.nr-sd-icon-tab:hover {
+    color: var(--cds-text-primary, #161616);
+}
+.nr-sd-icon-tab--active {
+    color: var(--cds-text-primary, #161616);
+    border-bottom-color: var(--cds-interactive, #0f62fe);
+}
+
+.cds--g100 .nr-sd-icon-tab {
+    color: var(--cds-text-secondary, #c6c6c6);
+}
+.cds--g100 .nr-sd-icon-tab:hover {
+    color: var(--cds-text-primary, #f4f4f4);
+}
+.cds--g100 .nr-sd-icon-tab--active {
+    color: var(--cds-text-primary, #f4f4f4);
+}
+.cds--g100 .nr-sd-icon-tabs {
+    border-bottom-color: var(--cds-border-subtle-01, #393939);
+}
+
+/* ── AWS admin UI ──────────────────────────────────────────────────────── */
+
+.nr-admin__aws-status {
+    font-size: 12px;
+    color: var(--cds-text-secondary, #525252);
+    align-self: center;
+}
+.nr-admin__upload-btn--danger {
+    color: var(--cds-text-error, #da1e28) !important;
+    border-color: var(--cds-support-error, #da1e28) !important;
+}
+.nr-admin__upload-btn--danger:hover {
+    background: var(--cds-support-error, #da1e28) !important;
+    color: #fff !important;
+}
+.cds--g100 .nr-admin__aws-status {
+    color: var(--cds-text-secondary, #c6c6c6);
 }

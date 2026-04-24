@@ -19,7 +19,7 @@ import Copy16 from '@carbon/icons/es/copy/16.js';
 import ChevronUp16 from '@carbon/icons/es/chevron--up/16.js';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
-import { getIconById, addUploadedIcon, removeUploadedIcon } from './icon-catalog';
+import { getIconById, addUploadedIcon, removeUploadedIcon, stripAwsBackground } from './icon-catalog';
 import { getVisibleIcons } from './icon-config';
 import { shapeStore } from './shape-store';
 import { getComponentCollections } from './admin';
@@ -75,6 +75,7 @@ let svgParseError = '';
 
 // Icon background state (not persisted to registry)
 let selectedIconBgEnabled = true;
+let selectedIconMonochrome = false;
 let selectedIconBgColor = PRIMARY_COLORS[0].base; // Grey 70 by default
 let selectedIconBgShape: 'circle' | 'square' | 'octagon' = 'circle';
 let selectedIconBgRadius = 6;
@@ -259,6 +260,14 @@ let modifiersAccordionLi: HTMLLIElement | null = null;
 let chamferSizeInput:   HTMLInputElement;
 let chamferSizeValueEl: HTMLElement;
 let iconFaceRowEl:      HTMLElement;
+let taperInput: HTMLInputElement;
+let taperValueEl: HTMLElement;
+let twistInput: HTMLInputElement;
+let twistValueEl: HTMLElement;
+let stxInput: HTMLInputElement;
+let stxValueEl: HTMLElement;
+let styInput: HTMLInputElement;
+let styValueEl: HTMLElement;
 
 const CDS_ICON_TRASH      = carbonIconToString(TrashCan16 as CarbonIcon);
 const CDS_ICON_COPY       = carbonIconToString(Copy16 as CarbonIcon);
@@ -425,32 +434,28 @@ function buildModifiersContent(container: HTMLElement) {
         },
         container);
 
-    let taperInput: HTMLInputElement, taperVal: HTMLElement;
     buildSliderField('Taper', 'sd-taper', 0, 0.95, 0.05,
         (el) => { taperInput = el; el.value = String(selectedTaper); },
-        (el) => { taperVal = el; el.textContent = selectedTaper.toFixed(2); },
-        () => { selectedTaper = parseFloat(taperInput.value); taperVal.textContent = selectedTaper.toFixed(2); apply3DModifiers(); },
+        (el) => { taperValueEl = el; el.textContent = selectedTaper.toFixed(2); },
+        () => { selectedTaper = parseFloat(taperInput.value); taperValueEl.textContent = selectedTaper.toFixed(2); apply3DModifiers(); },
         container);
 
-    let twistInput: HTMLInputElement, twistVal: HTMLElement;
     buildSliderField('Twist', 'sd-twist', -180, 180, 5,
         (el) => { twistInput = el; el.value = String(selectedTwist); },
-        (el) => { twistVal = el; el.textContent = `${selectedTwist}°`; },
-        () => { selectedTwist = parseFloat(twistInput.value); twistVal.textContent = `${selectedTwist}°`; apply3DModifiers(); },
+        (el) => { twistValueEl = el; el.textContent = `${selectedTwist}°`; },
+        () => { selectedTwist = parseFloat(twistInput.value); twistValueEl.textContent = `${selectedTwist}°`; apply3DModifiers(); },
         container);
 
-    let stxInput: HTMLInputElement, stxVal: HTMLElement;
     buildSliderField('Scale Top X', 'sd-scale-top-x', 0.1, 2, 0.05,
         (el) => { stxInput = el; el.value = String(selectedScaleTopX); },
-        (el) => { stxVal = el; el.textContent = selectedScaleTopX.toFixed(2); },
-        () => { selectedScaleTopX = parseFloat(stxInput.value); stxVal.textContent = selectedScaleTopX.toFixed(2); apply3DModifiers(); },
+        (el) => { stxValueEl = el; el.textContent = selectedScaleTopX.toFixed(2); },
+        () => { selectedScaleTopX = parseFloat(stxInput.value); stxValueEl.textContent = selectedScaleTopX.toFixed(2); apply3DModifiers(); },
         container);
 
-    let styInput: HTMLInputElement, styVal: HTMLElement;
     buildSliderField('Scale Top Y', 'sd-scale-top-y', 0.1, 2, 0.05,
         (el) => { styInput = el; el.value = String(selectedScaleTopY); },
-        (el) => { styVal = el; el.textContent = selectedScaleTopY.toFixed(2); },
-        () => { selectedScaleTopY = parseFloat(styInput.value); styVal.textContent = selectedScaleTopY.toFixed(2); apply3DModifiers(); },
+        (el) => { styValueEl = el; el.textContent = selectedScaleTopY.toFixed(2); },
+        () => { selectedScaleTopY = parseFloat(styInput.value); styValueEl.textContent = selectedScaleTopY.toFixed(2); apply3DModifiers(); },
         container);
 }
 
@@ -727,29 +732,35 @@ function syncFormFactorTiles() {
 const NO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><line x1="6" y1="16" x2="26" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 
 // Generates a composite SVG: colored background shape with icon SVG centered inside.
-function buildCompositeIconSvg(iconSvg: string, bgColor: string | null, bgShape: 'circle' | 'square' | 'octagon', applyWhiteFilter = true, bgRadius = 6, bgChamfer = 0.18): string {
+function buildCompositeIconSvg(iconSvg: string, bgColor: string | null, bgShape: 'circle' | 'square' | 'octagon', applyWhiteFilter = true, bgRadius = 6, bgChamfer = 0.18, padding: 'normal' | 'compact' | 'tight' = 'normal', clipToShape = false): string {
     const S = 64;
-    const pad = 13; // ~20% inset on each side
+    const pad = padding === 'compact' ? 6 : padding === 'tight' ? 3 : 13;
     const iconInner = S - 2 * pad;
-    let bgEl = '';
-    if (bgColor !== null) {
-        if (bgShape === 'circle') {
-            bgEl = `<circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}" fill="${bgColor}"/>`;
-        } else if (bgShape === 'octagon') {
-            const c = Math.round(S * bgChamfer);
-            bgEl = `<polygon points="${c},0 ${S - c},0 ${S},${c} ${S},${S - c} ${S - c},${S} ${c},${S} 0,${S - c} 0,${c}" fill="${bgColor}"/>`;
-        } else {
-            bgEl = `<rect width="${S}" height="${S}" rx="${bgRadius}" fill="${bgColor}"/>`;
-        }
+
+    let shapeEl = '';
+    if (bgShape === 'circle') {
+        shapeEl = `<circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}"`;
+    } else if (bgShape === 'octagon') {
+        const c = Math.round(S * bgChamfer);
+        shapeEl = `<polygon points="${c},0 ${S - c},0 ${S},${c} ${S},${S - c} ${S - c},${S} ${c},${S} 0,${S - c} 0,${c}"`;
+    } else {
+        shapeEl = `<rect x="0" y="0" width="${S}" height="${S}" rx="${bgRadius}"`;
     }
-    const iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg)}`;
-    // White-tint: feColorMatrix maps every non-transparent pixel to white while preserving alpha.
-    // Skipped in adaptive mode — the CSS class nr-icon-adaptive handles coloring instead.
-    const filterDefs = applyWhiteFilter
-        ? `<defs><filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter></defs>`
-        : '';
+
+    const bgEl = bgColor !== null ? `${shapeEl} fill="${bgColor}"/>` : '';
+
+    let defsParts = '';
+    if (applyWhiteFilter) {
+        defsParts += `<filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter>`;
+    }
+    if (clipToShape) {
+        defsParts += `<clipPath id="nr-icon-clip">${shapeEl}/></clipPath>`;
+    }
+    const defs = defsParts ? `<defs>${defsParts}</defs>` : '';
     const filterAttr = applyWhiteFilter ? ' filter="url(#nr-white)"' : '';
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${filterDefs}${bgEl}<image href="${iconHref}" x="${pad}" y="${pad}" width="${iconInner}" height="${iconInner}"${filterAttr}/></svg>`;
+    const clipAttr = clipToShape ? ' clip-path="url(#nr-icon-clip)"' : '';
+    const iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg)}`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${defs}${bgEl}<image href="${iconHref}" x="${pad}" y="${pad}" width="${iconInner}" height="${iconInner}"${filterAttr}${clipAttr}/></svg>`;
 }
 
 /**
@@ -801,13 +812,21 @@ function applyIconToCurrentShape() {
         return;
     }
     const isAdaptive = selectedIconAdaptive && !selectedIconBgEnabled;
+    const isAwsIcon = icon.source === 'aws';
+    const monoAws = isAwsIcon && selectedIconMonochrome;
+    const iconSvg = monoAws ? stripAwsBackground(icon.svg) : icon.svg;
+    const applyWhite = !isAdaptive && (!isAwsIcon || monoAws);
+    const iconPad = monoAws ? 'compact' : (isAwsIcon ? 'tight' : 'normal');
+    const clipIcon = isAwsIcon && !monoAws;
     const svgSource = buildCompositeIconSvg(
-        icon.svg,
+        iconSvg,
         selectedIconBgEnabled ? selectedIconBgColor : null,
         selectedIconBgShape,
-        !isAdaptive,  // skip white filter when adaptive CSS class takes over
+        applyWhite,
         selectedIconBgRadius,
-        selectedIconBgChamfer
+        selectedIconBgChamfer,
+        iconPad,
+        clipIcon,
     );
     const adaptiveClass = isAdaptive ? 'nr-icon-adaptive' : '';
     const iconPx = selectedIconSize * GRID_SIZE;
@@ -966,9 +985,29 @@ function buildIconContent(container: HTMLElement) {
         container.appendChild(formItem);
     }
 
-    // Search input — filters the grid by label (substring, case-insensitive).
-    // "No icon" is always offered so the user can clear a selection regardless
-    // of the filter.
+    // Icon source tabs
+    let iconSourceTab: 'common' | 'aws' = 'common';
+    const tabRow = document.createElement('div');
+    tabRow.className = 'nr-sd-icon-tabs';
+    const commonTab = document.createElement('button');
+    commonTab.type = 'button';
+    commonTab.className = 'nr-sd-icon-tab nr-sd-icon-tab--active';
+    commonTab.textContent = 'Common';
+    const awsTab = document.createElement('button');
+    awsTab.type = 'button';
+    awsTab.className = 'nr-sd-icon-tab';
+    awsTab.textContent = 'AWS';
+    const setActiveTab = (tab: 'common' | 'aws') => {
+        iconSourceTab = tab;
+        commonTab.classList.toggle('nr-sd-icon-tab--active', tab === 'common');
+        awsTab.classList.toggle('nr-sd-icon-tab--active', tab === 'aws');
+    };
+    commonTab.addEventListener('click', () => { setActiveTab('common'); renderGrid(); });
+    awsTab.addEventListener('click', () => { setActiveTab('aws'); renderGrid(); });
+    tabRow.appendChild(commonTab);
+    tabRow.appendChild(awsTab);
+    container.appendChild(tabRow);
+
     const searchRow = document.createElement('div');
     searchRow.className = 'nr-sd-icon-search';
     const searchInput = document.createElement('input');
@@ -991,9 +1030,12 @@ function buildIconContent(container: HTMLElement) {
         grid.innerHTML = '';
         const visible = getVisible();
         const term = iconSearchTerm.trim().toLowerCase();
+        const sourceFiltered = iconSourceTab === 'aws'
+            ? visible.filter(ic => ic.source === 'aws')
+            : visible.filter(ic => ic.source !== 'aws');
         const filtered = term
-            ? visible.filter(ic => ic.label.toLowerCase().includes(term))
-            : visible;
+            ? sourceFiltered.filter(ic => ic.label.toLowerCase().includes(term))
+            : sourceFiltered;
         const allIcons: Array<{ id: string | null; label: string; svg: string; source?: string }> = [
             { id: null, label: 'No icon', svg: NO_ICON_SVG },
             ...filtered.map(ic => ({ id: ic.id, label: ic.label, svg: ic.svg, source: ic.source })),
@@ -1002,6 +1044,7 @@ function buildIconContent(container: HTMLElement) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'nr-sd-icon-btn';
+            if (icon.source === 'aws') btn.classList.add('nr-icon-color');
             btn.setAttribute('title', icon.label);
             btn.setAttribute('aria-label', icon.label);
             btn.setAttribute('data-icon-id', icon.id ?? '');
@@ -1010,10 +1053,25 @@ function buildIconContent(container: HTMLElement) {
             btn.innerHTML = icon.svg;
 
             btn.addEventListener('click', () => {
+                const wasAws = selectedIcon ? getIconById(selectedIcon)?.source === 'aws' : false;
+                const isAws = icon.source === 'aws';
                 selectedIcon = icon.id;
+                if (isAws) {
+                    if (!wasAws) {
+                        selectedIconBgEnabled = false;
+                        selectedIconMonochrome = false;
+                        selectedIconBgShape = 'square';
+                        selectedIconBgRadius = 6;
+                    }
+                    const entry = getIconById(icon.id!);
+                    if (entry?.bgColor) selectedIconBgColor = entry.bgColor;
+                } else if (wasAws) {
+                    selectedIconBgEnabled = true;
+                }
                 grid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
                     b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
                 );
+                syncIconControlVisibility();
                 applyIconToCurrentShape();
             });
 
@@ -1122,6 +1180,121 @@ function buildIconContent(container: HTMLElement) {
     adaptiveRow.appendChild(adaptiveTrack);
     container.appendChild(adaptiveRow);
 
+    // AWS icon mode switcher — Colored or Monochrome
+    const iconModeRow = document.createElement('div');
+    iconModeRow.className = 'nr-sd-face-row';
+    const isAwsSelected = selectedIcon ? getIconById(selectedIcon)?.source === 'aws' : false;
+    iconModeRow.style.display = isAwsSelected ? '' : 'none';
+
+    const modeLbl = document.createElement('label');
+    modeLbl.className = 'nr-sd-row-label';
+    modeLbl.textContent = 'Style';
+
+    const modeSwitcher = document.createElement('div');
+    modeSwitcher.className = 'nr-sd-face-switcher';
+
+    for (const mode of ['colored', 'mono'] as const) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const isActive = mode === 'colored' ? !selectedIconMonochrome : selectedIconMonochrome;
+        btn.className = 'nr-sd-face-btn' + (isActive ? ' nr-sd-face-btn--active' : '');
+        btn.textContent = mode === 'colored' ? 'Colored' : 'Mono';
+        btn.addEventListener('click', () => {
+            selectedIconMonochrome = mode === 'mono';
+            if (mode === 'mono' && !selectedIconBgEnabled) {
+                selectedIconBgEnabled = true;
+            }
+            modeSwitcher.querySelectorAll('.nr-sd-face-btn').forEach(b =>
+                b.classList.toggle('nr-sd-face-btn--active', b === btn)
+            );
+            syncIconControlVisibility();
+            applyIconToCurrentShape();
+        });
+        modeSwitcher.appendChild(btn);
+    }
+
+    iconModeRow.appendChild(modeLbl);
+    iconModeRow.appendChild(modeSwitcher);
+    container.appendChild(iconModeRow);
+
+    // AWS icon clip shape controls
+    const awsShapeRow = document.createElement('div');
+    awsShapeRow.className = 'nr-sd-face-row';
+    awsShapeRow.style.display = isAwsSelected ? '' : 'none';
+
+    const awsShapeLbl = document.createElement('label');
+    awsShapeLbl.className = 'nr-sd-row-label';
+    awsShapeLbl.textContent = 'Clip';
+
+    const awsShapeSwitcher = document.createElement('div');
+    awsShapeSwitcher.className = 'nr-sd-face-switcher';
+
+    for (const shape of ['square', 'circle', 'octagon'] as const) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-sd-face-btn' + (selectedIconBgShape === shape ? ' nr-sd-face-btn--active' : '');
+        btn.textContent = shape.charAt(0).toUpperCase() + shape.slice(1);
+        btn.addEventListener('click', () => {
+            selectedIconBgShape = shape;
+            awsShapeSwitcher.querySelectorAll('.nr-sd-face-btn').forEach(b =>
+                b.classList.toggle('nr-sd-face-btn--active', b === btn)
+            );
+            awsRadiusRow.style.display = shape === 'square' ? '' : 'none';
+            document.querySelectorAll<HTMLInputElement>('input[name="sd-icon-bg-shape"]').forEach(r => {
+                r.checked = r.value === shape;
+            });
+            applyIconToCurrentShape();
+        });
+        awsShapeSwitcher.appendChild(btn);
+    }
+
+    awsShapeRow.appendChild(awsShapeLbl);
+    awsShapeRow.appendChild(awsShapeSwitcher);
+    container.appendChild(awsShapeRow);
+
+    // AWS icon corner radius
+    const awsRadiusRow = document.createElement('div');
+    awsRadiusRow.className = 'nr-sd-slider-row';
+    awsRadiusRow.style.display = (isAwsSelected && selectedIconBgShape === 'square') ? '' : 'none';
+
+    let awsRadiusInput: HTMLInputElement;
+    let awsRadiusVal: HTMLElement;
+    buildSliderField('Corner Radius', 'sd-aws-icon-radius', 0, 20, 1,
+        (el) => { awsRadiusInput = el; el.value = String(selectedIconBgRadius); },
+        (el) => { awsRadiusVal = el; el.textContent = `${selectedIconBgRadius} px`; },
+        () => {
+            selectedIconBgRadius = parseInt(awsRadiusInput.value, 10);
+            awsRadiusVal.textContent = `${selectedIconBgRadius} px`;
+            applyIconToCurrentShape();
+        },
+        awsRadiusRow);
+    container.appendChild(awsRadiusRow);
+
+    function syncIconControlVisibility() {
+        const curIcon = selectedIcon ? getIconById(selectedIcon) : undefined;
+        const isAws = curIcon?.source === 'aws';
+        iconModeRow.style.display = isAws ? '' : 'none';
+        awsShapeRow.style.display = isAws ? '' : 'none';
+        awsRadiusRow.style.display = (isAws && selectedIconBgShape === 'square') ? '' : 'none';
+        if (awsRadiusInput) { awsRadiusInput.value = String(selectedIconBgRadius); }
+        awsShapeSwitcher.querySelectorAll('.nr-sd-face-btn').forEach((b, i) => {
+            const shapes = ['square', 'circle', 'octagon'];
+            b.classList.toggle('nr-sd-face-btn--active', shapes[i] === selectedIconBgShape);
+        });
+        if (iconBgNoBackgroundBtnEl) {
+            iconBgNoBackgroundBtnEl.classList.toggle('nr-sd-swatch-btn--selected', !selectedIconBgEnabled);
+        }
+        for (const ref of iconBgSwatchRefs) {
+            ref.btn.classList.toggle('nr-sd-swatch-btn--selected', selectedIconBgEnabled && ref.colorBase === selectedIconBgColor);
+        }
+        if (iconBgCustomColorInputRef) {
+            iconBgCustomColorInputRef.value = selectedIconBgColor;
+        }
+        modeSwitcher.querySelectorAll('.nr-sd-face-btn').forEach((b, i) => {
+            b.classList.toggle('nr-sd-face-btn--active', i === 0 ? !selectedIconMonochrome : selectedIconMonochrome);
+        });
+    }
+
     // Face toggle — top or front (cuboid only)
     iconFaceRowEl = document.createElement('div');
     iconFaceRowEl.className = 'nr-sd-face-row';
@@ -1206,7 +1379,6 @@ function buildIconBackgroundContent(container: HTMLElement) {
     noBgBtn.className = 'nr-sd-swatch-btn nr-sd-swatch-btn--no-bg' + (!selectedIconBgEnabled ? ' nr-sd-swatch-btn--selected' : '');
     noBgBtn.setAttribute('title', 'No background');
     noBgBtn.setAttribute('aria-label', 'No background');
-    noBgBtn.style.display = isComplexShape ? '' : 'none';
     iconBgNoBackgroundBtnEl = noBgBtn;
     noBgBtn.addEventListener('click', () => {
         selectedIconBgEnabled = false;
@@ -1252,7 +1424,6 @@ function buildIconBackgroundContent(container: HTMLElement) {
     // ── Custom color picker (complex shape only) ──────────────────────────────
     const customColorRow = document.createElement('div');
     customColorRow.className = 'nr-sd-custom-color-row';
-    customColorRow.style.display = isComplexShape ? '' : 'none';
     iconBgCustomColorRowEl = customColorRow;
 
     const customColorLabel = document.createElement('label');
@@ -2094,7 +2265,13 @@ function onSave() {
     if (selectedIcon) {
         const iconEntry = getIconById(selectedIcon);
         if (iconEntry) {
-            const svg = buildCompositeIconSvg(iconEntry.svg, selectedIconBgEnabled ? selectedIconBgColor : null, selectedIconBgShape, true, selectedIconBgRadius, selectedIconBgChamfer);
+            const isAws = iconEntry.source === 'aws';
+            const isAwsMono = isAws && selectedIconMonochrome;
+            const iconSvg = isAwsMono ? stripAwsBackground(iconEntry.svg) : iconEntry.svg;
+            const applyWhite = !isAws || isAwsMono;
+            const pad = isAwsMono ? 'compact' : (isAws ? 'tight' : 'normal');
+            const clip = isAws && !isAwsMono;
+            const svg = buildCompositeIconSvg(iconSvg, selectedIconBgEnabled ? selectedIconBgColor : null, selectedIconBgShape, applyWhite, selectedIconBgRadius, selectedIconBgChamfer, pad, clip);
             iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
         }
     }
@@ -3009,8 +3186,8 @@ function onComplexShapeToggle(enabled: boolean) {
         hideLayersPanel();
         if (positionAccordionLi)     positionAccordionLi.style.display     = 'none';
         if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = 'none';
-        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = 'none';
-        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = 'none';
+        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = '';
+        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = '';
         updateAdaptiveToggleVisibility();
 
         // Rebuild the single-shape preview using Layer 1's dimensions
@@ -3729,6 +3906,12 @@ function loadShapeIntoCanvas(id: string) {
     selectedChamferSize  = savedDefaults?.chamferSize ?? 0;
     selectedChamferStart = savedDefaults?.chamferStart ?? 0;
 
+    // Sync 3D modifier sliders with loaded values
+    if (taperInput) { taperInput.value = String(selectedTaper); taperValueEl.textContent = selectedTaper.toFixed(2); }
+    if (twistInput) { twistInput.value = String(selectedTwist); twistValueEl.textContent = `${selectedTwist}°`; }
+    if (stxInput) { stxInput.value = String(selectedScaleTopX); stxValueEl.textContent = selectedScaleTopX.toFixed(2); }
+    if (styInput) { styInput.value = String(selectedScaleTopY); styValueEl.textContent = selectedScaleTopY.toFixed(2); }
+
     if (savedDefaults?.complexShape && savedDefaults.layers?.length) {
         // ── Complex shape path ─────────────────────────────────────────────────
         isComplexShape     = true;
@@ -3760,8 +3943,8 @@ function loadShapeIntoCanvas(id: string) {
         if (complexToggleBtn) complexToggleBtn.setAttribute('aria-checked', 'false');
         if (positionAccordionLi)     positionAccordionLi.style.display     = 'none';
         if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = 'none';
-        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = 'none';
-        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = 'none';
+        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = '';
+        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = '';
         updateAdaptiveToggleVisibility();
         hideLayersPanel();
 

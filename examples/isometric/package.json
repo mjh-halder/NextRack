@@ -22,6 +22,7 @@
     "@joint/core": "workspace:^",
     "@joint/decorators": "workspace:^",
     "@joint/layout-directed-graph": "workspace:^",
+    "fflate": "^0.8.2",
     "marked": "^15.0.0"
   },
   "devDependencies": {

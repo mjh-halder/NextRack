@@ -41,6 +41,8 @@ interface PaletteItem {
     create: () => IsometricShape;
     /** Optional raw SVG markup rendered as a leading icon. */
     iconSvg?: string;
+    /** When true, the icon preserves its original colors (no dark-mode invert). */
+    iconColor?: boolean;
 }
 
 const CONTAINER_ITEMS: PaletteItem[] = [
@@ -638,7 +640,7 @@ export class ComponentPalette {
             || shapeKey
             || 'Element';
         const iconId = shapeKey ? ShapeRegistry[shapeKey]?.icon : undefined;
-        const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
+        const iconEntry = iconId ? getIconById(iconId) : undefined;
 
         const li = document.createElement('li');
         li.className = 'nr-tree-element';
@@ -647,10 +649,10 @@ export class ComponentPalette {
         const row = document.createElement('div');
         row.className = 'nr-tree-row';
 
-        if (iconSvg) {
+        if (iconEntry?.svg) {
             const iconSpan = document.createElement('span');
-            iconSpan.className = 'nr-tree-icon';
-            iconSpan.innerHTML = iconSvg;
+            iconSpan.className = 'nr-tree-icon' + (iconEntry.source === 'aws' ? ' nr-icon-color' : '');
+            iconSpan.innerHTML = iconEntry.svg;
             iconSpan.setAttribute('aria-hidden', 'true');
             row.appendChild(iconSpan);
         }
@@ -826,12 +828,16 @@ export class ComponentPalette {
     }
 
     private buildList() {
-        const componentItems: PaletteItem[] = Object.entries(ShapeRegistry).filter(([id]) => !BUILT_IN_SHAPE_IDS.has(id)).map(([id, defaults]) => ({
-            label: defaults.displayName ?? id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-            kind: id,
-            create: () => getPreviewFactory(id, defaults.baseShape ?? 'cuboid')(),
-            iconSvg: defaults.icon ? getIconById(defaults.icon)?.svg : undefined,
-        }));
+        const componentItems: PaletteItem[] = Object.entries(ShapeRegistry).filter(([id]) => !BUILT_IN_SHAPE_IDS.has(id)).map(([id, defaults]) => {
+            const iconEntry = defaults.icon ? getIconById(defaults.icon) : undefined;
+            return {
+                label: defaults.displayName ?? id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+                kind: id,
+                create: () => getPreviewFactory(id, defaults.baseShape ?? 'cuboid')(),
+                iconSvg: iconEntry?.svg,
+                iconColor: iconEntry?.source === 'aws',
+            };
+        });
 
         this.listEl.appendChild(this.buildSection('Components', componentItems, false));
         this.listEl.appendChild(this.buildSection('Zoning', CONTAINER_ITEMS, true));
@@ -849,7 +855,7 @@ export class ComponentPalette {
 
             if (item.iconSvg) {
                 const iconSpan = document.createElement('span');
-                iconSpan.className = 'nr-palette-item-icon';
+                iconSpan.className = 'nr-palette-item-icon' + (item.iconColor ? ' nr-icon-color' : '');
                 iconSpan.innerHTML = item.iconSvg;
                 iconSpan.setAttribute('aria-hidden', 'true');
                 btn.appendChild(iconSpan);
