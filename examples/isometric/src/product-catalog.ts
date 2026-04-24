@@ -6,8 +6,10 @@ import ArrowUp16 from '@carbon/icons/es/arrow--up/16.js';
 import ArrowDown16 from '@carbon/icons/es/arrow--down/16.js';
 import Save16 from '@carbon/icons/es/save/16.js';
 import Download16 from '@carbon/icons/es/download/16.js';
+import Copy16 from '@carbon/icons/es/copy/16.js';
 
 const ICON_TRASH = carbonIconToString(TrashCan16 as CarbonIcon);
+const ICON_COPY  = carbonIconToString(Copy16 as CarbonIcon);
 const ICON_OVERFLOW = carbonIconToString(OverflowMenuVertical16 as CarbonIcon);
 const ICON_SORT_ASC = carbonIconToString(ArrowUp16 as CarbonIcon);
 const ICON_SORT_DESC = carbonIconToString(ArrowDown16 as CarbonIcon);
@@ -233,6 +235,26 @@ function buildProductList(container: HTMLElement): void {
     batchDownloadBtn.className = 'nr-dt__batch-btn';
     batchDownloadBtn.innerHTML = `Download<span class="nr-dt__batch-btn-icon">${ICON_DOWNLOAD}</span>`;
     batchActions.appendChild(batchDownloadBtn);
+
+    const batchDuplicateBtn = document.createElement('button');
+    batchDuplicateBtn.type = 'button';
+    batchDuplicateBtn.className = 'nr-dt__batch-btn';
+    batchDuplicateBtn.innerHTML = `Duplicate<span class="nr-dt__batch-btn-icon">${ICON_COPY}</span>`;
+    batchDuplicateBtn.addEventListener('click', () => {
+        selected.forEach(id => {
+            const src = getProduct(id);
+            if (!src) return;
+            const clone: ProductEntry = {
+                id: 'product-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                componentType: src.componentType,
+                values: { ...src.values, name: (src.values.name ?? '') + ' (copy)' },
+            };
+            saveProduct(clone);
+        });
+        selected.clear();
+        render();
+    });
+    batchActions.appendChild(batchDuplicateBtn);
 
     const batchDeleteBtn = document.createElement('button');
     batchDeleteBtn.type = 'button';

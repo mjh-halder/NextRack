@@ -98,6 +98,7 @@ function setAppView(view: AppView) {
     (document.getElementById('minimap') as HTMLElement).style.display = isGrid ? '' : 'none';
     (document.getElementById('resource-bar') as HTMLElement).style.display = isGrid ? '' : 'none';
     (document.getElementById('layout-bar') as HTMLElement).style.display = isGrid ? '' : 'none';
+    (document.getElementById('zoom-control') as HTMLElement).style.display = isGrid ? '' : 'none';
     if (!isGrid) {
         designNameEl.style.display = 'none';
         (document.getElementById('workload-table') as HTMLElement).style.display = 'none';

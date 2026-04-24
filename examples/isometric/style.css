@@ -1898,8 +1898,9 @@
     transition: right 0.1s ease;
 }
 
-/* Shift toggle left when the inspector panel is open (240px wide + 10px gap) */
-body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
+/* Shift toggle and minimap left when the inspector panel is open (240px wide + 10px gap) */
+body:has(#inspector:not(.inspector-hidden)) #view-toggle-container,
+body:has(#inspector:not(.inspector-hidden)) #minimap {
     right: 250px;
 }
 
@@ -2049,8 +2050,17 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
 /* Each label + input pair */
 .inspector-row {
     display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+}
+.inspector-row:has(textarea) {
     flex-direction: column;
-    gap: 2px;
+    align-items: stretch;
+}
+.inspector-row:has(textarea) > label {
+    flex: none;
+    min-width: auto;
 }
 
 .inspector-row > label {
@@ -2059,6 +2069,8 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: var(--cds-text-secondary, #525252);
+    flex: 0 0 72px;
+    min-width: 72px;
 }
 
 /* Carbon field-01 style: flat fill, no side borders, strong bottom border */
@@ -2277,7 +2289,9 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
    for the two connection paths (wrapper & line) that carry fill="none" as an SVG
    attribute in JointJS's markup. The arrowhead path has a real fill color set
    (not "none") so it keeps the #8d8d8d fill and matches the line. */
+.joint-link:hover path[joint-selector="line"] { stroke-width: 3 !important; }
 .cds--g100 .joint-link path                { stroke: #8d8d8d !important; stroke-width: 1 !important; fill: #8d8d8d !important; }
+.cds--g100 .joint-link:hover path[joint-selector="line"] { stroke-width: 3 !important; }
 .cds--g100 .joint-link path[fill="none"]   { fill: none !important; }
 .cds--g100 .joint-link.nr-cluster-link path               { stroke: var(--nr-cluster-color, #0072c3) !important; stroke-width: 1.5 !important; stroke-dasharray: 8 4; fill: var(--nr-cluster-color, #0072c3) !important; }
 .cds--g100 .joint-link.nr-cluster-link path[fill="none"]  { fill: none !important; }
@@ -3683,6 +3697,7 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
     bottom: 16px;
     right: 16px;
     z-index: 20;
+    transition: right 0.1s ease;
 }
 
 .nr-minimap {
@@ -4652,10 +4667,12 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
 
 .nr-dt {
     margin-top: 0;
+    overflow-x: auto;
 }
 
 .nr-dt__table {
     width: 100%;
+    min-width: 600px;
     border-collapse: collapse;
     border-spacing: 0;
     font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
@@ -5092,7 +5109,7 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
     flex: 1;
     overflow-y: auto;
     padding: var(--cds-spacing-06, 24px) var(--cds-spacing-07, 32px);
-    max-width: 800px;
+    max-width: none;
     font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
     color: var(--cds-text-primary, #161616);
     line-height: 1.5;
@@ -5191,7 +5208,7 @@ body:has(#inspector:not(.inspector-hidden)) #view-toggle-container {
 .nr-zoom-control {
     position: fixed;
     bottom: 12px;
-    left: 60px;
+    left: calc(48px + 208px + 8px);
     z-index: 10;
     display: flex;
     align-items: center;

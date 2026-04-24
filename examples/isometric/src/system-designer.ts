@@ -1579,6 +1579,7 @@ const areaSelect = new AreaSelect({
         currentCell = null;
         currentFrame = null;
         setTreeHighlight(null);
+        hideZoneHud();
         if (cells.length === 0) {
             panel.hide();
             return;
@@ -2021,7 +2022,7 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             showNewDesignModal();
             break;
         case 'file-save':
-            saveGraph(graph);
+            saveGraph(graph, currentGridCountX, currentGridCountY);
             break;
         case 'file-open':
             loadGraph(graph, () => {

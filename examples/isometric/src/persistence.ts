@@ -4,9 +4,9 @@ import { GRID_SIZE } from './theme';
 const FILE_NAME = 'nextrack-diagram.json';
 const DEFAULT_DESIGN_KEY = 'nextrack-default-design-v1';
 
-export function saveGraph(graph: dia.Graph): void {
+export function saveGraph(graph: dia.Graph, gridCountX?: number, gridCountY?: number): void {
     const data = {
-        meta: { gridSize: GRID_SIZE, version: 1, exportedAt: new Date().toISOString() },
+        meta: { gridSize: GRID_SIZE, gridCountX, gridCountY, version: 1, exportedAt: new Date().toISOString() },
         cells: graph.getCells().map(cell => cell.toJSON()),
     };
     const json = JSON.stringify(data, null, 2);

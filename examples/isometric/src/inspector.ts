@@ -1,6 +1,6 @@
 import { dia } from '@joint/core';
 import IsometricShape from './shapes/isometric-shape';
-import { ShapeRegistry } from './shapes/shape-registry';
+import { ShapeRegistry, BUILT_IN_SHAPE_IDS, ShapeDefinition } from './shapes/shape-registry';
 import { PRIMARY_COLORS } from './colors';
 import { getCustomFields, getDataType, FieldDefinition } from './schema-registry';
 import { getProductsByType, getProduct } from './product-catalog';
@@ -733,6 +733,36 @@ export class PropertyPanel {
         this.nodeLabelHiddenEl.addEventListener('change', () => this.saveNode());
         this.nodeSection.appendChild(nodeLabelRow);
 
+        // Accent color picker — sets icon background and complex-shape layer colors
+        if (!BUILT_IN_SHAPE_IDS.has(shapeKey)) {
+            const colorRow = document.createElement('div');
+            colorRow.className = 'inspector-row';
+            const colorLabel = document.createElement('label');
+            colorLabel.textContent = 'Accent';
+            colorRow.appendChild(colorLabel);
+
+            const swatchWrap = document.createElement('div');
+            swatchWrap.className = 'nr-inspector-swatch-row';
+            const currentAccent = (cell.get('accentColor') as string) || '';
+
+            for (const c of PRIMARY_COLORS) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'nr-inspector-swatch-btn' + (currentAccent === c.base ? ' nr-inspector-swatch-btn--selected' : '');
+                btn.style.setProperty('--swatch-color', c.base);
+                btn.title = c.label;
+                btn.addEventListener('click', () => {
+                    cell.set('accentColor', c.base);
+                    swatchWrap.querySelectorAll('.nr-inspector-swatch-btn').forEach(b =>
+                        b.classList.toggle('nr-inspector-swatch-btn--selected', b === btn)
+                    );
+                    this.applyAccentColor(cell, c.base);
+                });
+                swatchWrap.appendChild(btn);
+            }
+            colorRow.appendChild(swatchWrap);
+            this.nodeSection.appendChild(colorRow);
+        }
 
         // Custom fields from schema registry
         const customContainer = document.createElement('div');
@@ -931,6 +961,39 @@ export class PropertyPanel {
             if (!zone.graph) continue;
             const cur = zone.size();
             zone.resize(w || cur.width, h || cur.height);
+        }
+    }
+
+    private applyAccentColor(cell: IsometricShape, color: string): void {
+        const meta = cell.get(META_KEY) as Record<string, unknown> | undefined;
+        const shapeKey = (meta?.shapeType as string) || '';
+        const def = ShapeRegistry[shapeKey] as ShapeDefinition | undefined;
+        if (!def) return;
+
+        // Update icon background href with the new accent color
+        if (def.icon && def.iconHref) {
+            // Rebuild composite icon with new bg color by updating the cell attr directly
+            const iconHref = def.iconHref;
+            // Quick color swap in the existing data URI
+            if (iconHref && def.iconBgColor) {
+                const newHref = iconHref.replace(
+                    encodeURIComponent(def.iconBgColor),
+                    encodeURIComponent(color)
+                );
+                cell.attr('topIcon/href', newHref);
+                cell.attr('topIcon2D/href', newHref);
+            }
+        }
+
+        // For complex shapes: update layer style colors
+        if (def.complexShape && def.layers) {
+            // Complex shapes store style on embedded children
+            const children = cell.getEmbeddedCells();
+            for (const child of children) {
+                if (child.get('componentRole') === 'child') {
+                    child.attr('top/fill', color);
+                }
+            }
         }
     }
 

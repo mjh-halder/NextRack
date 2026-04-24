@@ -22,7 +22,7 @@ export class Link extends shapes.standard.Link {
                 },
                 wrapper: {
                     connection: true,
-                    strokeWidth: 10,
+                    strokeWidth: 20,
                     strokeLinejoin: 'round'
                 }
             }
