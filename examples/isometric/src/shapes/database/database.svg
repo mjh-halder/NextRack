@@ -16,12 +16,12 @@
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"
-        :d="{{getSideData([size, isometricHeight, taper, scaleTopX, scaleTopY])}}"
+        :d="{{getSideData([size, isometricHeight, taper, scaleTopX, scaleTopY, shapeRotation])}}"
     />
 
     <ellipse @selector="top" @group-selector="iso"
-        :cx="{{topCenterX([size, isometricHeight])}}"
-        :cy="{{topCenterY([size, isometricHeight])}}"
+        :cx="{{topCenterX([size, isometricHeight, shapeRotation])}}"
+        :cy="{{topCenterY([size, isometricHeight, shapeRotation])}}"
         :rx="{{topRx([size, taper, scaleTopX])}}"
         :ry="{{topRy([size, taper, scaleTopY])}}"
         fill="#a8a8a8"

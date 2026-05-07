@@ -8,8 +8,8 @@ function bakeIconHref(def: ShapeDefinition): string | undefined {
     const entry = getIconById(def.icon);
     if (!entry) return undefined;
     const S = 64;
-    const isAws = entry.source === 'aws';
-    const pad = isAws ? 3 : 13;
+    const isVendor = entry.source === 'aws' || entry.source === 'gcp' || entry.source === 'azure';
+    const pad = isVendor ? 3 : 13;
     const inner = S - 2 * pad;
     const bgColor = def.iconBgColor ?? null;
     const bgShape = def.iconBgShape ?? 'circle';
@@ -22,7 +22,7 @@ function bakeIconHref(def: ShapeDefinition): string | undefined {
         else bgEl = `<rect width="${S}" height="${S}" rx="${bgRadius}" fill="${bgColor}"/>`;
     }
     const iconDataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(entry.svg)}`;
-    const applyWhite = entry.source !== 'aws';
+    const applyWhite = !isVendor;
     const filter = applyWhite ? `<defs><filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter></defs>` : '';
     const filterAttr = applyWhite ? ' filter="url(#nr-white)"' : '';
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${filter}${bgEl}<image href="${iconDataUri}" x="${pad}" y="${pad}" width="${inner}" height="${inner}"${filterAttr}/></svg>`;

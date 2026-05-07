@@ -227,6 +227,7 @@ export function applyRegistryDefaults(
     if (defaults.customVerts) {
         shape.set('normalizedVerts', defaults.customVerts);
     }
+    if (defaults.rotation) shape.set('shapeRotation', defaults.rotation);
     if (defaults.taper != null) shape.set('taper', defaults.taper);
     if (defaults.twist != null) shape.set('twist', defaults.twist);
     if (defaults.scaleTopX != null) shape.set('scaleTopX', defaults.scaleTopX);
@@ -256,8 +257,6 @@ export function applyRegistryDefaults(
         if (defaults.iconFace === 'front') {
             const localX = (w - iconPx) / 2;
             const localY = (iH - iconPx) / 2;
-            // Counter-rotate the icon content so it reads right-side up on
-            // the front face — the projection matrix below flips the y-axis.
             const cx = localX + iconPx / 2;
             const cy = localY + iconPx / 2;
             topIconAttrs = {
@@ -267,6 +266,19 @@ export function applyRegistryDefaults(
                 width:     iconPx,
                 height:    iconPx,
                 transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`,
+            };
+        } else if (defaults.iconFace === 'side') {
+            const localX = (h - iconPx) / 2;
+            const localY = (iH - iconPx) / 2;
+            const cx = localX + iconPx / 2;
+            const cy = localY + iconPx / 2;
+            topIconAttrs = {
+                href:      defaults.iconHref,
+                x:         localX,
+                y:         localY,
+                width:     iconPx,
+                height:    iconPx,
+                transform: `matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy})`,
             };
         } else {
             topIconAttrs = {

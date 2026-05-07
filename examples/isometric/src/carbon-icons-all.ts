@@ -51,4 +51,12 @@ function loadAll(): CarbonIconEntry[] {
     return out;
 }
 
-export const CARBON_ICONS: ReadonlyArray<CarbonIconEntry> = loadAll();
+let _cache: CarbonIconEntry[] | null = null;
+
+export function getCarbonIcons(): ReadonlyArray<CarbonIconEntry> {
+    if (!_cache) _cache = loadAll();
+    return _cache;
+}
+
+/** @deprecated Use getCarbonIcons() for lazy loading */
+export const CARBON_ICONS: ReadonlyArray<CarbonIconEntry> = [];

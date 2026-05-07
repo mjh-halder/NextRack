@@ -1,0 +1,179 @@
+{
+  "meta": {
+    "gridSize": 20,
+    "gridCountX": 50,
+    "gridCountY": 50,
+    "version": 1,
+    "exportedAt": "2026-04-25T00:00:00.000Z"
+  },
+  "cells": [
+    {
+      "type": "Frame",
+      "id": "zone-dmz",
+      "position": { "x": 200, "y": 60 },
+      "size": { "width": 280, "height": 200 },
+      "isFrame": true,
+      "z": -1,
+      "meta": {
+        "name": "DMZ Zone",
+        "color": "#da1e28",
+        "labelPosition": "top-left"
+      },
+      "embeds": ["firewall-1", "loadbalancer-1"],
+      "attrs": {}
+    },
+    {
+      "type": "Frame",
+      "id": "zone-az-a",
+      "position": { "x": 60, "y": 340 },
+      "size": { "width": 240, "height": 200 },
+      "isFrame": true,
+      "z": -1,
+      "meta": {
+        "name": "Availability Zone A",
+        "color": "#0072c3",
+        "labelPosition": "top-left"
+      },
+      "embeds": ["server-1", "server-2"],
+      "attrs": {}
+    },
+    {
+      "type": "Frame",
+      "id": "zone-az-b",
+      "position": { "x": 380, "y": 340 },
+      "size": { "width": 240, "height": 200 },
+      "isFrame": true,
+      "z": -1,
+      "meta": {
+        "name": "Availability Zone B",
+        "color": "#0072c3",
+        "labelPosition": "top-left"
+      },
+      "embeds": ["server-3", "server-4"],
+      "attrs": {}
+    },
+    {
+      "type": "Firewall",
+      "id": "firewall-1",
+      "position": { "x": 220, "y": 120 },
+      "size": { "width": 60, "height": 20 },
+      "isometricHeight": 40,
+      "z": 0,
+      "meta": {
+        "name": "Edge-FW-01",
+        "shapeType": "firewall"
+      },
+      "parent": "zone-dmz"
+    },
+    {
+      "type": "Computer",
+      "id": "loadbalancer-1",
+      "position": { "x": 380, "y": 120 },
+      "size": { "width": 20, "height": 40 },
+      "isometricHeight": 40,
+      "z": 0,
+      "meta": {
+        "name": "LB-01",
+        "shapeType": "computer"
+      },
+      "parent": "zone-dmz"
+    },
+    {
+      "type": "Computer",
+      "id": "server-1",
+      "position": { "x": 100, "y": 400 },
+      "size": { "width": 20, "height": 40 },
+      "isometricHeight": 40,
+      "z": 0,
+      "meta": {
+        "name": "Web-Srv-01",
+        "shapeType": "computer"
+      },
+      "parent": "zone-az-a"
+    },
+    {
+      "type": "Computer",
+      "id": "server-2",
+      "position": { "x": 220, "y": 400 },
+      "size": { "width": 20, "height": 40 },
+      "isometricHeight": 40,
+      "z": 0,
+      "meta": {
+        "name": "Web-Srv-02",
+        "shapeType": "computer"
+      },
+      "parent": "zone-az-a"
+    },
+    {
+      "type": "Computer",
+      "id": "server-3",
+      "position": { "x": 420, "y": 400 },
+      "size": { "width": 20, "height": 40 },
+      "isometricHeight": 40,
+      "z": 0,
+      "meta": {
+        "name": "App-Srv-01",
+        "shapeType": "computer"
+      },
+      "parent": "zone-az-b"
+    },
+    {
+      "type": "Computer",
+      "id": "server-4",
+      "position": { "x": 540, "y": 400 },
+      "size": { "width": 20, "height": 40 },
+      "isometricHeight": 40,
+      "z": 0,
+      "meta": {
+        "name": "App-Srv-02",
+        "shapeType": "computer"
+      },
+      "parent": "zone-az-b"
+    },
+    {
+      "type": "Link",
+      "id": "link-fw-to-lb",
+      "source": { "id": "firewall-1" },
+      "target": { "id": "loadbalancer-1" },
+      "vertices": [],
+      "z": -1,
+      "linkMeta": { "linkType": "Host Access", "bandwidth": "10Gbps", "medium": "fiber", "encryption": "TLS" }
+    },
+    {
+      "type": "Link",
+      "id": "link-lb-to-srv1",
+      "source": { "id": "loadbalancer-1" },
+      "target": { "id": "server-1" },
+      "vertices": [],
+      "z": -1,
+      "linkMeta": { "linkType": "Host Access", "bandwidth": "10Gbps", "medium": "copper", "encryption": "" }
+    },
+    {
+      "type": "Link",
+      "id": "link-lb-to-srv2",
+      "source": { "id": "loadbalancer-1" },
+      "target": { "id": "server-2" },
+      "vertices": [],
+      "z": -1,
+      "linkMeta": { "linkType": "Host Access", "bandwidth": "10Gbps", "medium": "copper", "encryption": "" }
+    },
+    {
+      "type": "Link",
+      "id": "link-lb-to-srv3",
+      "source": { "id": "loadbalancer-1" },
+      "target": { "id": "server-3" },
+      "vertices": [],
+      "z": -1,
+      "linkMeta": { "linkType": "Host Access", "bandwidth": "10Gbps", "medium": "copper", "encryption": "" }
+    },
+    {
+      "type": "Link",
+      "id": "link-lb-to-srv4",
+      "source": { "id": "loadbalancer-1" },
+      "target": { "id": "server-4" },
+      "vertices": [],
+      "z": -1,
+      "linkMeta": { "linkType": "Host Access", "bandwidth": "10Gbps", "medium": "copper", "encryption": "" }
+    }
+  ]
+}

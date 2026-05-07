@@ -6,11 +6,11 @@ import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFact
 import { drawGrid, switchView, transformationMatrix, applyShapeStyle } from './utils';
 import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
 import { parseSvgFootprint } from './svg-footprint';
-import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
+import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE } from './theme';
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
 const CD_GRID_COUNT = 10;
-import { ShapeRegistry, BUILT_IN_SHAPE_IDS, updateShapeDefinition, deleteShape, addShape, saveRegistryToStorage, ShapeLayer } from './shapes/shape-registry';
+import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, updateShapeDefinition, deleteShape, addShape, saveRegistryToStorage, ShapeLayer } from './shapes/shape-registry';
 import { BaseShape } from './shapes/shape-definition';
 import { PRIMARY_COLORS } from './colors';
 import { carbonIconToString, CarbonIcon } from './icons';
@@ -19,10 +19,16 @@ import Copy16 from '@carbon/icons/es/copy/16.js';
 import ChevronUp16 from '@carbon/icons/es/chevron--up/16.js';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
-import { getIconById, addUploadedIcon, removeUploadedIcon, stripAwsBackground } from './icon-catalog';
+import { getIconById, addUploadedIcon, removeUploadedIcon, stripAwsBackground, IconCatalogEntry, ensureFullCatalog } from './icon-catalog';
+
+function isVendorIcon(entry: IconCatalogEntry | undefined | null): boolean {
+    return entry?.source === 'aws' || entry?.source === 'gcp' || entry?.source === 'azure';
+}
 import { getVisibleIcons } from './icon-config';
 import { shapeStore } from './shape-store';
+import { saveToInventory, isDarkMode } from './svg-inventory';
 import { getComponentCollections } from './admin';
+import { buildComponentPanel, formatLabel, ComponentTreeItem } from './component-tree';
 
 // DOM elements
 const canvasEl     = document.getElementById('cd2-canvas')                as HTMLDivElement;
@@ -38,10 +44,6 @@ const canvasWrapEl = document.getElementById('cd2-canvas-wrap')           as HTM
 // The set of icons offered in the picker is further filtered by the admin
 // configuration below — see buildIconContent().
 
-function formatLabel(id: string): string {
-    return id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-}
-
 const SIDEBAR_INSET = 0;
 let currentShape: IsometricShape | null = null;
 let currentShape2D: IsometricShape | null = null;
@@ -53,7 +55,7 @@ let gridVEl: any = null;
 // Non-dimension template state (form factor, icon, style)
 let selectedBaseShape: BaseShape = (BASE_SHAPE_BY_ID[currentShapeId] || 'cuboid') as BaseShape;
 let selectedIcon: string | null = null;
-let selectedIconFace: 'top' | 'front' = 'top';
+let selectedIconFace: 'top' | 'front' | 'side' = 'top';
 let selectedIconSize = 1; // grid units; 1 GU = GRID_SIZE px
 let selectedStyle = { topColor: '', sideColor: '', frontColor: '', strokeColor: '' };
 
@@ -63,6 +65,10 @@ let selectedCornerRadius = 0; // pixels
 // Chamfer state (not persisted to registry; only applies to cuboid shapes)
 let selectedChamferSize = 0; // pixels
 let selectedChamferStart = 0; // fraction 0–1
+
+// Rotation state (0 or 90; applies to all shapes except cuboid)
+let selectedRotation = 0;
+let rotationAccordionLi: HTMLLIElement | null = null;
 
 // 3D modifier state
 let selectedTaper = 0;
@@ -84,6 +90,11 @@ let selectedIconBgChamfer = 0.18;
 // Direct references to the swatch buttons so syncExtrasFromShape can update
 // them without relying on a DOM query that could match unrelated elements.
 let iconBgSwatchRefs: Array<{ btn: HTMLElement; colorBase: string }> = [];
+
+// ── Variation state ───────────────────────────────────────────────────────────
+let hasVariations = false;
+let activeVariation: 'default' | 'turned90' = 'default';
+let rebuildVariationButtons: () => void = () => {};
 
 // ── Complex Shape state ────────────────────────────────────────────────────────
 let isComplexShape = false;
@@ -207,34 +218,7 @@ paper2D.setDimensions(
     GRID_SIZE * CD_GRID_COUNT * SCALE + CD_MARGIN * 2
 );
 
-// ── Zoom ─────────────────────────────────────────────────────────────────────
-
-function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
-    evt.preventDefault();
-    const clampedDelta = Math.sign(delta) * Math.min(Math.abs(delta), 1);
-    const step = clampedDelta > 0 ? 1.02 : 1 / 1.02;
-    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * step));
-    if (newZoom === currentZoom) return;
-    const factor = newZoom / currentZoom;
-    currentZoom = newZoom;
-    const mx = paper.matrix();
-    const sx = mx.a * x + mx.c * y + mx.e;
-    const sy = mx.b * x + mx.d * y + mx.f;
-    paper.matrix(
-        V.createSVGMatrix()
-            .translate(sx, sy)
-            .scale(factor)
-            .translate(-sx, -sy)
-            .multiply(mx)
-    );
-}
-
-paper.on('blank:mousewheel', (evt: dia.Event, x: number, y: number, delta: number) => {
-    applyWheelZoom(evt, x, y, delta);
-});
-paper.on('cell:mousewheel', (_cellView: dia.CellView, evt: dia.Event, x: number, y: number, delta: number) => {
-    applyWheelZoom(evt, x, y, delta);
-});
+// Zoom disabled in the component designer preview.
 
 // ── Fixed view matrices ───────────────────────────────────────────────────────
 // ISO paper is always isometric; 2D paper is always in 2D mode.
@@ -474,6 +458,37 @@ function buildPositionContent(container: HTMLElement) {
         onOffsetChange, container);
 }
 
+function buildRotationContent(container: HTMLElement) {
+    const row = document.createElement('div');
+    row.className = 'nr-sd-face-row';
+
+    const label = document.createElement('label');
+    label.className = 'nr-sd-row-label';
+    label.textContent = 'Rotation';
+    row.appendChild(label);
+
+    const switcher = document.createElement('div');
+    switcher.className = 'nr-sd-face-switcher';
+
+    for (const angle of [0, 90] as const) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-sd-face-btn' + (selectedRotation === angle ? ' nr-sd-face-btn--active' : '');
+        btn.textContent = `${angle}°`;
+        btn.addEventListener('click', () => {
+            selectedRotation = angle;
+            switcher.querySelectorAll('.nr-sd-face-btn').forEach(b =>
+                b.classList.toggle('nr-sd-face-btn--active', b === btn)
+            );
+            applyRotation();
+        });
+        switcher.appendChild(btn);
+    }
+
+    row.appendChild(switcher);
+    container.appendChild(row);
+}
+
 // Compact 2D preview thumbnails for the form-factor picker.
 // Match the "selectable tile" interaction used by the icon background colour picker
 // (same nr-sd-swatch-* classes). All preview outlines use currentColor so they
@@ -483,6 +498,10 @@ const FORM_FACTOR_PREVIEWS_SVG: Record<string, string> = {
     cylinder:  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12a7 2.5 0 0 0 14 0V6"/></svg>`,
     pyramid:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="12,4 20,20 4,20"/></svg>`,
     octagon:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,4 16,4 20,8 20,16 16,20 8,20 4,16 4,8"/></svg>`,
+    tube:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><ellipse cx="18" cy="12" rx="3" ry="6"/><line x1="6" y1="6" x2="18" y2="6"/><line x1="6" y1="18" x2="18" y2="18"/><ellipse cx="6" cy="12" rx="3" ry="6"/></svg>`,
+    pipe:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="18" rx="6" ry="3"/><line x1="6" y1="6" x2="6" y2="18"/><line x1="18" y1="6" x2="18" y2="18"/><ellipse cx="12" cy="6" rx="6" ry="3"/></svg>`,
+    duct:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,5 16,5 19,8 19,16 16,19 8,19 5,16 5,8"/><line x1="8" y1="5" x2="20" y2="5"/><line x1="5" y1="8" x2="17" y2="8"/><polygon points="20,5 23,8 23,16 20,19 20,5" opacity="0.5"/></svg>`,
+    channel:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="5,8 5,16 8,19 16,19 19,16 19,8 16,5 8,5"/><line x1="5" y1="8" x2="5" y2="20"/><line x1="8" y1="5" x2="8" y2="17"/><polygon points="5,20 8,23 16,23 19,20 5,20" opacity="0.5"/></svg>`,
     custom:    `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="4,8 12,4 20,10 16,20 6,18"/></svg>`,
 };
 
@@ -492,6 +511,10 @@ function buildFormFactorContent(container: HTMLElement) {
     const options: { value: BaseShape; label: string }[] = [
         { value: 'cuboid',      label: 'Cube' },
         { value: 'cylinder',    label: 'Cylinder' },
+        { value: 'tube',        label: 'Tube' },
+        { value: 'pipe',        label: 'Pipe' },
+        { value: 'duct',        label: 'Duct' },
+        { value: 'channel',     label: 'Channel' },
         { value: 'pyramid',     label: 'Pyramid' },
         { value: 'octagon',     label: 'Octagon' },
         { value: 'custom',      label: 'Custom' },
@@ -586,9 +609,8 @@ function buildFormFactorContent(container: HTMLElement) {
     }
     veSvg.appendChild(veGridGroup);
 
-    const vePolygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    vePolygon.classList.add('nr-vertex-editor__polygon');
-    veSvg.appendChild(vePolygon);
+    const vePolygonsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    veSvg.appendChild(vePolygonsGroup);
 
     const veHandlesGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     veSvg.appendChild(veHandlesGroup);
@@ -596,6 +618,29 @@ function buildFormFactorContent(container: HTMLElement) {
     const veEdgeHitsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     veSvg.insertBefore(veEdgeHitsGroup, veHandlesGroup);
 
+    // Path toolbar
+    const vePathToolbar = document.createElement('div');
+    vePathToolbar.className = 'nr-ve-path-toolbar';
+
+    const vePathTabsEl = document.createElement('div');
+    vePathTabsEl.className = 'nr-ve-path-tabs';
+    vePathToolbar.appendChild(vePathTabsEl);
+
+    const veAddPathBtn = document.createElement('button');
+    veAddPathBtn.type = 'button';
+    veAddPathBtn.className = 'nr-ve-path-add';
+    veAddPathBtn.textContent = '+';
+    veAddPathBtn.title = 'New path';
+    veAddPathBtn.addEventListener('click', () => {
+        customPaths.push([[0.25, 0.25], [0.5, 0.25], [0.5, 0.5], [0.25, 0.5]]);
+        activePathIdx = customPaths.length - 1;
+        rebuildPathTabs();
+        veRender();
+        veApply();
+    });
+    vePathToolbar.appendChild(veAddPathBtn);
+
+    veContainer.appendChild(vePathToolbar);
     veContainer.appendChild(veSvg);
 
     const veHint = document.createElement('div');
@@ -605,11 +650,43 @@ function buildFormFactorContent(container: HTMLElement) {
 
     container.appendChild(veContainer);
 
-    let customVerts: [number, number][] = [[0, 0], [1, 0], [1, 1], [0, 1]];
+    let customPaths: [number, number][][] = [[[0, 0], [1, 0], [1, 1], [0, 1]]];
+    let activePathIdx = 0;
+
+    function rebuildPathTabs() {
+        vePathTabsEl.innerHTML = '';
+        customPaths.forEach((_, idx) => {
+            const tab = document.createElement('button');
+            tab.type = 'button';
+            tab.className = 'nr-ve-path-tab' + (idx === activePathIdx ? ' nr-ve-path-tab--active' : '');
+            tab.textContent = `Path ${idx + 1}`;
+            tab.addEventListener('click', () => {
+                activePathIdx = idx;
+                rebuildPathTabs();
+                veRender();
+            });
+            if (customPaths.length > 1) {
+                const del = document.createElement('span');
+                del.className = 'nr-ve-path-tab__del';
+                del.textContent = '\u00d7';
+                del.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    customPaths.splice(idx, 1);
+                    if (activePathIdx >= customPaths.length) activePathIdx = customPaths.length - 1;
+                    rebuildPathTabs();
+                    veRender();
+                    veApply();
+                });
+                tab.appendChild(del);
+            }
+            vePathTabsEl.appendChild(tab);
+        });
+        vePathToolbar.style.display = selectedBaseShape === 'custom' ? '' : 'none';
+    }
 
     function veToScreen(nx: number, ny: number): [number, number] {
-        const area = VE_SIZE - VE_PAD * 2;
-        return [VE_PAD + nx * area, VE_PAD + ny * area];
+        const a = VE_SIZE - VE_PAD * 2;
+        return [VE_PAD + nx * a, VE_PAD + ny * a];
     }
 
     function veFromScreen(sx: number, sy: number): [number, number] {
@@ -623,42 +700,53 @@ function buildFormFactorContent(container: HTMLElement) {
     }
 
     function veRender() {
-        const pts = customVerts.map(([nx, ny]) => veToScreen(nx, ny));
-        vePolygon.setAttribute('points', pts.map(([x, y]) => `${x},${y}`).join(' '));
-
+        vePolygonsGroup.innerHTML = '';
         veHandlesGroup.innerHTML = '';
         veEdgeHitsGroup.innerHTML = '';
 
-        for (let i = 0; i < pts.length; i++) {
-            const [x, y] = pts[i];
-            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('cx', String(x));
-            circle.setAttribute('cy', String(y));
-            circle.setAttribute('r', String(VE_HANDLE));
-            circle.classList.add('nr-vertex-editor__handle');
-            circle.dataset.idx = String(i);
-            veHandlesGroup.appendChild(circle);
+        for (let p = 0; p < customPaths.length; p++) {
+            const path = customPaths[p];
+            const pts = path.map(([nx, ny]) => veToScreen(nx, ny));
+            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+            polygon.setAttribute('points', pts.map(([x, y]) => `${x},${y}`).join(' '));
+            polygon.classList.add('nr-vertex-editor__polygon');
+            if (p !== activePathIdx) polygon.classList.add('nr-vertex-editor__polygon--inactive');
+            vePolygonsGroup.appendChild(polygon);
 
-            const j = (i + 1) % pts.length;
-            const [x2, y2] = pts[j];
-            const edgeLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-            edgeLine.setAttribute('x1', String(x));
-            edgeLine.setAttribute('y1', String(y));
-            edgeLine.setAttribute('x2', String(x2));
-            edgeLine.setAttribute('y2', String(y2));
-            edgeLine.classList.add('nr-vertex-editor__edge-hit');
-            edgeLine.dataset.after = String(i);
-            veEdgeHitsGroup.appendChild(edgeLine);
+            if (p !== activePathIdx) continue;
+
+            for (let i = 0; i < pts.length; i++) {
+                const [x, y] = pts[i];
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', String(x));
+                circle.setAttribute('cy', String(y));
+                circle.setAttribute('r', String(VE_HANDLE));
+                circle.classList.add('nr-vertex-editor__handle');
+                circle.dataset.idx = String(i);
+                veHandlesGroup.appendChild(circle);
+
+                const j = (i + 1) % pts.length;
+                const [x2, y2] = pts[j];
+                const edgeLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                edgeLine.setAttribute('x1', String(x));
+                edgeLine.setAttribute('y1', String(y));
+                edgeLine.setAttribute('x2', String(x2));
+                edgeLine.setAttribute('y2', String(y2));
+                edgeLine.classList.add('nr-vertex-editor__edge-hit');
+                edgeLine.dataset.after = String(i);
+                veEdgeHitsGroup.appendChild(edgeLine);
+            }
         }
     }
 
     function veApply() {
         if (!currentShape) return;
-        currentShape.set('normalizedVerts', customVerts.map(v => [...v]));
-        if (currentShape2D) currentShape2D.set('normalizedVerts', customVerts.map(v => [...v]));
+        const allPaths = customPaths.map(path => path.map(v => [...v] as [number, number]));
+        currentShape.set('normalizedVerts', allPaths);
+        if (currentShape2D) currentShape2D.set('normalizedVerts', allPaths);
     }
 
-    // Drag handles
+    // Drag handles (active path only)
     let veDragIdx = -1;
     veSvg.addEventListener('pointerdown', (e: PointerEvent) => {
         const target = e.target as SVGElement;
@@ -673,7 +761,7 @@ function buildFormFactorContent(container: HTMLElement) {
         const rect = veSvg.getBoundingClientRect();
         const sx = e.clientX - rect.left;
         const sy = e.clientY - rect.top;
-        customVerts[veDragIdx] = veFromScreen(sx, sy);
+        customPaths[activePathIdx][veDragIdx] = veFromScreen(sx, sy);
         veRender();
         veApply();
     });
@@ -686,7 +774,7 @@ function buildFormFactorContent(container: HTMLElement) {
             const after = parseInt(target.dataset.after, 10);
             const rect = veSvg.getBoundingClientRect();
             const [nx, ny] = veFromScreen(e.clientX - rect.left, e.clientY - rect.top);
-            customVerts.splice(after + 1, 0, [nx, ny]);
+            customPaths[activePathIdx].splice(after + 1, 0, [nx, ny]);
             veRender();
             veApply();
         }
@@ -697,9 +785,9 @@ function buildFormFactorContent(container: HTMLElement) {
         e.preventDefault();
         const target = e.target as SVGElement;
         if (target.classList.contains('nr-vertex-editor__handle') && target.dataset.idx) {
-            if (customVerts.length <= 3) return;
+            if (customPaths[activePathIdx].length <= 3) return;
             const idx = parseInt(target.dataset.idx, 10);
-            customVerts.splice(idx, 1);
+            customPaths[activePathIdx].splice(idx, 1);
             veRender();
             veApply();
         }
@@ -707,14 +795,30 @@ function buildFormFactorContent(container: HTMLElement) {
 
     veContainerRef = veContainer;
     onCustomSelected = () => {
-        if (currentShape && currentShape.get('normalizedVerts')?.length >= 3) {
-            customVerts = (currentShape.get('normalizedVerts') as [number, number][]).map(v => [...v] as [number, number]);
+        if (currentShape) {
+            const raw = currentShape.get('normalizedVerts');
+            if (raw && raw.length > 0) {
+                if (typeof raw[0][0] === 'number') {
+                    customPaths = [(raw as [number, number][]).map(v => [...v] as [number, number])];
+                } else {
+                    customPaths = (raw as [number, number][][]).map(
+                        (path: [number, number][]) => path.map(v => [...v] as [number, number])
+                    );
+                }
+            } else {
+                customPaths = [[[0, 0], [1, 0], [1, 1], [0, 1]]];
+            }
         }
+        activePathIdx = 0;
+        rebuildPathTabs();
         veRender();
         veApply();
     };
 
-    if (selectedBaseShape === 'custom') veRender();
+    if (selectedBaseShape === 'custom') {
+        rebuildPathTabs();
+        veRender();
+    }
 }
 
 // Mirror the currently selected radio input into the preview-tile classes.
@@ -812,7 +916,7 @@ function applyIconToCurrentShape() {
         return;
     }
     const isAdaptive = selectedIconAdaptive && !selectedIconBgEnabled;
-    const isAwsIcon = icon.source === 'aws';
+    const isAwsIcon = isVendorIcon(icon as IconCatalogEntry);
     const monoAws = isAwsIcon && selectedIconMonochrome;
     const iconSvg = monoAws ? stripAwsBackground(icon.svg) : icon.svg;
     const applyWhite = !isAdaptive && (!isAwsIcon || monoAws);
@@ -840,27 +944,8 @@ function applyIconToCurrentShape() {
     let topIconAttrs: Record<string, unknown>;
 
     if (selectedIconFace === 'front') {
-        // Project the icon onto the front face parallelogram.
-        //
-        // The front face has vertices (in shape-local model space, r=0):
-        //   V3=(0,h), V2=(w,h), topV2=(w-iH,h-iH), topV3=(-iH,h-iH)
-        //
-        // Local coordinate system on the face:
-        //   origin  = V3 = (0, h)
-        //   x-axis  = (1, 0) per unit  (along the bottom edge)
-        //   y-axis  = (-1,-1) per unit  (up the face, toward topV3)
-        //
-        // SVG matrix(a,b,c,d,e,f): X = a*lx + c*ly + e, Y = b*lx + d*ly + f
-        //   → matrix(1, 0, -1, -1, 0, h)
-        //
-        // The icon occupies [localX, localY, iconPx, iconPx] in local space,
-        // centered within [0..w] × [0..iH].
         const localX = (w - iconPx) / 2;
         const localY = (iH - iconPx) / 2;
-        // The projection matrix inverts the y-axis, so the icon content is
-        // rendered upside down on the face. Rotate 180° around the icon's
-        // own centre (applied BEFORE the projection matrix in SVG transform
-        // order) to compensate.
         const cx = localX + iconPx / 2;
         const cy = localY + iconPx / 2;
         topIconAttrs = {
@@ -870,6 +955,23 @@ function applyIconToCurrentShape() {
             width:  iconPx,
             height: iconPx,
             transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`,
+        };
+    } else if (selectedIconFace === 'side') {
+        // Side face (right edge V1→V2):
+        //   V1=(w,0), V2=(w,h), topV1=(w-iH,-iH), topV2=(w-iH,h-iH)
+        // Local coords: origin=V1=(w,0), x-axis=(0,1), y-axis=(-1,-1)
+        //   → matrix(0, 1, -1, -1, w, 0)
+        const localX = (h - iconPx) / 2;
+        const localY = (iH - iconPx) / 2;
+        const cx = localX + iconPx / 2;
+        const cy = localY + iconPx / 2;
+        topIconAttrs = {
+            href,
+            x: localX,
+            y: localY,
+            width:  iconPx,
+            height: iconPx,
+            transform: `matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy})`,
         };
     } else {
         // Top face: standard positioning in model space, no extra transform.
@@ -986,26 +1088,31 @@ function buildIconContent(container: HTMLElement) {
     }
 
     // Icon source tabs
-    let iconSourceTab: 'common' | 'aws' = 'common';
+    let iconSourceTab: 'common' | 'aws' | 'gcp' | 'azure' = 'common';
     const tabRow = document.createElement('div');
     tabRow.className = 'nr-sd-icon-tabs';
-    const commonTab = document.createElement('button');
-    commonTab.type = 'button';
-    commonTab.className = 'nr-sd-icon-tab nr-sd-icon-tab--active';
-    commonTab.textContent = 'Common';
-    const awsTab = document.createElement('button');
-    awsTab.type = 'button';
-    awsTab.className = 'nr-sd-icon-tab';
-    awsTab.textContent = 'AWS';
-    const setActiveTab = (tab: 'common' | 'aws') => {
-        iconSourceTab = tab;
-        commonTab.classList.toggle('nr-sd-icon-tab--active', tab === 'common');
-        awsTab.classList.toggle('nr-sd-icon-tab--active', tab === 'aws');
-    };
-    commonTab.addEventListener('click', () => { setActiveTab('common'); renderGrid(); });
-    awsTab.addEventListener('click', () => { setActiveTab('aws'); renderGrid(); });
-    tabRow.appendChild(commonTab);
-    tabRow.appendChild(awsTab);
+
+    const tabDefs: Array<{ key: 'common' | 'aws' | 'gcp' | 'azure'; label: string }> = [
+        { key: 'common', label: 'Common' },
+        { key: 'aws',    label: 'AWS' },
+        { key: 'gcp',    label: 'GCP' },
+        { key: 'azure',  label: 'Azure' },
+    ];
+    const tabBtns = new Map<string, HTMLButtonElement>();
+
+    for (const td of tabDefs) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-sd-icon-tab' + (td.key === 'common' ? ' nr-sd-icon-tab--active' : '');
+        btn.textContent = td.label;
+        btn.addEventListener('click', () => {
+            iconSourceTab = td.key;
+            tabBtns.forEach((b, k) => b.classList.toggle('nr-sd-icon-tab--active', k === td.key));
+            renderGrid();
+        });
+        tabBtns.set(td.key, btn);
+        tabRow.appendChild(btn);
+    }
     container.appendChild(tabRow);
 
     const searchRow = document.createElement('div');
@@ -1030,9 +1137,10 @@ function buildIconContent(container: HTMLElement) {
         grid.innerHTML = '';
         const visible = getVisible();
         const term = iconSearchTerm.trim().toLowerCase();
-        const sourceFiltered = iconSourceTab === 'aws'
-            ? visible.filter(ic => ic.source === 'aws')
-            : visible.filter(ic => ic.source !== 'aws');
+        const vendorSources = new Set(['aws', 'gcp', 'azure']);
+        const sourceFiltered = vendorSources.has(iconSourceTab)
+            ? visible.filter(ic => ic.source === iconSourceTab)
+            : visible.filter(ic => !vendorSources.has(ic.source));
         const filtered = term
             ? sourceFiltered.filter(ic => ic.label.toLowerCase().includes(term))
             : sourceFiltered;
@@ -1044,7 +1152,8 @@ function buildIconContent(container: HTMLElement) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'nr-sd-icon-btn';
-            if (icon.source === 'aws') btn.classList.add('nr-icon-color');
+            if (icon.source === 'aws' || icon.source === 'gcp' || icon.source === 'azure') btn.classList.add('nr-icon-color');
+            if (icon.source === 'gcp') btn.style.background = '#cccccc';
             btn.setAttribute('title', icon.label);
             btn.setAttribute('aria-label', icon.label);
             btn.setAttribute('data-icon-id', icon.id ?? '');
@@ -1053,11 +1162,11 @@ function buildIconContent(container: HTMLElement) {
             btn.innerHTML = icon.svg;
 
             btn.addEventListener('click', () => {
-                const wasAws = selectedIcon ? getIconById(selectedIcon)?.source === 'aws' : false;
-                const isAws = icon.source === 'aws';
+                const wasVendor = selectedIcon ? isVendorIcon(getIconById(selectedIcon)) : false;
+                const isVendor = isVendorIcon(icon as IconCatalogEntry);
                 selectedIcon = icon.id;
-                if (isAws) {
-                    if (!wasAws) {
+                if (isVendor) {
+                    if (!wasVendor) {
                         selectedIconBgEnabled = false;
                         selectedIconMonochrome = false;
                         selectedIconBgShape = 'square';
@@ -1065,7 +1174,7 @@ function buildIconContent(container: HTMLElement) {
                     }
                     const entry = getIconById(icon.id!);
                     if (entry?.bgColor) selectedIconBgColor = entry.bgColor;
-                } else if (wasAws) {
+                } else if (wasVendor) {
                     selectedIconBgEnabled = true;
                 }
                 grid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
@@ -1183,7 +1292,7 @@ function buildIconContent(container: HTMLElement) {
     // AWS icon mode switcher — Colored or Monochrome
     const iconModeRow = document.createElement('div');
     iconModeRow.className = 'nr-sd-face-row';
-    const isAwsSelected = selectedIcon ? getIconById(selectedIcon)?.source === 'aws' : false;
+    const isAwsSelected = selectedIcon ? isVendorIcon(getIconById(selectedIcon)) : false;
     iconModeRow.style.display = isAwsSelected ? '' : 'none';
 
     const modeLbl = document.createElement('label');
@@ -1272,7 +1381,7 @@ function buildIconContent(container: HTMLElement) {
 
     function syncIconControlVisibility() {
         const curIcon = selectedIcon ? getIconById(selectedIcon) : undefined;
-        const isAws = curIcon?.source === 'aws';
+        const isAws = isVendorIcon(curIcon);
         iconModeRow.style.display = isAws ? '' : 'none';
         awsShapeRow.style.display = isAws ? '' : 'none';
         awsRadiusRow.style.display = (isAws && selectedIconBgShape === 'square') ? '' : 'none';
@@ -1295,10 +1404,9 @@ function buildIconContent(container: HTMLElement) {
         });
     }
 
-    // Face toggle — top or front (cuboid only)
+    // Face toggle — top, front, or side
     iconFaceRowEl = document.createElement('div');
     iconFaceRowEl.className = 'nr-sd-face-row';
-    iconFaceRowEl.style.display = selectedBaseShape === 'cuboid' ? '' : 'none';
 
     const faceLbl = document.createElement('label');
     faceLbl.className = 'nr-sd-row-label';
@@ -1307,7 +1415,7 @@ function buildIconContent(container: HTMLElement) {
     const faceSwitcher = document.createElement('div');
     faceSwitcher.className = 'nr-sd-face-switcher';
 
-    for (const face of ['top', 'front'] as const) {
+    for (const face of ['top', 'front', 'side'] as const) {
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'nr-sd-face-btn' + (selectedIconFace === face ? ' nr-sd-face-btn--active' : '');
@@ -1778,7 +1886,7 @@ function buildInspectorPanel() {
     const ctSelect = componentTypeSelect;
     ctSelect.id = 'sd-component-type';
     ctSelect.className = 'cds--text-input cds--text-input--sm';
-    const ctOptions = ['', 'Server', 'Firewall', 'Switch', 'Storage', 'NIC'];
+    const ctOptions = ['', 'Server', 'Firewall', 'Switch', 'Storage', 'NIC', 'HSM', 'Custom'];
     for (const opt of ctOptions) {
         const el = document.createElement('option');
         el.value = opt;
@@ -1851,11 +1959,72 @@ function buildInspectorPanel() {
     complexToggleWrapper.appendChild(toggleText);
     complexToggleWrapper.appendChild(toggleTrack);
 
+    // Variations toggle
+    const variationsWrapper = document.createElement('div');
+    variationsWrapper.className = 'nr-toggle' + (hasVariations ? ' nr-toggle--checked' : '');
+
+    const variationsText = document.createElement('span');
+    variationsText.className = 'nr-toggle__label-text';
+    variationsText.textContent = 'Variations';
+
+    const variationsTrack = document.createElement('button');
+    variationsTrack.type = 'button';
+    variationsTrack.className = 'nr-toggle__track';
+    variationsTrack.setAttribute('role', 'switch');
+    variationsTrack.setAttribute('aria-checked', hasVariations ? 'true' : 'false');
+    variationsTrack.setAttribute('aria-label', 'Variations');
+
+    const variationSwitcher = document.createElement('div');
+    variationSwitcher.className = 'nr-sd-face-row';
+    variationSwitcher.style.display = hasVariations ? '' : 'none';
+
+    const varLbl = document.createElement('label');
+    varLbl.className = 'nr-sd-row-label';
+    varLbl.textContent = 'Editing';
+
+    const varBtnGroup = document.createElement('div');
+    varBtnGroup.className = 'nr-sd-face-switcher';
+
+    rebuildVariationButtons = () => {
+        varBtnGroup.innerHTML = '';
+        for (const v of ['default', 'turned90'] as const) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'nr-sd-face-btn' + (activeVariation === v ? ' nr-sd-face-btn--active' : '');
+            btn.textContent = v === 'default' ? 'Default' : '90° Turned';
+            btn.addEventListener('click', () => {
+                if (activeVariation === v) return;
+                switchVariation(v);
+            });
+            varBtnGroup.appendChild(btn);
+        }
+    };
+    rebuildVariationButtons();
+
+    variationSwitcher.appendChild(varLbl);
+    variationSwitcher.appendChild(varBtnGroup);
+
+    variationsTrack.addEventListener('click', () => {
+        hasVariations = !variationsWrapper.classList.contains('nr-toggle--checked');
+        variationsWrapper.classList.toggle('nr-toggle--checked', hasVariations);
+        variationsTrack.setAttribute('aria-checked', hasVariations ? 'true' : 'false');
+        variationSwitcher.style.display = hasVariations ? '' : 'none';
+        if (!hasVariations) {
+            activeVariation = 'default';
+            rebuildVariationButtons();
+        }
+    });
+
+    variationsWrapper.appendChild(variationsText);
+    variationsWrapper.appendChild(variationsTrack);
+
     nameSection.appendChild(nameLabel);
     nameSection.appendChild(shapeNameInput);
     nameSection.appendChild(ctLabel);
     nameSection.appendChild(ctSelect);
     nameSection.appendChild(hideLabelWrapper);
+    nameSection.appendChild(variationsWrapper);
+    nameSection.appendChild(variationSwitcher);
     nameSection.appendChild(complexToggleWrapper);
     inspectorEl.appendChild(nameSection);
 
@@ -1865,6 +2034,11 @@ function buildInspectorPanel() {
     accordion.appendChild(buildAccordionItem('Dimensions',      false, buildDimensionsContent));
     modifiersAccordionLi = buildAccordionItem('Modifiers', false, buildModifiersContent);
     accordion.appendChild(modifiersAccordionLi);
+
+    // Rotation section — visible for all shapes except cuboid
+    rotationAccordionLi = buildAccordionItem('Rotation', false, buildRotationContent);
+    rotationAccordionLi.style.display = selectedBaseShape !== 'cuboid' ? '' : 'none';
+    accordion.appendChild(rotationAccordionLi);
 
     // Position section — only visible in complex shape mode
     positionAccordionLi = buildAccordionItem('Position', false, buildPositionContent);
@@ -1916,16 +2090,40 @@ function buildInspectorPanel() {
     exportSvgBtn.textContent = 'Export SVG';
     exportSvgBtn.addEventListener('click', exportShapeSvg);
 
+    const saveToInvBtn = document.createElement('button');
+    saveToInvBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    saveToInvBtn.type = 'button';
+    saveToInvBtn.style.width = '100%';
+    saveToInvBtn.textContent = 'Save SVG to Inventory';
+    saveToInvBtn.addEventListener('click', async () => {
+        const root = document.documentElement;
+        const wasDark = isDarkMode();
+        const svgCurrent = await buildShapeSvgString();
+        if (!svgCurrent) return;
+        root.className = wasDark ? 'cds--white' : 'cds--g100';
+        void document.body.offsetHeight;
+        const svgOther = await buildShapeSvgString();
+        root.className = wasDark ? 'cds--g100' : 'cds--white';
+        const svgLight = wasDark ? (svgOther ?? svgCurrent) : svgCurrent;
+        const svgDark  = wasDark ? svgCurrent : (svgOther ?? svgCurrent);
+        const name = ShapeRegistry[currentShapeId]?.displayName ?? currentShapeId;
+        const generalStored = shapeStore.list('general').find(s => s.id === currentShapeId);
+        const col = generalStored?.definition.collection || ShapeRegistry[currentShapeId]?.collection || 'General';
+        saveToInventory(currentShapeId, name, col, svgLight, svgDark);
+        showToast('SVG saved to inventory');
+    });
+
     footer.appendChild(saveBtn);
     footer.appendChild(duplicateBtn);
     footer.appendChild(exportSvgBtn);
+    footer.appendChild(saveToInvBtn);
     footer.appendChild(deleteBtn);
     inspectorEl.appendChild(footer);
 }
 
 // All form factors except 'cuboid' require width === height (square base).
 function requiresSquareBase(baseShape: string): boolean {
-    return baseShape !== 'cuboid' && baseShape !== 'custom';
+    return baseShape !== 'cuboid' && baseShape !== 'custom' && baseShape !== 'tube' && baseShape !== 'pipe' && baseShape !== 'duct' && baseShape !== 'channel';
 }
 
 // Form factors that expose the corner radius slider.
@@ -1973,6 +2171,16 @@ function applyChamferStartToCurrentShape() {
     if (!currentShape) return;
     currentShape.set('chamferStart', selectedChamferStart);
     currentShape2D?.set('chamferStart', selectedChamferStart);
+}
+
+function applyRotation() {
+    if (isComplexShape) {
+        for (const s of layerShapes) s?.set('shapeRotation', selectedRotation);
+        for (const s of layerShapes2D) s?.set('shapeRotation', selectedRotation);
+        return;
+    }
+    currentShape?.set('shapeRotation', selectedRotation);
+    currentShape2D?.set('shapeRotation', selectedRotation);
 }
 
 function apply3DModifiers() {
@@ -2024,7 +2232,7 @@ function updateDimensionLock() {
     const currentSvgLayer = isComplexShape ? (layers[selectedLayerIndex] ?? null) : null;
     const hasSvgLayer     = currentSvgLayer !== null && isLayerSvg(currentSvgLayer);
     const isCuboid = supportsCornerRadius(selectedBaseShape);
-    if (iconFaceRowEl)     iconFaceRowEl.style.display     = isCuboid ? '' : 'none';
+    if (rotationAccordionLi) rotationAccordionLi.style.display = selectedBaseShape !== 'cuboid' ? '' : 'none';
     if (modifiersSvgInfoEl) modifiersSvgInfoEl.style.display = hasSvgLayer ? '' : 'none';
 }
 
@@ -2066,6 +2274,7 @@ function syncExtrasFromShape(id: string) {
         frontColor:  defaults?.style?.frontColor  ?? '',
         strokeColor: defaults?.style?.strokeColor ?? '',
     };
+    selectedRotation  = defaults?.rotation  ?? 0;
     selectedTaper     = defaults?.taper     ?? 0;
     selectedTwist     = defaults?.twist     ?? 0;
     selectedScaleTopX = defaults?.scaleTopX ?? 1;
@@ -2208,6 +2417,7 @@ function applyFormFactorToCanvas() {
         }
     }
     apply3DModifiers();
+    applyRotation();
 }
 
 // Apply slider dimension values to the preview shape (grid units → px).
@@ -2259,13 +2469,12 @@ function onFieldChange() {
 }
 
 // Persist all template values to the Shape Registry.
-function onSave() {
-    // Pre-compute icon URI (shared by both simple and complex paths)
+function collectCurrentDef(): Partial<ShapeDefinition> {
     let iconHref: string | undefined;
     if (selectedIcon) {
         const iconEntry = getIconById(selectedIcon);
         if (iconEntry) {
-            const isAws = iconEntry.source === 'aws';
+            const isAws = isVendorIcon(iconEntry);
             const isAwsMono = isAws && selectedIconMonochrome;
             const iconSvg = isAwsMono ? stripAwsBackground(iconEntry.svg) : iconEntry.svg;
             const applyWhite = !isAws || isAwsMono;
@@ -2276,11 +2485,9 @@ function onSave() {
         }
     }
 
-    if (isComplexShape) {
-        if (layers.length === 0) return;
+    if (isComplexShape && layers.length > 0) {
         const layer1 = layers[0];
-        updateShapeDefinition(currentShapeId, {
-            displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
+        return {
             defaultSize: { width: layer1.width, height: layer1.height },
             defaultIsometricHeight: layer1.depth,
             baseShape: layer1.baseShape,
@@ -2297,29 +2504,20 @@ function onSave() {
             chamferSize: selectedChamferSize,
             chamferStart: selectedChamferStart || undefined,
             style: {
-                topColor:    selectedStyle.topColor    || undefined,
-                frontColor:  selectedStyle.frontColor  || undefined,
-                sideColor:   selectedStyle.sideColor   || undefined,
+                topColor: selectedStyle.topColor || undefined,
+                frontColor: selectedStyle.frontColor || undefined,
+                sideColor: selectedStyle.sideColor || undefined,
                 strokeColor: selectedStyle.strokeColor || undefined,
             },
             complexShape: true,
             layers: layers.map(l => ({ ...l, style: { ...l.style } })),
-        });
-        saveRegistryToStorage();
-        document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
-        buildPalettePanel();
-        return;
+        };
     }
 
-    if (!currentShape) return;
-    const widthGU  = parseFloat(widthInput.value);
+    const widthGU = parseFloat(widthInput.value);
     const heightGU = parseFloat(heightInput.value);
-    const depthGU  = parseFloat(depthInput.value);
-    if (isNaN(widthGU) || isNaN(heightGU) || isNaN(depthGU)) return;
-
-    updateShapeDefinition(currentShapeId, {
-        displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
-        componentType: componentTypeSelect?.value || undefined,
+    const depthGU = parseFloat(depthInput.value);
+    return {
         defaultSize: { width: widthGU * GRID_SIZE, height: heightGU * GRID_SIZE },
         defaultIsometricHeight: depthGU * GRID_SIZE,
         baseShape: selectedBaseShape,
@@ -2335,9 +2533,9 @@ function onSave() {
         chamferSize: selectedChamferSize,
         chamferStart: selectedChamferStart || undefined,
         style: {
-            topColor:    selectedStyle.topColor    || undefined,
-            frontColor:  selectedStyle.frontColor  || undefined,
-            sideColor:   selectedStyle.sideColor   || undefined,
+            topColor: selectedStyle.topColor || undefined,
+            frontColor: selectedStyle.frontColor || undefined,
+            sideColor: selectedStyle.sideColor || undefined,
             strokeColor: selectedStyle.strokeColor || undefined,
         },
         complexShape: false,
@@ -2345,14 +2543,118 @@ function onSave() {
         customVerts: selectedBaseShape === 'custom' && currentShape
             ? (currentShape.get('normalizedVerts') as [number, number][] | undefined)
             : undefined,
+        rotation: selectedRotation || undefined,
         taper: selectedTaper || undefined,
         twist: selectedTwist || undefined,
         scaleTopX: selectedScaleTopX !== 1 ? selectedScaleTopX : undefined,
         scaleTopY: selectedScaleTopY !== 1 ? selectedScaleTopY : undefined,
-    });
+    };
+}
+
+function switchVariation(target: 'default' | 'turned90') {
+    const currentDef = collectCurrentDef();
+    if (activeVariation === 'default') {
+        updateShapeDefinition(currentShapeId, {
+            ...currentDef,
+            displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
+            componentType: componentTypeSelect?.value || undefined,
+            hasVariations: true,
+        });
+    } else {
+        updateShapeDefinition(currentShapeId, { turned90: currentDef as ShapeDefinition });
+    }
+
+    activeVariation = target;
+    const displayName = shapeNameInput?.value.trim() || formatLabel(currentShapeId);
+
+    if (target === 'turned90') {
+        const t90 = ShapeRegistry[currentShapeId]?.turned90;
+        if (t90) {
+            const tempId = '__variation_temp__';
+            ShapeRegistry[tempId] = { ...t90, displayName };
+            loadShapeIntoCanvas(tempId);
+            delete ShapeRegistry[tempId];
+        } else {
+            loadShapeIntoCanvas(currentShapeId);
+        }
+    } else {
+        loadShapeIntoCanvas(currentShapeId);
+    }
+
+    if (shapeNameInput) shapeNameInput.value = displayName;
+    rebuildVariationButtons();
+}
+
+async function onSave() {
+    const def = collectCurrentDef();
+    const name = shapeNameInput?.value.trim() || formatLabel(currentShapeId);
+    const ct = componentTypeSelect?.value || undefined;
+
+    const existing = ShapeRegistry[currentShapeId];
+    const update: Partial<ShapeDefinition> = {
+        ...def,
+        displayName: name,
+        componentType: ct,
+        hasVariations: hasVariations || undefined,
+    };
+
+    if (hasVariations) {
+        if (activeVariation === 'default') {
+            update.turned90 = existing?.turned90 as ShapeDefinition | undefined;
+        } else {
+            // Editing turned90: keep existing default fields, store current as turned90
+            if (existing) {
+                update.defaultSize = existing.defaultSize;
+                update.defaultIsometricHeight = existing.defaultIsometricHeight;
+                update.baseShape = existing.baseShape;
+                update.iconFace = existing.iconFace;
+                update.icon = existing.icon;
+                update.iconSize = existing.iconSize;
+                update.iconBgColor = existing.iconBgColor;
+                update.iconBgShape = existing.iconBgShape;
+                update.iconBgRadius = existing.iconBgRadius;
+                update.iconBgChamfer = existing.iconBgChamfer;
+                update.iconHref = existing.iconHref;
+                update.cornerRadius = existing.cornerRadius;
+                update.chamferSize = existing.chamferSize;
+                update.chamferStart = existing.chamferStart;
+                update.style = existing.style;
+                update.complexShape = existing.complexShape;
+                update.layers = existing.layers;
+                update.customVerts = existing.customVerts;
+                update.rotation = existing.rotation;
+                update.taper = existing.taper;
+                update.twist = existing.twist;
+                update.scaleTopX = existing.scaleTopX;
+                update.scaleTopY = existing.scaleTopY;
+            }
+            update.turned90 = def as ShapeDefinition;
+        }
+    } else {
+        update.turned90 = undefined;
+    }
+
+    updateShapeDefinition(currentShapeId, update);
     saveRegistryToStorage();
     document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
     buildPalettePanel();
+
+    // Auto-save SVG to inventory (both light + dark variants)
+    const root = document.documentElement;
+    const wasDark = isDarkMode();
+    const svgCurrent = await buildShapeSvgString();
+    if (svgCurrent) {
+        root.className = wasDark ? 'cds--white' : 'cds--g100';
+        void document.body.offsetHeight;
+        const svgOther = await buildShapeSvgString();
+        root.className = wasDark ? 'cds--g100' : 'cds--white';
+        const svgLight = wasDark ? (svgOther ?? svgCurrent) : svgCurrent;
+        const svgDark  = wasDark ? svgCurrent : (svgOther ?? svgCurrent);
+        const generalStored = shapeStore.list('general').find(s => s.id === currentShapeId);
+        const col = generalStored?.definition.collection || ShapeRegistry[currentShapeId]?.collection || 'General';
+        saveToInventory(currentShapeId, name, col, svgLight, svgDark);
+        document.dispatchEvent(new CustomEvent('nextrack:inventory-changed'));
+    }
 }
 
 function centerShapeOnCanvas(shape: IsometricShape, shape2D: IsometricShape | null) {
@@ -3276,10 +3578,11 @@ function nameToId(name: string): string {
     return candidate;
 }
 
-function onCreateShape(name: string) {
+function onCreateShape(name: string, componentType?: string) {
     const id = nameToId(name);
     addShape(id, {
         displayName: name,
+        componentType,
         defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
         defaultIsometricHeight: GRID_SIZE * 0.5,
     });
@@ -3449,7 +3752,7 @@ function showNewShapeModal() {
     const headingEl = document.createElement('p');
     headingEl.className = 'cds--modal-header__heading';
     headingEl.id = 'nr-cd-modal-heading';
-    headingEl.textContent = 'New Shape';
+    headingEl.textContent = 'New Component';
 
     const closeBtnWrapper = document.createElement('div');
     closeBtnWrapper.className = 'cds--modal-close-button';
@@ -3477,7 +3780,7 @@ function showNewShapeModal() {
     const label = document.createElement('label');
     label.className = 'cds--label';
     label.setAttribute('for', 'nr-cd-name-input');
-    label.textContent = 'Shape Name';
+    label.textContent = 'Component Name';
 
     const outerWrapper = document.createElement('div');
     outerWrapper.className = 'cds--text-input__field-outer-wrapper';
@@ -3502,6 +3805,41 @@ function showNewShapeModal() {
     inputWrapper.appendChild(errorEl);
     formItem.appendChild(inputWrapper);
     bodyEl.appendChild(formItem);
+
+    // Component Type dropdown
+    const typeFormItem = document.createElement('div');
+    typeFormItem.className = 'cds--form-item';
+    typeFormItem.style.marginTop = '12px';
+
+    const typeWrapper = document.createElement('div');
+    typeWrapper.className = 'cds--select';
+
+    const typeLabel = document.createElement('label');
+    typeLabel.className = 'cds--label';
+    typeLabel.setAttribute('for', 'nr-cd-type-select');
+    typeLabel.textContent = 'Component Type';
+
+    const typeInputWrapper = document.createElement('div');
+    typeInputWrapper.className = 'cds--select-input-wrapper';
+
+    const typeSelect = document.createElement('select');
+    typeSelect.id = 'nr-cd-type-select';
+    typeSelect.className = 'cds--select-input';
+
+    for (const opt of ['', 'Server', 'Firewall', 'Switch', 'Storage', 'NIC', 'HSM', 'Custom']) {
+        const el = document.createElement('option');
+        el.value = opt;
+        el.textContent = opt || '— none —';
+        el.className = 'cds--select-option';
+        typeSelect.appendChild(el);
+    }
+
+    typeInputWrapper.appendChild(typeSelect);
+    typeInputWrapper.insertAdjacentHTML('beforeend', CDS_ICON_CHEVRON_DOWN);
+    typeWrapper.appendChild(typeLabel);
+    typeWrapper.appendChild(typeInputWrapper);
+    typeFormItem.appendChild(typeWrapper);
+    bodyEl.appendChild(typeFormItem);
 
     const footerEl = document.createElement('div');
     footerEl.className = 'cds--modal-footer';
@@ -3531,7 +3869,7 @@ function showNewShapeModal() {
             return;
         }
         modalEl.remove();
-        onCreateShape(name);
+        onCreateShape(name, typeSelect.value || undefined);
     });
 
     nameInput.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -3567,32 +3905,137 @@ function cleanSvgForExport(clone: SVGSVGElement): void {
     });
 }
 
-function exportShapeSvg(): void {
-    const svgEl = paper.el.querySelector('svg');
-    if (!svgEl) return;
+function rasterizeSvgToDataUri(href: string, width: number, height: number): Promise<string> {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const scale = 2;
+            canvas.width = width * scale;
+            canvas.height = height * scale;
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(href);
+        img.src = href;
+    });
+}
 
-    const clone = svgEl.cloneNode(true) as SVGSVGElement;
-    cleanSvgForExport(clone);
+async function inlineSvgImage(img: SVGImageElement, href: string): Promise<void> {
+    const w = parseFloat(img.getAttribute('width') || '0');
+    const h = parseFloat(img.getAttribute('height') || '0');
+    if (href.startsWith('data:image/svg+xml') && w > 0 && h > 0) {
+        const pngUri = await rasterizeSvgToDataUri(href, w, h);
+        img.setAttribute('href', pngUri);
+        img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', pngUri);
+    } else {
+        img.setAttribute('href', href);
+        img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
+    }
+}
 
-    clone.style.position = 'absolute';
-    clone.style.left = '-9999px';
-    document.body.appendChild(clone);
+function showToast(message: string): void {
+    const n = document.createElement('div');
+    n.className = 'cds--inline-notification cds--inline-notification--success';
+    n.setAttribute('role', 'status');
+    n.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:9000;min-width:260px;max-width:400px;';
+    n.innerHTML = `<div class="cds--inline-notification__details"><p class="cds--inline-notification__title">${message}</p></div>`;
+    document.body.appendChild(n);
+    setTimeout(() => n.remove(), 3000);
+}
 
-    const contentGroup = clone.querySelector('.joint-cells-layer') as SVGGElement | null;
-    const bbox = contentGroup ? contentGroup.getBBox() : clone.getBBox();
-    document.body.removeChild(clone);
+async function cloneShapeView(shape: IsometricShape): Promise<SVGGElement | null> {
+    const view = paper.findViewByModel(shape);
+    if (!view) return null;
 
-    if (bbox.width === 0 || bbox.height === 0) return;
+    const liveEls = view.el.querySelectorAll('path, ellipse, rect, circle, polygon, line');
+    const computedColors: Array<{ fill: string; stroke: string }> = [];
+    liveEls.forEach(el => {
+        const cs = window.getComputedStyle(el);
+        computedColors.push({ fill: cs.fill, stroke: cs.stroke });
+    });
+
+    const shapeEl = view.el.cloneNode(true) as SVGGElement;
+
+    const cloneEls = shapeEl.querySelectorAll('path, ellipse, rect, circle, polygon, line');
+    cloneEls.forEach((el, i) => {
+        if (computedColors[i]) {
+            const { fill, stroke } = computedColors[i];
+            if (fill && fill !== 'none') el.setAttribute('fill', fill);
+            if (stroke && stroke !== 'none') el.setAttribute('stroke', stroke);
+        }
+    });
+
+    shapeEl.querySelectorAll('.joint-port').forEach(el => el.remove());
+    shapeEl.querySelectorAll('[joint-selector="label"]').forEach(el => el.remove());
+    shapeEl.querySelectorAll('[display="none"]').forEach(el => el.remove());
+    shapeEl.querySelectorAll('path').forEach(p => {
+        const d = p.getAttribute('d') ?? '';
+        if (!d || d === 'M 0 0') p.remove();
+    });
+    const images = Array.from(shapeEl.querySelectorAll('image'));
+    for (const img of images) {
+        const href = img.getAttribute('href') || img.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+        const w = parseFloat(img.getAttribute('width') || '0');
+        const h = parseFloat(img.getAttribute('height') || '0');
+        if (!href || w === 0 || h === 0) { img.remove(); continue; }
+        await inlineSvgImage(img as SVGImageElement, href);
+    }
+
+    return shapeEl;
+}
+
+async function buildShapeSvgString(): Promise<string | null> {
+    const shapes = isComplexShape ? layerShapes : (currentShape ? [currentShape] : []);
+    if (shapes.length === 0) return null;
+
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('xmlns', ns);
+    svg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+
+    const mx = paper.matrix();
+    const wrapper = document.createElementNS(ns, 'g');
+    wrapper.setAttribute('transform',
+        `matrix(${mx.a},${mx.b},${mx.c},${mx.d},0,0)`);
+
+    for (const shape of shapes) {
+        const el = await cloneShapeView(shape);
+        if (!el) continue;
+        el.removeAttribute('transform');
+        const pos = shape.position();
+        const g = document.createElementNS(ns, 'g');
+        g.setAttribute('transform', `translate(${pos.x},${pos.y})`);
+        g.appendChild(el);
+        wrapper.appendChild(g);
+    }
+
+    svg.appendChild(wrapper);
+
+    svg.style.cssText = 'position:absolute;left:-9999px;top:-9999px;overflow:visible';
+    svg.setAttribute('width', '4000');
+    svg.setAttribute('height', '4000');
+    document.body.appendChild(svg);
+    const bbox = svg.getBBox();
+    document.body.removeChild(svg);
+
+    if (bbox.width === 0 || bbox.height === 0) return null;
 
     const pad = 8;
-    clone.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`);
-    clone.setAttribute('width', String(Math.ceil(bbox.width + pad * 2)));
-    clone.setAttribute('height', String(Math.ceil(bbox.height + pad * 2)));
-    clone.removeAttribute('style');
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    svg.setAttribute('viewBox',
+        `${bbox.x - pad} ${bbox.y - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`);
+    svg.setAttribute('width', String(Math.ceil(bbox.width + pad * 2)));
+    svg.setAttribute('height', String(Math.ceil(bbox.height + pad * 2)));
+    svg.removeAttribute('style');
 
-    const svgString = new XMLSerializer().serializeToString(clone);
+    return new XMLSerializer().serializeToString(svg);
+}
+
+async function exportShapeSvg(): Promise<void> {
+    const svgString = await buildShapeSvgString();
+    if (!svgString) return;
+
     const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
 
@@ -3711,111 +4154,15 @@ function onDeleteShape(id: string) {
     buildPalettePanel();
 }
 
-const CD_ICON_CHEVRON_DOWN = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 11L3 6l.7-.7L8 9.6l4.3-4.3.7.7z"/></svg>`;
 
-function buildCollapsibleSection(title: string, body: HTMLElement, separator: boolean): HTMLElement {
-    const section = document.createElement('div');
-    section.className = 'nr-palette-section' + (separator ? ' nr-palette-section--separated' : '');
-
-    const headerBtn = document.createElement('button');
-    headerBtn.className = 'nr-section-header';
-    headerBtn.type = 'button';
-    headerBtn.setAttribute('aria-expanded', 'true');
-
-    const labelSpan = document.createElement('span');
-    labelSpan.textContent = title;
-
-    const chevronSpan = document.createElement('span');
-    chevronSpan.className = 'nr-section-chevron';
-    chevronSpan.innerHTML = CD_ICON_CHEVRON_DOWN;
-
-    headerBtn.appendChild(labelSpan);
-    headerBtn.appendChild(chevronSpan);
-
-    const bodyWrapper = document.createElement('div');
-    bodyWrapper.className = 'nr-section-body';
-    bodyWrapper.appendChild(body);
-
-    headerBtn.addEventListener('click', () => {
-        const collapsed = section.classList.toggle('nr-palette-section--collapsed');
-        headerBtn.setAttribute('aria-expanded', String(!collapsed));
-    });
-
-    section.appendChild(headerBtn);
-    section.appendChild(bodyWrapper);
-    return section;
-}
+let componentPanelHandle: { rebuild: () => void } | null = null;
 
 function buildPalettePanel() {
     paletteEl.innerHTML = '';
 
-    const header = document.createElement('div');
-    header.className = 'nr-panel-header';
-    const title = document.createElement('span');
-    title.className = 'nr-panel-title';
-    title.textContent = 'Component Designer';
-    header.appendChild(title);
-    paletteEl.appendChild(header);
-
     const generalIds = new Set(shapeStore.list('general').map(s => s.id));
-
-    // ── User Components (first, expanded by default) ─────────────────────────
-    const userWrapper = document.createElement('div');
-
-    const newBtn = document.createElement('button');
-    newBtn.type = 'button';
-    newBtn.className = 'nr-palette-new-btn';
-    newBtn.textContent = '+ New Component';
-    newBtn.addEventListener('click', showNewShapeModal);
-    userWrapper.appendChild(newBtn);
-
-    const list = document.createElement('ul');
-    list.className = 'nr-palette-list';
-    list.setAttribute('role', 'listbox');
-    list.setAttribute('aria-label', 'User Components');
-
-    for (const id of Object.keys(ShapeRegistry).filter(id => !BUILT_IN_SHAPE_IDS.has(id) && !generalIds.has(id))) {
-        const li = document.createElement('li');
-        li.setAttribute('role', 'option');
-        li.setAttribute('aria-selected', String(id === currentShapeId));
-
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'nr-palette-item' + (id === currentShapeId ? ' nr-palette-item--selected' : '');
-        btn.dataset.shapeId = id;
-
-        const iconId  = ShapeRegistry[id]?.icon;
-        const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
-        if (iconSvg) {
-            const iconSpan = document.createElement('span');
-            iconSpan.className = 'nr-palette-item-icon';
-            iconSpan.innerHTML = iconSvg;
-            iconSpan.setAttribute('aria-hidden', 'true');
-            btn.appendChild(iconSpan);
-        }
-        const labelSpan = document.createElement('span');
-        labelSpan.className = 'nr-palette-item-label';
-        labelSpan.textContent = ShapeRegistry[id]?.displayName ?? formatLabel(id);
-        btn.appendChild(labelSpan);
-
-        btn.addEventListener('click', () => {
-            paletteEl.querySelectorAll<HTMLButtonElement>('.nr-palette-item').forEach(b => {
-                b.classList.toggle('nr-palette-item--selected', b === btn);
-                b.closest('li')?.setAttribute('aria-selected', String(b === btn));
-            });
-            currentShapeId = id;
-            loadShapeIntoCanvas(id);
-        });
-
-        li.appendChild(btn);
-        list.appendChild(li);
-    }
-
-    userWrapper.appendChild(list);
-    paletteEl.appendChild(buildCollapsibleSection('User Components', userWrapper, false));
-
-    // ── Collection-based sections (General, Oracle, NetApp, …) ─────────────
     const allGeneral = shapeStore.list('general');
+
     const byCollection = new Map<string, typeof allGeneral>();
     for (const stored of allGeneral) {
         const col = stored.definition.collection || 'General';
@@ -3823,57 +4170,51 @@ function buildPalettePanel() {
         byCollection.get(col)!.push(stored);
     }
 
-    for (const collectionName of getComponentCollections()) {
-        const items = byCollection.get(collectionName) ?? [];
-        const colList = document.createElement('ul');
-        colList.className = 'nr-palette-list';
-        colList.setAttribute('role', 'listbox');
-        colList.setAttribute('aria-label', `${collectionName} Components`);
+    const userIds = Object.keys(ShapeRegistry).filter(id => !BUILT_IN_SHAPE_IDS.has(id) && !generalIds.has(id));
 
-        for (const stored of items) {
-            const sid = stored.id;
-            const def = stored.definition;
-            const li = document.createElement('li');
-            li.setAttribute('role', 'option');
-            li.setAttribute('aria-selected', String(sid === currentShapeId));
+    const items: ComponentTreeItem[] = [];
 
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'nr-palette-item' + (sid === currentShapeId ? ' nr-palette-item--selected' : '');
-            btn.dataset.shapeId = sid;
-
-            const iconId  = def.icon;
-            const iconSvg = iconId ? getIconById(iconId)?.svg : undefined;
-            if (iconSvg) {
-                const iconSpan = document.createElement('span');
-                iconSpan.className = 'nr-palette-item-icon';
-                iconSpan.innerHTML = iconSvg;
-                iconSpan.setAttribute('aria-hidden', 'true');
-                btn.appendChild(iconSpan);
-            }
-            const labelSpan = document.createElement('span');
-            labelSpan.className = 'nr-palette-item-label';
-            labelSpan.textContent = def.displayName ?? formatLabel(sid);
-            btn.appendChild(labelSpan);
-
-            btn.addEventListener('click', () => {
-                if (!ShapeRegistry[sid]) {
-                    addShape(sid, { ...def });
-                }
-                paletteEl.querySelectorAll<HTMLButtonElement>('.nr-palette-item').forEach(b => {
-                    b.classList.toggle('nr-palette-item--selected', b === btn);
-                    b.closest('li')?.setAttribute('aria-selected', String(b === btn));
-                });
-                currentShapeId = sid;
-                loadShapeIntoCanvas(sid);
-            });
-
-            li.appendChild(btn);
-            colList.appendChild(li);
-        }
-
-        paletteEl.appendChild(buildCollapsibleSection(collectionName, colList, true));
+    for (const id of userIds) {
+        const def = ShapeRegistry[id];
+        items.push({
+            id,
+            label: def?.displayName ?? formatLabel(id),
+            iconSvg: def?.icon ? getIconById(def.icon)?.svg : undefined,
+            collection: 'User Components',
+        });
     }
+
+    for (const collectionName of getComponentCollections()) {
+        for (const s of (byCollection.get(collectionName) ?? [])) {
+            items.push({
+                id: s.id,
+                label: s.definition.displayName ?? formatLabel(s.id),
+                iconSvg: s.definition.icon ? getIconById(s.definition.icon)?.svg : undefined,
+                collection: collectionName,
+                data: s.definition,
+            });
+        }
+    }
+
+    const selectShape_ = (id: string, data?: unknown) => {
+        const def = data as ShapeDefinition | undefined;
+        if (def && !ShapeRegistry[id]) addShape(id, { ...def });
+        paletteEl.querySelectorAll<HTMLButtonElement>('.nr-comp-tree__row--leaf, .nr-palette-svg-card').forEach(b => {
+            const isMatch = b.dataset.shapeId === id;
+            b.classList.toggle('nr-comp-tree__row--selected', isMatch);
+            b.classList.toggle('nr-palette-svg-card--selected', isMatch);
+        });
+        currentShapeId = id;
+        loadShapeIntoCanvas(id);
+    };
+
+    componentPanelHandle = buildComponentPanel(paletteEl, {
+        items,
+        onSelect: selectShape_,
+        selectedId: () => currentShapeId,
+        showCreateButton: true,
+        onCreateClick: showNewShapeModal,
+    });
 }
 
 // ── Canvas shape loading ───────────────────────────────────────────────────────
@@ -3968,6 +4309,12 @@ function loadShapeIntoCanvas(id: string) {
         shape.set('defaultSize',            { width: initWidth, height: initHeight });
         shape.set('cornerRadius', selectedCornerRadius);
         shape.set('chamferSize', selectedChamferSize);
+        shape.set('chamferStart', selectedChamferStart);
+        shape.set('taper', selectedTaper);
+        shape.set('twist', selectedTwist);
+        shape.set('scaleTopX', selectedScaleTopX);
+        shape.set('scaleTopY', selectedScaleTopY);
+        if (savedDefaults?.customVerts) shape.set('normalizedVerts', savedDefaults.customVerts);
         shape.position(posX, posY);
         shape.toggleView(View.Isometric);
         graph.addCell(shape);
@@ -3980,6 +4327,12 @@ function loadShapeIntoCanvas(id: string) {
         shape2D.set('defaultSize',            { width: initWidth, height: initHeight });
         shape2D.set('cornerRadius', selectedCornerRadius);
         shape2D.set('chamferSize', selectedChamferSize);
+        shape2D.set('chamferStart', selectedChamferStart);
+        shape2D.set('taper', selectedTaper);
+        shape2D.set('twist', selectedTwist);
+        shape2D.set('scaleTopX', selectedScaleTopX);
+        shape2D.set('scaleTopY', selectedScaleTopY);
+        if (savedDefaults?.customVerts) shape2D.set('normalizedVerts', savedDefaults.customVerts);
         shape2D.position(posX, posY);
         shape2D.toggleView(View.TwoDimensional);
         graph2D.addCell(shape2D);
@@ -4041,6 +4394,8 @@ export const panel = {
 export function selectShape(id: string): void {
     if (!ShapeRegistry[id]) return;
     currentShapeId = id;
+    hasVariations = !!ShapeRegistry[id]?.hasVariations;
+    activeVariation = 'default';
     buildPalettePanel();
     buildInspectorPanel();
     loadShapeIntoCanvas(id);

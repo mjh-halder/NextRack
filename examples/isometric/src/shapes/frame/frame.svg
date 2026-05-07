@@ -4,8 +4,7 @@
         height="calc(h)"
         fill="rgba(0, 114, 195, 0.08)"
         stroke="#0072c3"
-        stroke-width="1.5"
-        stroke-dasharray="8 4"
+        stroke-width="1"
     />
     <text @selector="label"
         x="8"

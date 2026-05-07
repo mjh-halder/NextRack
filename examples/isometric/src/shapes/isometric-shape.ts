@@ -60,7 +60,8 @@ export default class IsometricShape extends dia.Element<IsometricElementAttribut
     }
 
     get topX(): number {
-        return -this.isometricHeight;
+        const rot = (this.get('shapeRotation') as number) ?? 0;
+        return rot === 90 ? 0 : -this.isometricHeight;
     }
 
     get topY(): number {
@@ -153,10 +154,13 @@ export abstract class PolygonShape extends IsometricShape {
         const stx = this.scaleTopX;
         const sty = this.scaleTopY;
         const hasMod = t !== 0 || tw !== 0 || stx !== 1 || sty !== 1;
+        const rot = (this.get('shapeRotation') as number) ?? 0;
+        const dx = rot === 90 ? 0   : -iH;
+        const dy = -iH;
 
         return base.map(([x, y]) => {
-            let tx = x - iH;
-            let ty = y - iH;
+            let tx = x + dx;
+            let ty = y + dy;
             if (hasMod) {
                 let lx = x - cx;
                 let ly = y - cy;
@@ -170,8 +174,8 @@ export abstract class PolygonShape extends IsometricShape {
                     lx = rx;
                     ly = ry;
                 }
-                tx = cx + lx - iH;
-                ty = cy + ly - iH;
+                tx = cx + lx + dx;
+                ty = cy + ly + dy;
             }
             return [tx, ty] as [number, number];
         });
@@ -325,7 +329,9 @@ export abstract class PolygonShape extends IsometricShape {
         const iH = this.isometricHeight;
         const cs = this.chamferStart;
         const shift = iH * cs;
-        return this.baseVertices().map(([x, y]) => [x - shift, y - shift] as [number, number]);
+        const rot = (this.get('shapeRotation') as number) ?? 0;
+        const dx = rot === 90 ? 0 : -shift;
+        return this.baseVertices().map(([x, y]) => [x + dx, y - shift] as [number, number]);
     }
 
     protected chamferedSideFacePath(i: number, j: number): string {
@@ -507,6 +513,9 @@ export class CylinderShape extends IsometricShape {
         const iH = this.isometricHeight;
         const cx = width / 2;
         const cy = height / 2;
+        const rot = (this.get('shapeRotation') as number) ?? 0;
+        const dx = rot === 90 ? 0   : -iH;
+        const dy = -iH;
 
         const baseRect = new g.Rect(0, 0, width, height);
         const baseDiagonal = new g.Line(baseRect.bottomLeft(), baseRect.topRight());
@@ -515,8 +524,8 @@ export class CylinderShape extends IsometricShape {
 
         const trx = this.topEllipseRx;
         const try_ = this.topEllipseRy;
-        const tcx = cx - iH;
-        const tcy = cy - iH;
+        const tcx = cx + dx;
+        const tcy = cy + dy;
         const topEllipse = new g.Ellipse(new g.Point(tcx, tcy), trx, try_);
         const topDiag = new g.Line(
             new g.Point(tcx - trx, tcy + try_),
@@ -547,10 +556,306 @@ export class PyramidShape extends IsometricShape {
     }
 
     get topX(): number {
-        return this.size().width - this.isometricHeight;
+        const rot = (this.get('shapeRotation') as number) ?? 0;
+        return rot === 90 ? this.size().width : this.size().width - this.isometricHeight;
     }
 
     get topY(): number {
         return this.size().height - this.isometricHeight;
+    }
+}
+
+// ── Tube (horizontal cylinder / pipe) ─────────────────────────────────────
+//
+// A circle of radius R in the 3D YZ-plane projects into 2D model space as the
+// conic 2u² − 2uv + v² = R².  Diagonalising the matrix [[2,−1],[−1,1]] gives
+// eigenvalues λ = (3±√5)/2, semi-axes a = R/√λ₂ = φR, b = R/√λ₁ = R/φ and
+// the major-axis direction (1, φ) → rotation = atan(φ) ≈ 58.28°.
+//
+// Tangent lines parallel to the tube axis (model-x) touch the ellipse at
+// θ = −π/4 (bottom) and θ = 3π/4 (top), where the parametric form is:
+//   u = −R sin θ,  v = R cos θ − R sin θ.
+// These tangent points define where the mantle attaches to the end caps.
+
+const PHI = (1 + Math.sqrt(5)) / 2;
+const TUBE_ARC_ROTATION = (Math.atan(PHI) * 180) / Math.PI;
+const SQRT2 = Math.SQRT2;
+
+export class TubeShape extends IsometricShape {
+    constructor(...args: any[]) {
+        super(...args);
+        const { defaultSize, defaultIsometricHeight } = this.attributes;
+        this.tools = {
+            [SIZE_KEY]: new SizeControl({ defaultSize }),
+            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+        };
+    }
+
+    private tubeGeometry() {
+        const { width: w, height: h } = this.size();
+        const iH = this.isometricHeight;
+        const R = iH / 2;
+        const rx = PHI * R;
+        const ry = R / PHI;
+        const rot = TUBE_ARC_ROTATION;
+
+        const s = R / SQRT2;
+        const s2 = R * SQRT2;
+
+        // Ellipse centers in model space: 3D(x, h/2, R) → model(x − R, h/2 − R)
+        const ncx = w - R;
+        const ncy = h / 2 - R;
+        const fcx = -R;
+        const fcy = h / 2 - R;
+
+        // Tangent points where body meets ellipses
+        // Bottom tangent (θ = −π/4): offset (+s, +s2) from centre
+        // Top tangent    (θ = 3π/4): offset (−s, −s2) from centre
+        return {
+            rx, ry, rot,
+            nb: { x: ncx + s, y: ncy + s2 },
+            nt: { x: ncx - s, y: ncy - s2 },
+            fb: { x: fcx + s, y: fcy + s2 },
+            ft: { x: fcx - s, y: fcy - s2 },
+        };
+    }
+
+    // Back arc — the protruding left half of the far-end ellipse.
+    // Closed via the chord ft→fb so the body (drawn on top) hides the seam.
+    get tubeBackArcPath(): string {
+        const { rx, ry, rot, fb, ft } = this.tubeGeometry();
+        return [
+            `M ${ft.x} ${ft.y}`,
+            `A ${rx} ${ry} ${rot} 0 0 ${fb.x} ${fb.y}`,
+            'Z',
+        ].join(' ');
+    }
+
+    // Body — the mantle rectangle closed by the right half of the back ellipse.
+    // The arc from fb→ft ensures a seamless tangential join at both ends.
+    get tubeBodyPath(): string {
+        const { rx, ry, rot, nb, nt, fb, ft } = this.tubeGeometry();
+        return [
+            `M ${ft.x} ${ft.y}`,
+            `L ${nt.x} ${nt.y}`,
+            `L ${nb.x} ${nb.y}`,
+            `L ${fb.x} ${fb.y}`,
+            `A ${rx} ${ry} ${rot} 0 1 ${ft.x} ${ft.y}`,
+            'Z',
+        ].join(' ');
+    }
+
+    // Front ellipse — full closed ellipse at the near end
+    get tubeFrontEllipsePath(): string {
+        const { rx, ry, rot, nb, nt } = this.tubeGeometry();
+        return [
+            `M ${nb.x} ${nb.y}`,
+            `A ${rx} ${ry} ${rot} 1 0 ${nt.x} ${nt.y}`,
+            `A ${rx} ${ry} ${rot} 1 0 ${nb.x} ${nb.y}`,
+            'Z',
+        ].join(' ');
+    }
+}
+
+// ── Pipe (horizontal cylinder along model Y — front to back) ──────────────
+// Circle in the XZ-plane: conic u²−2uv+2v²=R².  Same eigenvalues as the
+// tube (λ=(3±√5)/2), but the major axis is along (1, 1/φ) → rotation ≈ 31.72°.
+// Tangent lines parallel to model-Y touch at offset (±R√2, ±R/√2).
+
+const PIPE_ARC_ROTATION = (Math.atan(1 / PHI) * 180) / Math.PI;
+
+export class PipeShape extends IsometricShape {
+    constructor(...args: any[]) {
+        super(...args);
+        const { defaultSize, defaultIsometricHeight } = this.attributes;
+        this.tools = {
+            [SIZE_KEY]: new SizeControl({ defaultSize }),
+            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+        };
+    }
+
+    private pipeGeometry() {
+        const { width: w, height: h } = this.size();
+        const iH = this.isometricHeight;
+        const R = iH / 2;
+        const rx = PHI * R;
+        const ry = R / PHI;
+        const rot = PIPE_ARC_ROTATION;
+
+        const s = R * SQRT2;
+        const s2 = R / SQRT2;
+
+        // Ellipse centres: 3D(w/2, y, R) → model(w/2−R, y−R)
+        const ncx = w / 2 - R;
+        const ncy = h - R;
+        const fcx = w / 2 - R;
+        const fcy = -R;
+
+        // Right tangent (θ=−π/4): offset (+R√2, +R/√2)
+        // Left tangent  (θ=3π/4): offset (−R√2, −R/√2)
+        return {
+            rx, ry, rot,
+            nr: { x: ncx + s, y: ncy + s2 },
+            nl: { x: ncx - s, y: ncy - s2 },
+            fr: { x: fcx + s, y: fcy + s2 },
+            fl: { x: fcx - s, y: fcy - s2 },
+        };
+    }
+
+    get pipeBackArcPath(): string {
+        const { rx, ry, rot, fl, fr } = this.pipeGeometry();
+        return [
+            `M ${fl.x} ${fl.y}`,
+            `A ${rx} ${ry} ${rot} 0 1 ${fr.x} ${fr.y}`,
+            'Z',
+        ].join(' ');
+    }
+
+    get pipeBodyPath(): string {
+        const { rx, ry, rot, nr, nl, fr, fl } = this.pipeGeometry();
+        return [
+            `M ${fl.x} ${fl.y}`,
+            `L ${nl.x} ${nl.y}`,
+            `L ${nr.x} ${nr.y}`,
+            `L ${fr.x} ${fr.y}`,
+            `A ${rx} ${ry} ${rot} 0 0 ${fl.x} ${fl.y}`,
+            'Z',
+        ].join(' ');
+    }
+
+    get pipeFrontEllipsePath(): string {
+        const { rx, ry, rot, nr, nl } = this.pipeGeometry();
+        return [
+            `M ${nr.x} ${nr.y}`,
+            `A ${rx} ${ry} ${rot} 1 0 ${nl.x} ${nl.y}`,
+            `A ${rx} ${ry} ${rot} 1 0 ${nr.x} ${nr.y}`,
+            'Z',
+        ].join(' ');
+    }
+}
+
+// ── Duct (lying octagonal prism along model X) ────────────────────────────
+// Cross-section: octagon in the YZ-plane, projected via (X−Z, Y−Z).
+// Visible faces (camera ≈ −1,−1,−1): bottom, left, lower-left chamfer,
+// plus the two borderline chamfer faces (lower-right, upper-left).
+
+export class DuctShape extends IsometricShape {
+    constructor(...args: any[]) {
+        super(...args);
+        const { defaultSize, defaultIsometricHeight } = this.attributes;
+        this.tools = {
+            [SIZE_KEY]: new SizeControl({ defaultSize }),
+            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+        };
+    }
+
+    private ductGeometry() {
+        const { width: w, height: h } = this.size();
+        const iH = this.isometricHeight;
+        const c = Math.min(h, iH) * 0.28;
+
+        // Octagon vertices in (Y, Z) space, bottom-left origin
+        const oct: [number, number][] = [
+            [c, 0], [h - c, 0], [h, c], [h, iH - c],
+            [h - c, iH], [c, iH], [0, iH - c], [0, c],
+        ];
+
+        const near = oct.map(([y, z]) => ({ x: w - z, y: y - z }));
+        const far  = oct.map(([y, z]) => ({ x: -z,    y: y - z }));
+
+        return { near, far };
+    }
+
+    // Full outline: one closed polygon tracing the entire visible shape.
+    // Goes through the protruding back edges then across the mantle to the
+    // near end. Single stroke, no double lines, no crossing.
+    get ductOutlinePath(): string {
+        const { near: n, far: f } = this.ductGeometry();
+        return [
+            `M ${f[5].x} ${f[5].y}`,
+            `L ${f[4].x} ${f[4].y}`,
+            `L ${f[3].x} ${f[3].y}`,
+            `L ${f[2].x} ${f[2].y}`,
+            `L ${n[2].x} ${n[2].y}`,
+            `L ${n[1].x} ${n[1].y}`,
+            `L ${n[0].x} ${n[0].y}`,
+            `L ${n[7].x} ${n[7].y}`,
+            `L ${n[6].x} ${n[6].y}`,
+            `L ${n[5].x} ${n[5].y}`,
+            'Z',
+        ].join(' ');
+    }
+
+    // Back shade: protruding back portion, fill only (no stroke).
+    // The chord closure is invisible because the outline's stroke covers it.
+    get ductBackShadePath(): string {
+        const { far: f } = this.ductGeometry();
+        return `M ${f[2].x} ${f[2].y} L ${f[3].x} ${f[3].y} L ${f[4].x} ${f[4].y} L ${f[5].x} ${f[5].y} Z`;
+    }
+
+    // Front face: full near octagon with fill + stroke for the end-cap edges.
+    get ductFrontPath(): string {
+        const { near } = this.ductGeometry();
+        return 'M ' + near.map(p => `${p.x} ${p.y}`).join(' L ') + ' Z';
+    }
+}
+
+// ── Channel (lying octagonal prism along model Y — front to back) ─────────
+// Cross-section: octagon in the XZ-plane, projected via (X−Z, Y−Z).
+// Same visible faces as duct (camera symmetry in X/Y): bottom, left,
+// lower-left chamfer, plus borderline lower-right and upper-left chamfers.
+
+export class ChannelShape extends IsometricShape {
+    constructor(...args: any[]) {
+        super(...args);
+        const { defaultSize, defaultIsometricHeight } = this.attributes;
+        this.tools = {
+            [SIZE_KEY]: new SizeControl({ defaultSize }),
+            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+        };
+    }
+
+    private channelGeometry() {
+        const { width: w, height: h } = this.size();
+        const iH = this.isometricHeight;
+        const c = Math.min(w, iH) * 0.28;
+
+        // Octagon vertices in (X, Z) space
+        const oct: [number, number][] = [
+            [c, 0], [w - c, 0], [w, c], [w, iH - c],
+            [w - c, iH], [c, iH], [0, iH - c], [0, c],
+        ];
+
+        // Project: 3D(X, Y, Z) → model(X−Z, Y−Z)
+        const near = oct.map(([x, z]) => ({ x: x - z, y: h - z }));
+        const far  = oct.map(([x, z]) => ({ x: x - z, y: -z }));
+
+        return { near, far };
+    }
+
+    get channelOutlinePath(): string {
+        const { near: n, far: f } = this.channelGeometry();
+        return [
+            `M ${f[5].x} ${f[5].y}`,
+            `L ${f[4].x} ${f[4].y}`,
+            `L ${f[3].x} ${f[3].y}`,
+            `L ${f[2].x} ${f[2].y}`,
+            `L ${n[2].x} ${n[2].y}`,
+            `L ${n[1].x} ${n[1].y}`,
+            `L ${n[0].x} ${n[0].y}`,
+            `L ${n[7].x} ${n[7].y}`,
+            `L ${n[6].x} ${n[6].y}`,
+            `L ${n[5].x} ${n[5].y}`,
+            'Z',
+        ].join(' ');
+    }
+
+    get channelFrontPath(): string {
+        const { near } = this.channelGeometry();
+        return 'M ' + near.map(p => `${p.x} ${p.y}`).join(' L ') + ' Z';
     }
 }

@@ -5,18 +5,20 @@
 // Wiring: initAdmin() is called once from index.ts. show()/hide() are driven by
 // the app-level view switcher in index.ts.
 
-import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon, addAwsIcons, removeAllAwsIcons, getAwsIconCount } from './icon-catalog';
+import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon, addAwsIcons, removeAllAwsIcons, getAwsIconCount, addGcpIcons, removeAllGcpIcons, getGcpIconCount, addAzureIcons, removeAllAzureIcons, getAzureIconCount, onCatalogChange, ensureFullCatalog, ensureCarbonIcons } from './icon-catalog';
 import { unzipSync } from 'fflate';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Edit16 from '@carbon/icons/es/edit/16.js';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Upload16 from '@carbon/icons/es/upload/16.js';
 import SubtractAlt16 from '@carbon/icons/es/subtract--alt/16.js';
+import Download16 from '@carbon/icons/es/download/16.js';
 
 const ACTION_ICON_EDIT    = carbonIconToString(Edit16 as CarbonIcon);
 const ACTION_ICON_DELETE  = carbonIconToString(TrashCan16 as CarbonIcon);
 const ACTION_ICON_PUBLISH = carbonIconToString(Upload16 as CarbonIcon);
 const ACTION_ICON_REMOVE  = carbonIconToString(SubtractAlt16 as CarbonIcon);
+const ACTION_ICON_DOWNLOAD = carbonIconToString(Download16 as CarbonIcon);
 import {
     getAllConfig,
     setIconScope,
@@ -25,8 +27,9 @@ import {
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, deleteShape, saveRegistryToStorage } from './shapes/shape-registry';
 import { shapeStore } from './shape-store';
 import { componentStore, ComponentDefinition } from './component-store';
+import { listInventory, removeFromInventory, isDarkMode, SvgInventoryEntry } from './svg-inventory';
 
-type AdminView = 'icon-config' | 'component-library' | 'data' | 'user-settings';
+type AdminView = 'icon-config' | 'component-library' | 'inventory' | 'data' | 'user-settings';
 
 let rootEl: HTMLDivElement | null = null;
 let currentView: AdminView = 'icon-config';
@@ -41,6 +44,7 @@ const AVAILABLE_MAX = 300;
 const NAV_ITEMS: Array<{ id: AdminView; label: string }> = [
     { id: 'icon-config',       label: 'Icon Configuration' },
     { id: 'component-library', label: 'Component Library' },
+    { id: 'inventory',         label: 'SVG Inventory' },
     { id: 'data',              label: 'Data' },
     { id: 'user-settings',     label: 'User Settings' },
 ];
@@ -71,6 +75,13 @@ export function initAdmin(container: HTMLDivElement): void {
     container.appendChild(contentEl);
 
     selectView(currentView);
+
+    document.addEventListener('nextrack:inventory-changed', () => {
+        if (currentView === 'inventory' && rootEl) {
+            const contentEl = rootEl.querySelector<HTMLDivElement>('.nr-admin__content');
+            if (contentEl) renderInventory(contentEl);
+        }
+    });
 }
 
 function selectView(view: AdminView): void {
@@ -102,6 +113,7 @@ function selectView(view: AdminView): void {
     contentEl.style.overflow = '';
     if (view === 'icon-config')       renderIconConfig(contentEl);
     if (view === 'component-library') renderComponentLibrary(contentEl);
+    if (view === 'inventory')         renderInventory(contentEl);
     if (view === 'data')              renderDataView(contentEl);
     if (view === 'user-settings')     renderUserSettings(contentEl);
 }
@@ -130,6 +142,117 @@ function renderComponentLibrary(container: HTMLElement): void {
         buildUserComponentsSection(host, render);
     };
     render();
+}
+
+function buildInventoryCard(entry: SvgInventoryEntry, container: HTMLElement): HTMLElement {
+    const svgLight = entry.svgLight ?? (entry as any).svg ?? '';
+    const svgDark  = entry.svgDark  ?? svgLight;
+
+    const card = document.createElement('div');
+    card.className = 'nr-admin__inventory-card';
+
+    const preview = document.createElement('div');
+    preview.className = 'nr-admin__inventory-preview';
+
+    const lightWrap = document.createElement('div');
+    lightWrap.className = 'nr-admin__inventory-svg--light';
+    lightWrap.innerHTML = svgLight;
+    const darkWrap = document.createElement('div');
+    darkWrap.className = 'nr-admin__inventory-svg--dark';
+    darkWrap.innerHTML = svgDark;
+
+    preview.appendChild(lightWrap);
+    preview.appendChild(darkWrap);
+    card.appendChild(preview);
+
+    const label = document.createElement('div');
+    label.className = 'nr-admin__inventory-label';
+    label.textContent = entry.displayName;
+    label.title = entry.displayName;
+    card.appendChild(label);
+
+    const actions = document.createElement('div');
+    actions.className = 'nr-admin__inventory-actions';
+
+    const dlBtn = document.createElement('button');
+    dlBtn.type = 'button';
+    dlBtn.className = 'nr-admin__inventory-icon-btn';
+    dlBtn.title = 'Download';
+    dlBtn.setAttribute('aria-label', 'Download');
+    dlBtn.innerHTML = ACTION_ICON_DOWNLOAD;
+    dlBtn.addEventListener('click', () => {
+        const svg = isDarkMode() ? svgDark : svgLight;
+        const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = entry.displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-') + '.svg';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    });
+    actions.appendChild(dlBtn);
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'nr-admin__inventory-icon-btn nr-admin__inventory-icon-btn--danger';
+    delBtn.title = 'Remove';
+    delBtn.setAttribute('aria-label', 'Remove');
+    delBtn.innerHTML = ACTION_ICON_DELETE;
+    delBtn.addEventListener('click', () => {
+        removeFromInventory(entry.componentId);
+        renderInventory(container);
+    });
+    actions.appendChild(delBtn);
+
+    card.appendChild(actions);
+    return card;
+}
+
+function renderInventory(container: HTMLElement): void {
+    container.innerHTML = '';
+
+    const heading = document.createElement('h2');
+    heading.className = 'nr-admin__heading';
+    heading.textContent = 'SVG Inventory';
+    container.appendChild(heading);
+
+    const entries = listInventory();
+    if (entries.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'nr-admin__section-empty';
+        empty.textContent = 'No SVGs in inventory yet.';
+        container.appendChild(empty);
+        return;
+    }
+
+    const groups = new Map<string, SvgInventoryEntry[]>();
+    for (const entry of entries) {
+        const col = entry.collection || 'General';
+        if (!groups.has(col)) groups.set(col, []);
+        groups.get(col)!.push(entry);
+    }
+
+    groups.forEach((items, col) => {
+        const section = document.createElement('div');
+        section.className = 'nr-admin__inventory-section';
+
+        const title = document.createElement('h3');
+        title.className = 'nr-admin__inventory-section-title';
+        title.textContent = col;
+        section.appendChild(title);
+
+        const grid = document.createElement('div');
+        grid.className = 'nr-admin__inventory-grid';
+
+        for (const entry of items) {
+            grid.appendChild(buildInventoryCard(entry, container));
+        }
+
+        section.appendChild(grid);
+        container.appendChild(section);
+    });
 }
 
 function buildShapeRow(
@@ -406,6 +529,7 @@ function matchesSearch(entry: IconCatalogEntry, term: string): boolean {
 }
 
 function renderIconConfig(container: HTMLElement): void {
+    ensureFullCatalog();
     const h = document.createElement('h2');
     h.className = 'nr-admin__heading';
     h.textContent = 'Icon Configuration';
@@ -419,120 +543,150 @@ function renderIconConfig(container: HTMLElement): void {
         'Add more icons from the full Carbon library via search below.';
     container.appendChild(desc);
 
-    // Upload custom SVG icon
-    const uploadRow = document.createElement('div');
-    uploadRow.className = 'nr-admin__upload-row';
+    // ── Import section — structured as Carbon tiles ─────────────────────────
+    interface PackDef {
+        id: string; label: string; accept: string;
+        getCount: () => number;
+        addFn: ((entries: Array<{ label: string; svg: string }>) => Promise<{ added: number; error?: string }>) | null;
+        removeFn: (() => Promise<number>) | null;
+    }
 
-    const fileInput = document.createElement('input');
-    fileInput.type = 'file';
-    fileInput.accept = '.svg,image/svg+xml';
-    fileInput.style.display = 'none';
-    fileInput.id = 'nr-admin-icon-upload';
+    const packs: PackDef[] = [
+        { id: 'svg',   label: 'Custom SVG',  accept: '.svg,image/svg+xml', getCount: () => 0, addFn: null, removeFn: null },
+        { id: 'aws',   label: 'AWS',         accept: '.zip,application/zip', getCount: getAwsIconCount,   addFn: addAwsIcons,   removeFn: removeAllAwsIcons },
+        { id: 'gcp',   label: 'GCP',         accept: '.zip,application/zip', getCount: getGcpIconCount,   addFn: addGcpIcons,   removeFn: removeAllGcpIcons },
+        { id: 'azure', label: 'Azure',       accept: '.zip,application/zip', getCount: getAzureIconCount, addFn: addAzureIcons, removeFn: removeAllAzureIcons },
+    ];
 
-    fileInput.addEventListener('change', () => {
-        const file = fileInput.files?.[0];
-        if (!file) return;
-        const label = file.name.replace(/\.[^.]+$/, '');
-        const reader = new FileReader();
-        reader.onload = () => {
-            addUploadedIcon(label, reader.result as string);
-            renderSections();
-        };
-        reader.readAsText(file);
-        fileInput.value = '';
-    });
+    const importSection = document.createElement('div');
+    importSection.className = 'nr-admin__import-section';
 
-    const uploadLabel = document.createElement('label');
-    uploadLabel.className = 'nr-admin__upload-btn';
-    uploadLabel.setAttribute('for', 'nr-admin-icon-upload');
-    uploadLabel.textContent = 'Upload SVG Icon';
-    uploadLabel.setAttribute('role', 'button');
-    uploadLabel.tabIndex = 0;
-    uploadLabel.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+    const importTitle = document.createElement('h3');
+    importTitle.className = 'nr-admin__import-title';
+    importTitle.textContent = 'Import Icons';
+    importSection.appendChild(importTitle);
 
-    uploadRow.appendChild(fileInput);
-    uploadRow.appendChild(uploadLabel);
-    container.appendChild(uploadRow);
+    const importDesc = document.createElement('p');
+    importDesc.className = 'nr-admin__import-desc';
+    importDesc.textContent = 'Upload individual SVG files or vendor icon packs as ZIP archives.';
+    importSection.appendChild(importDesc);
 
-    // AWS icon pack upload
-    const awsRow = document.createElement('div');
-    awsRow.className = 'nr-admin__upload-row';
-    awsRow.style.gap = '8px';
+    const tileGrid = document.createElement('div');
+    tileGrid.className = 'nr-admin__import-grid';
 
-    const awsFileInput = document.createElement('input');
-    awsFileInput.type = 'file';
-    awsFileInput.accept = '.zip,application/zip';
-    awsFileInput.style.display = 'none';
-    awsFileInput.id = 'nr-admin-aws-upload';
+    const packRefs: Array<{ statusEl: HTMLElement; removeBtn: HTMLButtonElement; pack: PackDef }> = [];
 
-    const awsStatus = document.createElement('span');
-    awsStatus.className = 'nr-admin__aws-status';
-    const awsCount = getAwsIconCount();
-    awsStatus.textContent = awsCount > 0 ? `${awsCount} AWS icons loaded` : '';
+    for (const pack of packs) {
+        const tile = document.createElement('div');
+        tile.className = 'nr-admin__import-tile';
 
-    awsFileInput.addEventListener('change', async () => {
-        const file = awsFileInput.files?.[0];
-        if (!file) return;
-        awsStatus.textContent = 'Extracting…';
-        try {
-            const buf = await file.arrayBuffer();
-            const unzipped = unzipSync(new Uint8Array(buf));
-            const entries: Array<{ label: string; svg: string }> = [];
-            for (const [path, data] of Object.entries(unzipped)) {
-                if (!path.endsWith('.svg')) continue;
-                if (path.startsWith('__MACOSX')) continue;
-                const name = path.split('/').pop()!.replace(/\.svg$/, '');
-                let svg = new TextDecoder().decode(data);
-                const parser = new DOMParser();
-                const doc = parser.parseFromString(svg, 'image/svg+xml');
-                const svgEl = doc.querySelector('svg');
-                if (svgEl) {
-                    if (!svgEl.getAttribute('viewBox')) {
-                        const w = svgEl.getAttribute('width') || '80';
-                        const h = svgEl.getAttribute('height') || '80';
-                        svgEl.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(h)}`);
+        const tileLabel = document.createElement('div');
+        tileLabel.className = 'nr-admin__import-tile-label';
+        tileLabel.textContent = pack.label;
+        tile.appendChild(tileLabel);
+
+        const statusEl = document.createElement('div');
+        statusEl.className = 'nr-admin__import-tile-status';
+        const cnt = pack.getCount();
+        const inUse = pack.id !== 'svg' ? countUsedBySource(pack.id) : 0;
+        statusEl.textContent = cnt > 0 ? `${cnt} icons` + (inUse > 0 ? ` · ${inUse} in use` : '') : 'No icons';
+        tile.appendChild(statusEl);
+
+        const btnRow = document.createElement('div');
+        btnRow.className = 'nr-admin__import-tile-actions';
+
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = pack.accept;
+        fileInput.style.display = 'none';
+        fileInput.id = `nr-admin-upload-${pack.id}`;
+
+        const uploadBtn = document.createElement('label');
+        uploadBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+        uploadBtn.setAttribute('for', fileInput.id);
+        uploadBtn.textContent = pack.id === 'svg' ? 'Upload SVG' : 'Upload ZIP';
+        uploadBtn.setAttribute('role', 'button');
+        uploadBtn.tabIndex = 0;
+        uploadBtn.style.cursor = 'pointer';
+        uploadBtn.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files?.[0];
+            if (!file) return;
+            if (pack.id === 'svg') {
+                const lbl = file.name.replace(/\.[^.]+$/, '');
+                const reader = new FileReader();
+                reader.onload = () => { addUploadedIcon(lbl, reader.result as string); renderSections(); };
+                reader.readAsText(file);
+            } else if (pack.addFn) {
+                statusEl.textContent = 'Extracting…';
+                try {
+                    const buf = await file.arrayBuffer();
+                    const unzipped = unzipSync(new Uint8Array(buf));
+                    const entries: Array<{ label: string; svg: string }> = [];
+                    for (const [path, data] of Object.entries(unzipped)) {
+                        if (!path.endsWith('.svg') || path.startsWith('__MACOSX')) continue;
+                        const name = path.split('/').pop()!.replace(/\.svg$/, '');
+                        let svg = new TextDecoder().decode(data);
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(svg, 'image/svg+xml');
+                        const svgEl = doc.querySelector('svg');
+                        if (svgEl) {
+                            if (!svgEl.getAttribute('viewBox')) {
+                                const w = svgEl.getAttribute('width') || '80';
+                                const hh = svgEl.getAttribute('height') || '80';
+                                svgEl.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(hh)}`);
+                            }
+                            svgEl.removeAttribute('width');
+                            svgEl.removeAttribute('height');
+                            svg = new XMLSerializer().serializeToString(svgEl);
+                        }
+                        entries.push({ label: name, svg });
                     }
-                    svgEl.removeAttribute('width');
-                    svgEl.removeAttribute('height');
-                    svg = new XMLSerializer().serializeToString(svgEl);
+                    const result = await pack.addFn(entries);
+                    statusEl.textContent = result.error || `${result.added} imported (${pack.getCount()} total)`;
+                    removeBtn.style.display = pack.getCount() > 0 ? '' : 'none';
+                    renderSections();
+                } catch (e) {
+                    statusEl.textContent = 'Import failed';
+                    console.error(`[nextrack] ${pack.label} import failed:`, e);
                 }
-                entries.push({ label: name, svg });
             }
-            const added = addAwsIcons(entries);
-            awsStatus.textContent = `${added} new icons imported (${getAwsIconCount()} total)`;
+            fileInput.value = '';
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'cds--btn cds--btn--danger--tertiary cds--btn--sm';
+        removeBtn.textContent = 'Remove';
+        removeBtn.style.display = (pack.removeFn && pack.getCount() > 0) ? '' : 'none';
+        if (pack.id === 'svg') removeBtn.style.display = 'none';
+        removeBtn.addEventListener('click', async () => {
+            if (!pack.removeFn) return;
+            const removed = await pack.removeFn();
+            statusEl.textContent = `${removed} removed`;
+            removeBtn.style.display = 'none';
             renderSections();
-        } catch (e) {
-            awsStatus.textContent = 'Failed to extract ZIP';
-            console.error('[nextrack] AWS ZIP import failed:', e);
-        }
-        awsFileInput.value = '';
-    });
+        });
 
-    const awsUploadLabel = document.createElement('label');
-    awsUploadLabel.className = 'nr-admin__upload-btn';
-    awsUploadLabel.setAttribute('for', 'nr-admin-aws-upload');
-    awsUploadLabel.textContent = 'Upload AWS Icons (ZIP)';
-    awsUploadLabel.setAttribute('role', 'button');
-    awsUploadLabel.tabIndex = 0;
-    awsUploadLabel.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') awsFileInput.click(); });
+        btnRow.appendChild(fileInput);
+        btnRow.appendChild(uploadBtn);
+        btnRow.appendChild(removeBtn);
+        tile.appendChild(btnRow);
+        tileGrid.appendChild(tile);
 
-    const awsRemoveBtn = document.createElement('button');
-    awsRemoveBtn.type = 'button';
-    awsRemoveBtn.className = 'nr-admin__upload-btn nr-admin__upload-btn--danger';
-    awsRemoveBtn.textContent = 'Remove all AWS Icons';
-    awsRemoveBtn.style.display = awsCount > 0 ? '' : 'none';
-    awsRemoveBtn.addEventListener('click', () => {
-        const removed = removeAllAwsIcons();
-        awsStatus.textContent = `${removed} AWS icons removed`;
-        awsRemoveBtn.style.display = 'none';
-        renderSections();
-    });
+        packRefs.push({ statusEl, removeBtn, pack });
+    }
 
-    awsRow.appendChild(awsFileInput);
-    awsRow.appendChild(awsUploadLabel);
-    awsRow.appendChild(awsRemoveBtn);
-    awsRow.appendChild(awsStatus);
-    container.appendChild(awsRow);
+    importSection.appendChild(tileGrid);
+    container.appendChild(importSection);
+
+    const awsStatus = packRefs.find(p => p.pack.id === 'aws')!.statusEl;
+    const awsRemoveBtn = packRefs.find(p => p.pack.id === 'aws')!.removeBtn;
+    const gcpStatus = packRefs.find(p => p.pack.id === 'gcp')!.statusEl;
+    const gcpRemoveBtn = packRefs.find(p => p.pack.id === 'gcp')!.removeBtn;
+    const azureStatus = packRefs.find(p => p.pack.id === 'azure')!.statusEl;
+    const azureRemoveBtn = packRefs.find(p => p.pack.id === 'azure')!.removeBtn;
 
     // Search input (sticky at the top of the content area).
     const searchWrap = document.createElement('div');
@@ -563,52 +717,176 @@ function renderIconConfig(container: HTMLElement): void {
     });
 
     renderSections();
+
+    // Re-render when IndexedDB finishes loading vendor icons
+    onCatalogChange(() => {
+        renderSections();
+        awsStatus.textContent = getAwsIconCount() > 0 ? `${getAwsIconCount()} AWS icons loaded` : '';
+        awsRemoveBtn.style.display = getAwsIconCount() > 0 ? '' : 'none';
+        gcpStatus.textContent = getGcpIconCount() > 0 ? `${getGcpIconCount()} GCP icons loaded` : '';
+        gcpRemoveBtn.style.display = getGcpIconCount() > 0 ? '' : 'none';
+        azureStatus.textContent = getAzureIconCount() > 0 ? `${getAzureIconCount()} Azure icons loaded` : '';
+        azureRemoveBtn.style.display = getAzureIconCount() > 0 ? '' : 'none';
+    });
 }
 
+function getUsedIconIds(): Set<string> {
+    const used = new Set<string>();
+    for (const def of Object.values(ShapeRegistry)) {
+        if (def.icon) used.add(def.icon);
+    }
+    return used;
+}
+
+function countUsedBySource(source: string): number {
+    const used = getUsedIconIds();
+    return ICON_CATALOG.filter(i => i.source === source && used.has(i.id)).length;
+}
+
+let activeIconTab = 'general';
+
 function buildSections(host: HTMLElement): void {
+    host.innerHTML = '';
     const cfg  = getAllConfig();
     const term = iconSearchTerm.trim();
+    const vendorSources = new Set(['aws', 'gcp', 'azure']);
 
-    const general = ICON_CATALOG.filter(i =>
-        cfg[i.id] === 'general' && i.source !== 'aws' && matchesSearch(i, term)
-    );
-    const complexOnly = ICON_CATALOG.filter(i =>
-        cfg[i.id] === 'complex-only' && i.source !== 'aws' && matchesSearch(i, term)
-    );
-    const awsIcons = ICON_CATALOG.filter(i =>
-        i.source === 'aws' && matchesSearch(i, term)
-    );
+    const usedIds = getUsedIconIds();
 
-    host.appendChild(buildSection({
-        title: 'General Component Icons',
-        helper: 'Available in Component Editor and Complex Shape. Click to move to Additional Complex Shape Icons. × removes from both pickers.',
-        icons: general,
-        emptyText: term ? 'No matches in this section.' : 'No icons currently in this section.',
-        primaryTarget: 'complex-only',
-        showRemove: true,
-    }));
-
-    host.appendChild(buildSection({
-        title: 'Additional Complex Shape Icons',
-        helper: 'Available only in Complex Shape. Click to move to General Component Icons. × removes from both pickers.',
-        icons: complexOnly,
-        emptyText: term ? 'No matches in this section.' : 'No icons currently in this section.',
-        primaryTarget: 'general',
-        showRemove: true,
-    }));
-
-    if (awsIcons.length > 0 || getAwsIconCount() > 0) {
-        host.appendChild(buildSection({
-            title: `AWS Icons (${getAwsIconCount()})`,
-            helper: 'Imported from AWS icon pack. Managed separately — use "Remove all AWS Icons" above to clear.',
-            icons: awsIcons,
-            emptyText: term ? 'No AWS icons match the search.' : 'No AWS icons loaded.',
-            primaryTarget: null,
-            showRemove: false,
-        }));
+    function buildInUseSection(icons: ReadonlyArray<IconCatalogEntry>): HTMLElement | null {
+        const used = icons.filter(i => usedIds.has(i.id));
+        if (used.length === 0) return null;
+        const section = document.createElement('section');
+        section.className = 'nr-admin__section';
+        const head = document.createElement('div');
+        head.className = 'nr-admin__section-head';
+        const title = document.createElement('h3');
+        title.className = 'nr-admin__section-title';
+        title.textContent = 'In Use';
+        head.appendChild(title);
+        const cnt = document.createElement('span');
+        cnt.className = 'nr-admin__section-count';
+        cnt.textContent = String(used.length);
+        head.appendChild(cnt);
+        section.appendChild(head);
+        const helper = document.createElement('p');
+        helper.className = 'nr-admin__section-helper';
+        helper.textContent = 'Currently assigned to components.';
+        section.appendChild(helper);
+        const grid = document.createElement('div');
+        grid.className = 'nr-admin__icon-compact-grid';
+        for (const icon of used) {
+            const shapeName = Object.values(ShapeRegistry).find(d => d.icon === icon.id)?.displayName ?? '';
+            grid.appendChild(buildTile(icon, {
+                titleAction: shapeName ? `Used by ${shapeName}` : icon.label,
+                onClick: null,
+                showRemove: false,
+            }));
+        }
+        section.appendChild(grid);
+        return section;
     }
 
-    host.appendChild(buildAvailableSection(cfg, term));
+    function buildTabWithInUse(sourceFilter: (i: IconCatalogEntry) => boolean, sectionCfg: SectionConfig): HTMLElement {
+        const wrap = document.createElement('div');
+        const allForSource = ICON_CATALOG.filter(sourceFilter);
+        const inUse = buildInUseSection(allForSource);
+        if (inUse) wrap.appendChild(inUse);
+        wrap.appendChild(buildSection(sectionCfg));
+        return wrap;
+    }
+
+    // Tab definitions
+    const tabs: Array<{ key: string; label: string; count?: number; build: () => HTMLElement }> = [
+        {
+            key: 'general', label: 'General',
+            count: ICON_CATALOG.filter(i => cfg[i.id] === 'general' && !vendorSources.has(i.source)).length,
+            build: () => buildTabWithInUse(
+                i => cfg[i.id] === 'general' && !vendorSources.has(i.source),
+                { title: 'General Component Icons', helper: 'Available in Component Editor and Complex Shape. Click to move to Complex Shape only. × removes from both pickers.',
+                  icons: ICON_CATALOG.filter(i => cfg[i.id] === 'general' && !vendorSources.has(i.source) && matchesSearch(i, term)),
+                  emptyText: term ? 'No matches.' : 'No icons in this section.', primaryTarget: 'complex-only', showRemove: true }),
+        },
+        {
+            key: 'complex', label: 'Complex Shape',
+            count: ICON_CATALOG.filter(i => cfg[i.id] === 'complex-only' && !vendorSources.has(i.source)).length,
+            build: () => buildTabWithInUse(
+                i => cfg[i.id] === 'complex-only' && !vendorSources.has(i.source),
+                { title: 'Complex Shape Icons', helper: 'Available only in Complex Shape. Click to move to General.',
+                  icons: ICON_CATALOG.filter(i => cfg[i.id] === 'complex-only' && !vendorSources.has(i.source) && matchesSearch(i, term)),
+                  emptyText: term ? 'No matches.' : 'No icons in this section.', primaryTarget: 'general', showRemove: true }),
+        },
+        {
+            key: 'aws', label: 'AWS',
+            count: getAwsIconCount(),
+            build: () => buildTabWithInUse(
+                i => i.source === 'aws',
+                { title: 'AWS Icons', helper: 'Imported from AWS icon pack.',
+                  icons: ICON_CATALOG.filter(i => i.source === 'aws' && matchesSearch(i, term)),
+                  emptyText: term ? 'No AWS icons match.' : 'No AWS icons loaded. Import via the tiles above.', primaryTarget: null, showRemove: false }),
+        },
+        {
+            key: 'gcp', label: 'GCP',
+            count: getGcpIconCount(),
+            build: () => buildTabWithInUse(
+                i => i.source === 'gcp',
+                { title: 'GCP Icons', helper: 'Imported from GCP icon pack.',
+                  icons: ICON_CATALOG.filter(i => i.source === 'gcp' && matchesSearch(i, term)),
+                  emptyText: term ? 'No GCP icons match.' : 'No GCP icons loaded. Import via the tiles above.', primaryTarget: null, showRemove: false }),
+        },
+        {
+            key: 'azure', label: 'Azure',
+            count: getAzureIconCount(),
+            build: () => buildTabWithInUse(
+                i => i.source === 'azure',
+                { title: 'Azure Icons', helper: 'Imported from Azure icon pack.',
+                  icons: ICON_CATALOG.filter(i => i.source === 'azure' && matchesSearch(i, term)),
+                  emptyText: term ? 'No Azure icons match.' : 'No Azure icons loaded. Import via the tiles above.', primaryTarget: null, showRemove: false }),
+        },
+        {
+            key: 'carbon', label: 'Carbon Library',
+            build: () => { ensureCarbonIcons(); return buildAvailableSection(getAllConfig(), term); },
+        },
+    ];
+
+    // Contained full-width tabs
+    const tabList = document.createElement('div');
+    tabList.className = 'nr-admin__tabs';
+    tabList.setAttribute('role', 'tablist');
+
+    const tabPanel = document.createElement('div');
+    tabPanel.className = 'nr-admin__tab-panel';
+
+    for (const tab of tabs) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-admin__tab' + (activeIconTab === tab.key ? ' nr-admin__tab--selected' : '');
+        btn.setAttribute('role', 'tab');
+        btn.setAttribute('aria-selected', String(activeIconTab === tab.key));
+
+        const labelSpan = document.createElement('span');
+        labelSpan.textContent = tab.label;
+        btn.appendChild(labelSpan);
+
+        if (tab.count != null && tab.count > 0) {
+            const badge = document.createElement('span');
+            badge.className = 'nr-admin__tab-badge';
+            badge.textContent = String(tab.count);
+            btn.appendChild(badge);
+        }
+
+        btn.addEventListener('click', () => {
+            activeIconTab = tab.key;
+            buildSections(host);
+        });
+        tabList.appendChild(btn);
+    }
+
+    host.appendChild(tabList);
+
+    const activeTab = tabs.find(t => t.key === activeIconTab) ?? tabs[0];
+    tabPanel.appendChild(activeTab.build());
+    host.appendChild(tabPanel);
 }
 
 function buildAvailableSection(cfg: Record<string, IconScope>, term: string): HTMLElement {
@@ -762,8 +1040,9 @@ function buildTile(icon: IconCatalogEntry, tcfg: TileConfig): HTMLElement {
     tile.setAttribute('aria-label', `${icon.label} — ${tcfg.titleAction}`);
     tile.title = `${icon.label} — ${tcfg.titleAction}`;
 
+    const isVendor = icon.source === 'aws' || icon.source === 'gcp' || icon.source === 'azure';
     const thumb = document.createElement('span');
-    thumb.className = 'nr-admin__icon-tile-thumb';
+    thumb.className = 'nr-admin__icon-tile-thumb' + (isVendor ? ' nr-icon-color' : '');
     thumb.innerHTML = icon.svg;
     tile.appendChild(thumb);
 

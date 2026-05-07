@@ -14,6 +14,10 @@ import { Pyramid } from './pyramid/pyramid'
 import { Octagon } from './octagon/octagon'
 import { Hexahedron } from './hexahedron/hexahedron'
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape'
+import { Tube } from './tube/tube'
+import { Pipe } from './pipe/pipe'
+import { Duct } from './duct/duct'
+import { Channel } from './channel/channel'
 import { ComplexComponent, ComplexComponentView } from './complex-component'
 
 export const cellNamespace = {
@@ -32,6 +36,10 @@ export const cellNamespace = {
     Octagon,
     Hexahedron,
     SvgPolygonShape,
+    Tube,
+    Pipe,
+    Duct,
+    Channel,
     // Typed as `nextrack.ComplexComponent`; JointJS resolves the matching view
     // at `nextrack.ComplexComponentView` in cellViewNamespace.
     nextrack: {
@@ -55,6 +63,10 @@ export {
     Octagon,
     Hexahedron,
     SvgPolygonShape,
+    Tube,
+    Pipe,
+    Duct,
+    Channel,
     ComplexComponent,
     ComplexComponentView,
 }

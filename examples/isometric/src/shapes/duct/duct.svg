@@ -1,0 +1,59 @@
+<g
+    highlighter-selector="base"
+>
+    <rect @selector="base" @group-selector="common"
+        width="calc(w)"
+        height="calc(h)"
+        fill="transparent"
+        stroke="none"
+    />
+
+    <path @selector="base2D" @group-selector="2d"
+        :d="{{base2DPath([size, isometricHeight])}}"
+        fill="#e0e0e0"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <!-- Full outline: single stroke around the entire visible shape -->
+    <path @selector="outline" @group-selector="iso"
+        :d="{{outlinePath([size, isometricHeight])}}"
+        fill="#e0e0e0"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <!-- Front face: near-end octagon with edges -->
+    <path @selector="frontFace" @group-selector="iso"
+        :d="{{frontPath([size, isometricHeight])}}"
+        fill="#c6c6c6"
+        stroke="#333"
+        stroke-linejoin="round"
+    />
+
+    <image @selector="topIcon" @group-selector="iso"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
+    <image @selector="topIcon2D" @group-selector="2d"
+        href=""
+        x="0" y="0" width="0" height="0"
+        preserveAspectRatio="xMidYMid meet"
+    />
+
+    <text @selector="label" @group-selector="common"
+        text-anchor="left"
+        text-vertical-anchor="middle"
+        font-family="sans-serif"
+        font-size="11"
+        fill="#333"
+        stroke="#fff"
+        stroke-width="3"
+        paint-order="stroke"
+        y="calc(h + 10)"
+        x="calc(w + 10)"
+        text=""
+    />
+</g>

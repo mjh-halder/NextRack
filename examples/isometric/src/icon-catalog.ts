@@ -34,9 +34,9 @@ import k8sControlPlaneSvg from '../assets/kubernetes--control-plane-node.svg';
 import instanceVirtualSvg from '../assets/instance--virtual.svg';
 import k8sWorkerNodeSvg from '../assets/kubernetes--worker-node.svg';
 
-import { CARBON_ICONS } from './carbon-icons-all';
+import { getCarbonIcons } from './carbon-icons-all';
 
-export type IconSource = 'custom' | 'carbon' | 'uploaded' | 'aws';
+export type IconSource = 'custom' | 'carbon' | 'uploaded' | 'aws' | 'gcp' | 'azure';
 
 export interface IconCatalogEntry {
     id: string;
@@ -85,14 +85,21 @@ const CUSTOM_ICONS: ReadonlyArray<IconCatalogEntry> = [
     { id: 'sap',                   label: 'SAP',                   svg: sapSvg,                 source: 'custom' },
 ];
 
-const CARBON_ENTRIES: ReadonlyArray<IconCatalogEntry> = CARBON_ICONS.map(ic => ({
-    id:     ic.id,     // already namespaced 'carbon:<name>'
-    label:  ic.label,
-    svg:    ic.svg,
-    source: 'carbon' as const,
-}));
+let carbonEntriesCache: IconCatalogEntry[] | null = null;
 
-const STATIC_CATALOG: ReadonlyArray<IconCatalogEntry> = [...CUSTOM_ICONS, ...CARBON_ENTRIES];
+function getCarbonEntries(): ReadonlyArray<IconCatalogEntry> {
+    if (!carbonEntriesCache) {
+        carbonEntriesCache = getCarbonIcons().map(ic => ({
+            id:     ic.id,
+            label:  ic.label,
+            svg:    ic.svg,
+            source: 'carbon' as const,
+        }));
+    }
+    return carbonEntriesCache;
+}
+
+const STATIC_CATALOG: ReadonlyArray<IconCatalogEntry> = [...CUSTOM_ICONS];
 
 // ── Uploaded icons (persisted in localStorage) ────────────────────────────────
 
@@ -123,9 +130,118 @@ function writeUploadedIcons(icons: StoredUploadedIcon[]): void {
     }
 }
 
-// ── AWS icons (persisted in localStorage) ────────────────────────────────────
+// ── SVG minification for storage ─────────────────────────────────────────────
 
-const AWS_STORAGE_KEY = 'nr-aws-icons-v1';
+function minifySvg(svg: string): string {
+    return svg
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/>\s+</g, '><')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s*([=])\s*/g, '$1')
+        .trim();
+}
+
+// ── IndexedDB vendor icon storage ────────────────────────────────────────────
+// localStorage has a ~5-10MB limit which is too small for large icon packs.
+// IndexedDB has no practical limit and works synchronously via a warm cache.
+
+const IDB_NAME = 'nextrack-icons';
+const IDB_VERSION = 1;
+const IDB_STORE = 'vendor-icons';
+
+interface VendorIconRecord {
+    id: string;
+    label: string;
+    svg: string;
+    source: string;
+    bgColor?: string;
+}
+
+let idbCache: Map<string, VendorIconRecord[]> = new Map();
+let idbReady = false;
+
+function openIdb(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(IDB_STORE)) {
+                db.createObjectStore(IDB_STORE, { keyPath: 'id' });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function idbLoadAll(): Promise<void> {
+    try {
+        const db = await openIdb();
+        const tx = db.transaction(IDB_STORE, 'readonly');
+        const store = tx.objectStore(IDB_STORE);
+        const all: VendorIconRecord[] = await new Promise((res, rej) => {
+            const req = store.getAll();
+            req.onsuccess = () => res(req.result);
+            req.onerror = () => rej(req.error);
+        });
+        db.close();
+        idbCache.clear();
+        for (const rec of all) {
+            const list = idbCache.get(rec.source) ?? [];
+            list.push(rec);
+            idbCache.set(rec.source, list);
+        }
+        // Migrate from localStorage if present
+        for (const [key, source] of [['nr-aws-icons-v1', 'aws'], ['nr-gcp-icons-v1', 'gcp'], ['nr-azure-icons-v1', 'azure']] as const) {
+            const raw = localStorage.getItem(key);
+            if (raw) {
+                try {
+                    const parsed = JSON.parse(raw) as Array<{ id: string; label: string; svg: string; bgColor?: string }>;
+                    if (parsed.length > 0 && !(idbCache.get(source)?.length)) {
+                        await idbWriteSource(source, parsed.map(p => ({ ...p, source })));
+                        idbCache.set(source, parsed.map(p => ({ ...p, source })));
+                    }
+                    localStorage.removeItem(key);
+                } catch { /* ignore migration errors */ }
+            }
+        }
+        idbReady = true;
+    } catch (e) {
+        console.error('[nextrack] IndexedDB load failed, falling back to empty cache:', e);
+        idbReady = true;
+    }
+}
+
+async function idbWriteSource(source: string, records: VendorIconRecord[]): Promise<boolean> {
+    try {
+        const db = await openIdb();
+        const tx = db.transaction(IDB_STORE, 'readwrite');
+        const store = tx.objectStore(IDB_STORE);
+        // Delete existing records for this source
+        const all: VendorIconRecord[] = await new Promise((res, rej) => {
+            const req = store.getAll();
+            req.onsuccess = () => res(req.result);
+            req.onerror = () => rej(req.error);
+        });
+        for (const rec of all) {
+            if (rec.source === source) store.delete(rec.id);
+        }
+        for (const rec of records) store.put(rec);
+        await new Promise<void>((res, rej) => { tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
+        db.close();
+        idbCache.set(source, records);
+        return true;
+    } catch (e) {
+        console.error(`[nextrack] Failed to write ${source} icons to IndexedDB:`, e);
+        return false;
+    }
+}
+
+function readVendorIcons(source: string): VendorIconRecord[] {
+    return idbCache.get(source) ?? [];
+}
+
+// ── Vendor icon public API (AWS / GCP / Azure) ──────────────────────────────
 
 interface StoredAwsIcon {
     id: string;
@@ -200,18 +316,16 @@ function sanitizeAwsSvg(svg: string): string {
         styleEl.remove();
     });
 
-    // Remove transparent/empty background rects (common AWS pattern)
+    // Remove background rects (common AWS pattern: full-size rect as first child)
     el.querySelectorAll('rect').forEach(r => {
         const id = (r.getAttribute('id') || '').toLowerCase();
         const dn = (r.getAttribute('data-name') || '').toLowerCase();
-        const style = r.getAttribute('style') || '';
-        const fill = r.getAttribute('fill') || '';
-        const isFillNone = style.includes('fill') && style.includes('none') || fill === 'none';
-        const isFullSize = (r.getAttribute('width') === '80' && r.getAttribute('height') === '80') ||
-                           (r.getAttribute('width') === '48' && r.getAttribute('height') === '48') ||
-                           (r.getAttribute('width') === '32' && r.getAttribute('height') === '32');
-        if (id.includes('transparent') || dn.includes('transparent') ||
-            (isFillNone && isFullSize)) {
+        const w = r.getAttribute('width') || '';
+        const h = r.getAttribute('height') || '';
+        const isFullSize = (w === '80' && h === '80') ||
+                           (w === '48' && h === '48') ||
+                           (w === '32' && h === '32');
+        if (id.includes('transparent') || dn.includes('transparent') || isFullSize) {
             r.remove();
         }
     });
@@ -350,54 +464,104 @@ export function extractAwsBgColor(svg: string): string | null {
     return null;
 }
 
-function readAwsIcons(): StoredAwsIcon[] {
-    try {
-        const raw = localStorage.getItem(AWS_STORAGE_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-}
-
-function writeAwsIcons(icons: StoredAwsIcon[]): void {
-    try {
-        localStorage.setItem(AWS_STORAGE_KEY, JSON.stringify(icons));
-    } catch (e) {
-        console.error('[nextrack] Failed to save AWS icons:', e);
-    }
-}
-
-export function addAwsIcons(entries: Array<{ label: string; svg: string }>): number {
-    const stored = readAwsIcons();
+export async function addAwsIcons(entries: Array<{ label: string; svg: string }>): Promise<{ added: number; error?: string }> {
+    const stored = readVendorIcons('aws');
     const existing = new Set(stored.map(s => s.label));
     let added = 0;
     for (const e of entries) {
         if (existing.has(e.label)) continue;
-        stored.push({ id: `aws:${e.label}`, label: e.label, svg: e.svg });
+        stored.push({ id: `aws:${e.label}`, label: e.label, svg: minifySvg(e.svg), source: 'aws' });
         added++;
     }
-    writeAwsIcons(stored);
+    const ok = await idbWriteSource('aws', stored);
+    if (!ok) return { added, error: 'Failed to save icons to database.' };
     rebuildCatalog();
-    return added;
+    return { added };
 }
 
-export function removeAllAwsIcons(): number {
-    const count = readAwsIcons().length;
-    writeAwsIcons([]);
+export async function removeAllAwsIcons(): Promise<number> {
+    const count = readVendorIcons('aws').length;
+    await idbWriteSource('aws', []);
     rebuildCatalog();
     return count;
 }
 
 export function getAwsIconCount(): number {
-    return readAwsIcons().length;
+    return readVendorIcons('aws').length;
+}
+
+export async function addGcpIcons(entries: Array<{ label: string; svg: string }>): Promise<{ added: number; error?: string }> {
+    const stored = readVendorIcons('gcp');
+    const existing = new Set(stored.map(s => s.label));
+    let added = 0;
+    for (const e of entries) {
+        if (existing.has(e.label)) continue;
+        stored.push({ id: `gcp:${e.label}`, label: e.label, svg: minifySvg(e.svg), source: 'gcp' });
+        added++;
+    }
+    const ok = await idbWriteSource('gcp', stored);
+    if (!ok) return { added, error: 'Failed to save icons to database.' };
+    rebuildCatalog();
+    return { added };
+}
+
+export async function removeAllGcpIcons(): Promise<number> {
+    const count = readVendorIcons('gcp').length;
+    await idbWriteSource('gcp', []);
+    rebuildCatalog();
+    return count;
+}
+
+export function getGcpIconCount(): number {
+    return readVendorIcons('gcp').length;
+}
+
+export async function addAzureIcons(entries: Array<{ label: string; svg: string }>): Promise<{ added: number; error?: string }> {
+    const stored = readVendorIcons('azure');
+    const existing = new Set(stored.map(s => s.label));
+    let added = 0;
+    for (const e of entries) {
+        if (existing.has(e.label)) continue;
+        stored.push({ id: `azure:${e.label}`, label: e.label, svg: minifySvg(e.svg), source: 'azure' });
+        added++;
+    }
+    const ok = await idbWriteSource('azure', stored);
+    if (!ok) return { added, error: 'Failed to save icons to database.' };
+    rebuildCatalog();
+    return { added };
+}
+
+export async function removeAllAzureIcons(): Promise<number> {
+    const count = readVendorIcons('azure').length;
+    await idbWriteSource('azure', []);
+    rebuildCatalog();
+    return count;
+}
+
+export function getAzureIconCount(): number {
+    return readVendorIcons('azure').length;
 }
 
 // ── Catalog rebuild ──────────────────────────────────────────────────────────
 
 type CatalogListener = () => void;
 const catalogListeners = new Set<CatalogListener>();
+
+// Cache sanitized SVGs so we don't re-parse on every rebuild
+const sanitizeCache = new Map<string, { svg: string; bgColor?: string }>();
+
+function getSanitized(rec: VendorIconRecord): { svg: string; bgColor?: string } {
+    let cached = sanitizeCache.get(rec.id);
+    if (!cached) {
+        const svg = sanitizeAwsSvg(rec.svg);
+        const bgColor = rec.source === 'aws' ? (rec.bgColor || extractAwsBgColor(rec.svg) || undefined) : undefined;
+        cached = { svg, bgColor };
+        sanitizeCache.set(rec.id, cached);
+    }
+    return cached;
+}
+
+let fullCatalogBuilt = false;
 
 function rebuildCatalog(): void {
     const uploaded: IconCatalogEntry[] = readUploadedIcons().map(u => ({
@@ -406,18 +570,83 @@ function rebuildCatalog(): void {
         svg: u.svg,
         source: 'uploaded' as const,
     }));
-    const aws: IconCatalogEntry[] = readAwsIcons().map(a => ({
-        id: a.id,
-        label: a.label,
-        svg: sanitizeAwsSvg(a.svg),
-        source: 'aws' as const,
-        bgColor: a.bgColor || extractAwsBgColor(a.svg) || undefined,
-    }));
+
+    // On first load: only sanitize icons that are actually used by shapes.
+    // Full catalog is built lazily when the user opens the icon picker or admin.
+    const usedIconIds = new Set<string>();
+    try {
+        const { ShapeRegistry } = require('./shapes/shape-registry');
+        for (const def of Object.values(ShapeRegistry) as Array<{ icon?: string }>) {
+            if (def.icon) usedIconIds.add(def.icon);
+        }
+    } catch { /* ignore if registry not loaded yet */ }
+
+    // Also include icons from shapes stored in localStorage (user-created components)
+    try {
+        for (const key of ['nextrack-shapes-general-v1', 'nextrack-shapes-user-v1']) {
+            const raw = localStorage.getItem(key);
+            if (!raw) continue;
+            const shapes = JSON.parse(raw) as Array<{ definition?: { icon?: string } }>;
+            for (const s of shapes) {
+                if (s.definition?.icon) usedIconIds.add(s.definition.icon);
+            }
+        }
+    } catch { /* ignore */ }
+
+    // If any used icon is not yet in STATIC_CATALOG or vendor cache, it may be a
+    // Carbon icon.  Load the Carbon library so those shapes get their icons.
+    if (!carbonEntriesCache && usedIconIds.size > 0) {
+        const knownIds = new Set(STATIC_CATALOG.map(i => i.id));
+        idbCache.forEach(records => { for (const r of records) knownIds.add(r.id); });
+        let needCarbon = false;
+        usedIconIds.forEach(id => { if (!knownIds.has(id)) needCarbon = true; });
+        if (needCarbon) getCarbonEntries();
+    }
+
+    const vendorEntries: IconCatalogEntry[] = [];
+    idbCache.forEach((records, source) => {
+        for (const rec of records) {
+            if (!fullCatalogBuilt && !usedIconIds.has(rec.id)) {
+                // Defer: add a lightweight stub (label + id only, no SVG parsing)
+                vendorEntries.push({
+                    id: rec.id,
+                    label: rec.label,
+                    svg: '',
+                    source: source as IconSource,
+                });
+                continue;
+            }
+            const { svg, bgColor } = getSanitized(rec);
+            vendorEntries.push({
+                id: rec.id,
+                label: rec.label,
+                svg,
+                source: source as IconSource,
+                bgColor,
+            });
+        }
+    });
+
     ICON_CATALOG.length = 0;
-    ICON_CATALOG.push(...STATIC_CATALOG, ...uploaded, ...aws);
+    ICON_CATALOG.push(...STATIC_CATALOG, ...uploaded, ...vendorEntries);
+    if (carbonEntriesCache) ICON_CATALOG.push(...carbonEntriesCache);
     ICON_BY_ID.clear();
     for (const i of ICON_CATALOG) ICON_BY_ID.set(i.id, i);
     catalogListeners.forEach(l => l());
+}
+
+/** Ensure all vendor icon SVGs are sanitized (fast). Call before opening the icon picker. */
+export function ensureFullCatalog(): void {
+    if (fullCatalogBuilt) return;
+    fullCatalogBuilt = true;
+    rebuildCatalog();
+}
+
+/** Load the full Carbon icon library into the catalog (slow, ~500ms). Call only when the user needs Carbon icons. */
+export function ensureCarbonIcons(): void {
+    if (carbonEntriesCache !== null) return;
+    getCarbonEntries();
+    rebuildCatalog();
 }
 
 export function addUploadedIcon(label: string, svg: string): string {
@@ -446,6 +675,16 @@ export const ICON_CATALOG: IconCatalogEntry[] = [];
 const ICON_BY_ID: Map<string, IconCatalogEntry> = new Map();
 rebuildCatalog();
 
+// Auto-load IndexedDB vendor icons on module init — rebuilds catalog when ready
+idbLoadAll().then(() => rebuildCatalog()).catch(() => {});
+
 export function getIconById(id: string): IconCatalogEntry | undefined {
-    return ICON_BY_ID.get(id);
+    const entry = ICON_BY_ID.get(id);
+    if (entry && !entry.svg && !fullCatalogBuilt) {
+        // Lazily resolve a deferred stub by rebuilding the full catalog
+        fullCatalogBuilt = true;
+        rebuildCatalog();
+        return ICON_BY_ID.get(id);
+    }
+    return entry;
 }

@@ -31,22 +31,14 @@
       }
       #app-loader .loader-brand {
         all: initial;
-        display: flex; align-items: center; gap: 6px;
+        display: flex; align-items: center; gap: 12px;
         margin-bottom: 32px;
         box-sizing: border-box;
       }
-      #app-loader .loader-icon {
-        all: initial;
-        font-family: 'Material Symbols Outlined';
-        font-size: 28px; color: #fff;
-        font-weight: 400; font-style: normal;
-        line-height: 28px; letter-spacing: normal;
-        text-transform: none; direction: ltr;
-        -webkit-font-smoothing: antialiased;
+      #app-loader .nr-loader-svg {
         display: block;
-        width: 28px; height: 28px;
-        overflow: hidden;
-        box-sizing: border-box;
+        width: 28px; height: 20px;
+        color: #fff;
       }
       #app-loader .loader-name {
         all: initial;
@@ -57,31 +49,51 @@
         display: block;
         box-sizing: border-box;
       }
-      #app-loader .loader-spinner {
-        all: initial;
-        display: block;
-        width: 24px; height: 24px;
-        border: 2px solid #333;
-        border-top-color: #0f62fe;
-        border-radius: 50%;
-        animation: loader-spin 0.8s linear infinite;
-        box-sizing: border-box;
+      .nr-loader-bar-top { animation: nr-loader-wrap-right 0.4s linear infinite; }
+      .nr-loader-bar-bottom { animation: nr-loader-wrap-left 0.4s linear infinite; }
+      @keyframes nr-loader-wrap-right {
+        0%   { transform: translateX(0); }
+        100% { transform: translateX(40px); }
       }
-      @keyframes loader-spin { to { transform: rotate(360deg); } }
+      @keyframes nr-loader-wrap-left {
+        0%   { transform: translateX(0); }
+        100% { transform: translateX(-40px); }
+      }
     </style>
   </head>
   <body>
     <div id="app-loader">
       <div class="loader-brand">
-        <span class="loader-icon">view_object_track</span>
+        <svg class="nr-loader-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 28">
+          <defs><clipPath id="loader-clip"><rect x="0" y="0" width="40" height="28"/></clipPath></defs>
+          <g clip-path="url(#loader-clip)">
+            <g class="nr-loader-bar-top">
+              <rect x="2" y="2" width="22" height="10" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+              <rect x="-38" y="2" width="22" height="10" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+            </g>
+            <g class="nr-loader-bar-bottom">
+              <rect x="16" y="16" width="22" height="10" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+              <rect x="56" y="16" width="22" height="10" rx="5" fill="none" stroke="currentColor" stroke-width="2"/>
+            </g>
+          </g>
+        </svg>
         <span class="loader-name">Xyronos</span>
       </div>
-      <div class="loader-spinner"></div>
     </div>
     <div id="top-header" class="cds--g100" role="banner" aria-label="Application header"></div>
     <nav id="nav-rail" class="cds--g100" aria-label="Application navigation">
-      <button id="nav-grid" class="nr-rail-item nr-rail-item--active" type="button"
-              title="System Designer" aria-label="System Designer" aria-current="page">
+      <button id="nav-apps" class="nr-rail-item nr-rail-item--active" type="button"
+              title="Workloads" aria-label="Workloads" aria-current="page">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor"
+             width="20" height="20" aria-hidden="true">
+          <path d="M16,17v8H6V17H16m0-2H6a2,2,0,0,0-2,2v8a2,2,0,0,0,2,2H16a2,2,0,0,0,2-2V17a2,2,0,0,0-2-2Z"/>
+          <path d="M27,6v5H17V6H27m0-2H17a2,2,0,0,0-2,2v5a2,2,0,0,0,2,2H27a2,2,0,0,0,2-2V6a2,2,0,0,0-2-2Z"/>
+          <path d="M27,17v5H22V17h5m0-2H22a2,2,0,0,0-2,2v5a2,2,0,0,0,2,2h5a2,2,0,0,0,2-2V17a2,2,0,0,0-2-2Z"/>
+          <path d="M11,6v5H6V6h5m0-2H6A2,2,0,0,0,4,6v5a2,2,0,0,0,2,2h5a2,2,0,0,0,2-2V6a2,2,0,0,0-2-2Z"/>
+        </svg>
+      </button>
+      <button id="nav-grid" class="nr-rail-item" type="button"
+              title="System Designer" aria-label="System Designer">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor"
              width="20" height="20" aria-hidden="true">
           <path d="M16,24a.9967.9967,0,0,1-.4741-.12l-13-7L3.4741,15.12,16,21.8643,28.5259,15.12l.9482,1.7607-13,7A.9967.9967,0,0,1,16,24Z"/>
@@ -96,11 +108,15 @@
           <path d="M28.5039,8.1362l-12-7a1,1,0,0,0-1.0078,0l-12,7A1,1,0,0,0,3,9V23a1,1,0,0,0,.4961.8638l12,7a1,1,0,0,0,1.0078,0l12-7A1,1,0,0,0,29,23V9A1,1,0,0,0,28.5039,8.1362ZM16,3.1577,26.0156,9,16,14.8423,5.9844,9ZM5,10.7412l10,5.833V28.2588L5,22.4258ZM17,28.2588V16.5742l10-5.833V22.4258Z"/>
         </svg>
       </button>
-      <button id="nav-apps" class="nr-rail-item" type="button"
-              title="Applications" aria-label="Applications">
+      <button id="nav-clusters" class="nr-rail-item" type="button"
+              title="Cluster Assignment" aria-label="Cluster Assignment">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor"
              width="20" height="20" aria-hidden="true">
-          <path d="M28 10H20V4a2 2 0 00-2-2H6a2 2 0 00-2 2V28a2 2 0 002 2H28a2 2 0 002-2V12A2 2 0 0028 10ZM6 4H18V28H6ZM28 28H20V12h8Z"/>
+          <path d="M30,30H22V22h8Zm-6-2h4V24H24Z"/>
+          <path d="M20,27H8A6,6,0,0,1,8,15h2v2H8a4,4,0,0,0,0,8H20Z"/>
+          <path d="M20,20H12V12h8Zm-6-2h4V14H14Z"/>
+          <path d="M24,17H22V15h2a4,4,0,0,0,0-8H12V5H24a6,6,0,0,1,0,12Z"/>
+          <path d="M10,10H2V2h8ZM4,8H8V4H4Z"/>
         </svg>
       </button>
       <button id="nav-catalog" class="nr-rail-item" type="button"
@@ -135,6 +151,9 @@
     <div id="view-toggle-container"></div>
     <div id="workload-table"></div>
     <div id="minimap"></div>
+    <button id="element-table-btn" type="button" class="nr-et-btn" title="Element Table" aria-label="Element Table">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="M12 29H5a2 2 0 01-2-2v-7h2v7h7v2zm15 0h-7v-2h7v-7h2v7a2 2 0 01-2 2zM3 12H1V5a2 2 0 012-2h7v2H3v7zm26 0h-2V5h-7V3h7a2 2 0 012 2v7z"/><path d="M10 18H6v-4h4zm0-6H6V8h4zm8 6h-4v-4h4zm0-6h-4V8h4zm8 6h-4v-4h4zm0-6h-4V8h4zm-16 14H6v-4h4zm8 0h-4v-4h4zm8 0h-4v-4h4z"/></svg>
+    </button>
     <div id="zoom-control"></div>
     <div id="inspector"></div>
     <div id="component-designer" aria-hidden="true">
@@ -154,15 +173,17 @@
       <div id="cd2-inspector"></div>
     </div>
     <div id="app-designer" aria-hidden="true">
-      <div id="ad-palette"></div>
-      <div id="ad-canvas-wrap">
+      <div id="ad-table"></div>
+      <div id="ad-palette" style="display:none"></div>
+      <div id="ad-canvas-wrap" style="display:none">
         <div class="ad-view-pane">
           <span class="ad-pane-label">Isometric</span>
           <div id="ad-canvas"></div>
         </div>
       </div>
-      <div id="ad-inspector"></div>
+      <div id="ad-inspector" style="display:none"></div>
     </div>
+    <div id="cluster-view" aria-hidden="true"></div>
     <div id="product-catalog" aria-hidden="true"></div>
     <div id="data-model" aria-hidden="true"></div>
     <div id="knowledge-base" aria-hidden="true"></div>

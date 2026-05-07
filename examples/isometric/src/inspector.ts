@@ -128,6 +128,7 @@ export class PropertyPanel {
     private zoneCustomInputs: Record<string, HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement> = {};
     private zoneColorSwatchBtns: Array<{ btn: HTMLButtonElement; color: string }> = [];
     private selectedZoneColor = DEFAULT_ZONE_COLOR;
+    private zoneBorderStyleSelect!: HTMLSelectElement;
     private zoneLabelPosPicker!: LabelPositionPicker;
     private zoneBadgePosPicker!: LabelPositionPicker;
     private zoneClusterNameInput!: HTMLInputElement;
@@ -178,6 +179,16 @@ export class PropertyPanel {
         });
 
         this.zoneSection.appendChild(this.buildZoneColorRow());
+
+        // Border style dropdown
+        const { row: borderStyleRow, select: borderStyleSelect } = this.buildSelectRow(
+            'zone-border-style', 'Border Style', ['Solid', 'Dashed']
+        );
+        // Remove the empty "— select —" option since both values are valid
+        borderStyleSelect.querySelector('option[value=""]')?.remove();
+        this.zoneBorderStyleSelect = borderStyleSelect;
+        this.zoneBorderStyleSelect.addEventListener('change', () => this.saveZone());
+        this.zoneSection.appendChild(borderStyleRow);
 
         // ---- Stretch Cluster subsection (visible only when zone is in a cluster) ----
         this.zoneClusterSection = document.createElement('div');
@@ -526,6 +537,10 @@ export class PropertyPanel {
         this.currentZone.attr('body/fill', hexToRgba(color, 0.08));
         this.currentZone.attr('label/fill', color);
 
+        const borderStyle = this.zoneBorderStyleSelect.value;
+        this.currentZone.set('zoneBorderStyle', borderStyle);
+        this.currentZone.attr('body/stroke-dasharray', borderStyle === 'Dashed' ? '8 4' : null);
+
         const selectedPos = this.zoneLabelPosPicker.getValue();
         this.currentZone.set('zoneLabelPosition', selectedPos);
         const pos = LABEL_POSITIONS[selectedPos];
@@ -795,6 +810,9 @@ export class PropertyPanel {
 
         this.selectedZoneColor = (frame.get('zoneColor') as string | undefined) ?? DEFAULT_ZONE_COLOR;
         this.syncZoneColorSwatches();
+
+        const borderStyle = (frame.get('zoneBorderStyle') as string | undefined) ?? 'Solid';
+        this.zoneBorderStyleSelect.value = borderStyle;
 
         this.zoneLabelPosPicker.setValue((frame.get('zoneLabelPosition') as string | undefined) ?? 'top-left');
         this.zoneLabelPosPicker.row.style.display = this.zoneLabelHiddenEl.checked ? 'none' : '';

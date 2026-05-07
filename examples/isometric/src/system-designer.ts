@@ -2,10 +2,11 @@ import { g, dia, V, highlighters, routers } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View } from './shapes/isometric-shape';
 import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, Frame, cellNamespace } from './shapes';
-import { sortElements, drawGrid, switchView, applyRegistryDefaults } from './utils';
+import { sortElements, drawGrid, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle } from './utils';
 import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
 import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath } from './inspector';
-import { ShapeRegistry } from './shapes/shape-registry';
+import { ShapeRegistry, ShapeDefinition } from './shapes/shape-registry';
+import { getPreviewFactory } from './shapes/shape-factories';
 import { ComponentPalette } from './palette';
 import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './persistence';
 import {
@@ -13,21 +14,25 @@ import {
     getActiveCanvasId, setActiveCanvasId, saveCanvasGraph, loadCanvasGraph, CanvasRecord,
 } from './canvas-store';
 import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
-import { initMinimap, updateMinimapView } from './minimap';
+import { initMinimap, updateMinimapView, scheduleMinimapUpdate } from './minimap';
 import { initResourceBar, showResourceBar, hideResourceBar, showZoneHud, hideZoneHud, detectStretchClusters } from './resource-bar';
 import { initAutoLayout, showLayoutBar, hideLayoutBar } from './auto-layout';
+import { applyHover, clearHover, applySelect, clearSelect, clearSelectFor, applyConnHighlight, clearConnHighlights as clearConnRings, syncAllRings } from './hover-highlight';
 import { initWorkloadTable, showWorkloadTable, hideWorkloadTable } from './workload-table';
 import { getCanvas } from './canvas-store';
 import { ViewToggle } from './view-toggle';
 import { AreaSelect } from './area-select';
 import { carbonIconToString, CarbonIcon } from './icons';
 import { FrameCornerControl } from './tools';
+import { LOADER_SVG, ensureLoaderStyles } from './loader';
+ensureLoaderStyles();
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
 import BringToFront16 from '@carbon/icons/es/bring-to-front/16.js';
 import SendToBack16 from '@carbon/icons/es/send-to-back/16.js';
 import ConnectionSignalOff16 from '@carbon/icons/es/connection-signal--off/16.js';
 import ConnectionSignal16 from '@carbon/icons/es/connection-signal/16.js';
+import Rotate16 from '@carbon/icons/es/rotate/16.js';
 
 // Inline Carbon SVG icons (16 × 16) used in the menu components
 const CDS_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 4.7l-.7-.7L8 7.3 4.7 4l-.7.7L7.3 8 4 11.3l.7.7L8 8.7l3.3 3.3.7-.7L8.7 8z"/></svg>`;
@@ -338,10 +343,7 @@ function highlightConnections(cell: IsometricShape): void {
             if (neighbor && !neighbor.isLink()) {
                 const view = paper.findViewByModel(neighbor);
                 if (view) {
-                    highlighters.mask.add(view, 'base', CONN_HIGHLIGHT_ID, {
-                        layer: dia.Paper.Layers.BACK,
-                        attrs: { stroke: CONN_LINK_COLOR, 'stroke-width': 2, 'stroke-opacity': 0.4 }
-                    });
+                    applyConnHighlight(view);
                     connHighlightedNodes.push(neighbor as dia.Element);
                 }
             }
@@ -353,11 +355,7 @@ function clearConnectionHighlights(): void {
     const hadLinks = connHighlightedLinks.length > 0;
     connHighlightedLinks = [];
     if (hadLinks) styleClusterLinks();
-    for (const node of connHighlightedNodes) {
-        if (!node.graph) continue;
-        const view = paper.findViewByModel(node);
-        if (view) highlighters.mask.remove(view, CONN_HIGHLIGHT_ID);
-    }
+    clearConnRings();
     connHighlightedNodes = [];
 }
 
@@ -498,17 +496,17 @@ gridVEl = drawGrid(paper, GRID_COUNT, GRID_SIZE);
 
 // Canvas dimensions: sidebar inset on the left + grid content + extra whitespace on
 // the right and bottom so panning feels open with room on all sides.
-const CANVAS_H_PAD = 800;
-const CANVAS_V_PAD = 800;
+const CANVAS_H_PAD = 200;
+const CANVAS_V_PAD = 200;
 paper.setDimensions(
     SIDEBAR_INSET + 2 * GRID_SIZE * GRID_COUNT * SCALE * ISOMETRIC_SCALE + CANVAS_H_PAD,
     GRID_SIZE * GRID_COUNT * SCALE + CANVAS_V_PAD
 );
 
-// Ensure the example canvas exists (migrates legacy default design on first run)
 ensureExampleCanvas();
 let activeCanvasId = getActiveCanvasId();
 loadCanvasGraph(activeCanvasId, graph);
+
 
 function toggleHideConnections(cell: IsometricShape): void {
     const hidden = !cell.get('hideConnections');
@@ -592,12 +590,39 @@ graph.on('change:position change:size', debouncedSort);
 
 // Zoom via mouse wheel (blank and cell areas)
 
+function getMinZoom(): number {
+    const baseMx = transformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
+    const gw = currentGridCountX * GRID_SIZE;
+    const gh = (currentGridCountY ?? currentGridCountX) * GRID_SIZE;
+    const corners = [
+        { x: baseMx.a * 0 + baseMx.c * 0, y: baseMx.b * 0 + baseMx.d * 0 },
+        { x: baseMx.a * gw + baseMx.c * 0, y: baseMx.b * gw + baseMx.d * 0 },
+        { x: baseMx.a * gw + baseMx.c * gh, y: baseMx.b * gw + baseMx.d * gh },
+        { x: baseMx.a * 0 + baseMx.c * gh, y: baseMx.b * 0 + baseMx.d * gh },
+    ];
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const c of corners) {
+        if (c.x < minX) minX = c.x;
+        if (c.x > maxX) maxX = c.x;
+        if (c.y < minY) minY = c.y;
+        if (c.y > maxY) maxY = c.y;
+    }
+    const gridScreenW = maxX - minX + 100;
+    const gridScreenH = maxY - minY + 100;
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
+    const vpW = window.innerWidth - SIDEBAR_INSET;
+    const vpH = window.innerHeight - headerH;
+    if (vpW <= 0 || vpH <= 0 || gridScreenW <= 0 || gridScreenH <= 0) return MIN_ZOOM;
+    return Math.max(MIN_ZOOM, Math.min(vpW / gridScreenW, vpH / gridScreenH));
+}
+
 function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
     evt.preventDefault();
     const clampedDelta = Math.sign(delta) * Math.min(Math.abs(delta), 1);
     const pct = 0.04 + 0.06 * (1 - currentZoom / MAX_ZOOM);
     const step = clampedDelta > 0 ? (1 + pct) : 1 / (1 + pct);
-    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * step));
+    const minZoom = getMinZoom();
+    const newZoom = Math.min(MAX_ZOOM, Math.max(minZoom, currentZoom * step));
     if (newZoom === currentZoom) return;
     const factor = newZoom / currentZoom;
     currentZoom = newZoom;
@@ -614,18 +639,20 @@ function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
             .multiply(mx)
     );
     syncZoomSlider();
+    scheduleMinimapUpdate();
 }
 
 // Zoom anchored to the centre of the usable viewport (header + sidebar excluded)
 function applyMenuZoom(factor: number) {
-    const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, currentZoom * factor));
+    const minZoom = getMinZoom();
+    const newZoom = Math.min(MAX_ZOOM, Math.max(minZoom, currentZoom * factor));
     if (newZoom === currentZoom) return;
     const zoomFactor = newZoom / currentZoom;
     currentZoom = newZoom;
     const mx = paper.matrix();
     const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
-    const sx = SIDEBAR_INSET + (window.innerWidth  - SIDEBAR_INSET) / 2;
-    const sy = headerH               + (window.innerHeight - headerH)       / 2;
+    const sx = window.scrollX + SIDEBAR_INSET + (window.innerWidth  - SIDEBAR_INSET) / 2;
+    const sy = window.scrollY + headerH      + (window.innerHeight - headerH)       / 2;
     paper.matrix(
         V.createSVGMatrix()
             .translate(sx, sy)
@@ -634,7 +661,46 @@ function applyMenuZoom(factor: number) {
             .multiply(mx)
     );
     syncZoomSlider();
+    scheduleMinimapUpdate();
 }
+
+// Clamp scroll so the grid never moves more than 200px outside the viewport
+const SCROLL_PAD = 100;
+function clampScroll(): void {
+    const mx = paper.matrix();
+    const gw = currentGridCountX * GRID_SIZE;
+    const gh = currentGridCountY * GRID_SIZE;
+    const corners = [
+        { x: mx.a * 0 + mx.c * 0 + mx.e, y: mx.b * 0 + mx.d * 0 + mx.f },
+        { x: mx.a * gw + mx.c * 0 + mx.e, y: mx.b * gw + mx.d * 0 + mx.f },
+        { x: mx.a * gw + mx.c * gh + mx.e, y: mx.b * gw + mx.d * gh + mx.f },
+        { x: mx.a * 0 + mx.c * gh + mx.e, y: mx.b * 0 + mx.d * gh + mx.f },
+    ];
+    let gMinX = Infinity, gMaxX = -Infinity, gMinY = Infinity, gMaxY = -Infinity;
+    for (const c of corners) {
+        if (c.x < gMinX) gMinX = c.x;
+        if (c.x > gMaxX) gMaxX = c.x;
+        if (c.y < gMinY) gMinY = c.y;
+        if (c.y > gMaxY) gMaxY = c.y;
+    }
+
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
+    const vpLeft = window.scrollX + SIDEBAR_INSET;
+    const vpTop = window.scrollY + headerH;
+    const vpRight = window.scrollX + window.innerWidth;
+    const vpBottom = window.scrollY + window.innerHeight;
+
+    let dx = 0, dy = 0;
+    if (gMaxX < vpLeft + SCROLL_PAD) dx = (vpLeft + SCROLL_PAD) - gMaxX;
+    if (gMinX > vpRight - SCROLL_PAD) dx = (vpRight - SCROLL_PAD) - gMinX;
+    if (gMaxY < vpTop + SCROLL_PAD) dy = (vpTop + SCROLL_PAD) - gMaxY;
+    if (gMinY > vpBottom - SCROLL_PAD) dy = (vpBottom - SCROLL_PAD) - gMinY;
+
+    if (dx !== 0 || dy !== 0) {
+        window.scroll(window.scrollX - dx, window.scrollY - dy);
+    }
+}
+window.addEventListener('scroll', clampScroll);
 
 paper.on('blank:mousewheel', (evt: dia.Event, x: number, y: number, delta: number) => {
     applyWheelZoom(evt, x, y, delta);
@@ -646,10 +712,123 @@ paper.on('cell:mousewheel', (_cellView: dia.CellView, evt: dia.Event, x: number,
 
 // Switch between isometric and 2D view
 
+// ── Experimental: animated view transition ──────────────────────────────────
+// Interpolates the paper matrix between 2D and isometric over ~300ms for a
+// smooth "rotation" feel. Shape iso/2d groups are crossfaded via opacity.
+
+const VIEW_TRANSITION_MS = 900;
+let viewTransitionRaf = 0;
+
+function lerpMatrix(a: DOMMatrix, b: DOMMatrix, t: number): SVGMatrix {
+    const m = V.createSVGMatrix();
+    m.a = a.a + (b.a - a.a) * t;
+    m.b = a.b + (b.b - a.b) * t;
+    m.c = a.c + (b.c - a.c) * t;
+    m.d = a.d + (b.d - a.d) * t;
+    m.e = a.e + (b.e - a.e) * t;
+    m.f = a.f + (b.f - a.f) * t;
+    return m;
+}
+
+function easeInOut(t: number): number {
+    return t;
+}
+
+function animateViewSwitch(toView: View) {
+    if (viewTransitionRaf) cancelAnimationFrame(viewTransitionRaf);
+
+    // Capture what model-space point is currently at the viewport center
+    const sm = paper.matrix();
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
+    const vpCx = window.scrollX + SIDEBAR_INSET + (window.innerWidth - SIDEBAR_INSET) / 2;
+    const vpCy = window.scrollY + headerH + (window.innerHeight - headerH) / 2;
+    const det = sm.a * sm.d - sm.b * sm.c;
+    const modelX = ( sm.d * (vpCx - sm.e) - sm.c * (vpCy - sm.f)) / det;
+    const modelY = (-sm.b * (vpCx - sm.e) + sm.a * (vpCy - sm.f)) / det;
+
+    // Adjust target matrix so the same model point stays at viewport center
+    const startMatrix = sm;
+    const endMatrix = transformationMatrix(toView, 20, SIDEBAR_INSET, currentGridCountX);
+    const endPx = endMatrix.a * modelX + endMatrix.c * modelY + endMatrix.e;
+    const endPy = endMatrix.b * modelX + endMatrix.d * modelY + endMatrix.f;
+    endMatrix.e += vpCx - endPx;
+    endMatrix.f += vpCy - endPy;
+
+    paper.el.style.position = 'relative';
+
+    const overlayEl = document.createElement('div');
+    overlayEl.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:1;opacity:0;background:var(--cds-background,#fff);display:flex;align-items:center;justify-content:center;';
+
+    const loaderWrap = document.createElement('div');
+    loaderWrap.style.cssText = 'position:fixed;top:50%;left:calc(50% + 128px);transform:translate(-50%,-50%);opacity:0;color:var(--cds-text-secondary,#525252);';
+    loaderWrap.innerHTML = LOADER_SVG;
+    overlayEl.appendChild(loaderWrap);
+
+    paper.el.appendChild(overlayEl);
+
+    let swapped = false;
+    const start = performance.now();
+
+    function tick(now: number) {
+        const elapsed = now - start;
+        const raw = Math.min(elapsed / VIEW_TRANSITION_MS, 1);
+        const t = easeInOut(raw);
+
+        const m = lerpMatrix(startMatrix, endMatrix, t);
+
+        // Gentle zoom dip, scaled around the viewport-center model point
+        const dip = Math.sin(raw * Math.PI) * 0.08;
+        if (dip > 0.001) {
+            const s = 1 - dip;
+            m.a *= s; m.b *= s; m.c *= s; m.d *= s;
+            const px = m.a * modelX + m.c * modelY + m.e;
+            const py = m.b * modelX + m.d * modelY + m.f;
+            m.e += vpCx - px;
+            m.f += vpCy - py;
+        }
+
+        paper.matrix(m);
+
+        // Fog: quick in (0–40%), slow out (40–100%)
+        let fog: number;
+        if (raw < 0.4) {
+            fog = raw / 0.4;
+        } else {
+            const out = (raw - 0.4) / 0.6;
+            fog = 1 - out * out;
+        }
+        overlayEl.style.opacity = String(fog);
+        const loaderOpacity = Math.max(0, fog - 0.5) * 2;
+        loaderWrap.style.opacity = String(loaderOpacity);
+
+        // Swap while fully faded out
+        if (!swapped && raw >= 0.5) {
+            swapped = true;
+            graph.getElements().forEach((el: dia.Element) =>
+                (el as IsometricShape).toggleView(toView));
+        }
+
+        if (raw < 1) {
+            viewTransitionRaf = requestAnimationFrame(tick);
+        } else {
+            viewTransitionRaf = 0;
+            overlayEl.remove();
+            if (!swapped) {
+                graph.getElements().forEach((el: dia.Element) =>
+                    (el as IsometricShape).toggleView(toView));
+            }
+            if (toView === View.Isometric) sortElements(graph);
+            if (currentCell) currentCell.addTools(paper, toView);
+        }
+    }
+    viewTransitionRaf = requestAnimationFrame(tick);
+}
+
 new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     currentView = view === 'isometric' ? View.Isometric : View.TwoDimensional;
     currentZoom = 1;
-    switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
+    paper.removeTools();
+    animateViewSwitch(currentView);
     updateMinimapView(currentView, currentGridCountX);
     syncZoomSlider();
 });
@@ -660,6 +839,10 @@ switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
 
 const minimapEl = document.getElementById('minimap') as HTMLDivElement;
 initMinimap(minimapEl, graph, paper);
+
+// ---- Element Table button ----
+import { showElementTable } from './element-table';
+(document.getElementById('element-table-btn') as HTMLButtonElement).addEventListener('click', () => showElementTable(graph));
 
 // ---- Zoom slider ----
 
@@ -1067,30 +1250,226 @@ function showNewDesignModal() {
 
 // ---- Export SVG ----
 
-function cleanSvgForExport(clone: SVGSVGElement): void {
-    // Remove grid and back-layer decorations
-    clone.querySelectorAll('[data-grid], .joint-back-layer').forEach(el => el.remove());
-
-    // Remove port/anchor circles
-    clone.querySelectorAll('.joint-port').forEach(el => el.remove());
-
-    // Ensure <image> href is also set as xlink:href for compatibility
-    clone.querySelectorAll('image').forEach(img => {
-        const href = img.getAttribute('href') || img.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
-        if (href) {
-            img.setAttribute('href', href);
-            img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
-        }
+function rasterizeSvgToDataUri(href: string, width: number, height: number): Promise<string> {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const scale = 2;
+            canvas.width = width * scale;
+            canvas.height = height * scale;
+            const ctx = canvas.getContext('2d')!;
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = () => resolve(href);
+        img.src = href;
     });
 }
 
-function downloadSvg(clone: SVGSVGElement, filename: string): void {
-    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+async function inlineSvgImage(img: SVGImageElement, href: string): Promise<void> {
+    const w = parseFloat(img.getAttribute('width') || '0');
+    const h = parseFloat(img.getAttribute('height') || '0');
 
-    const svgString = new XMLSerializer().serializeToString(clone);
+    if (href.startsWith('data:image/svg+xml') && w > 0 && h > 0) {
+        const pngUri = await rasterizeSvgToDataUri(href, w, h);
+        img.setAttribute('href', pngUri);
+        img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', pngUri);
+    } else {
+        img.setAttribute('href', href);
+        img.setAttributeNS('http://www.w3.org/1999/xlink', 'xlink:href', href);
+    }
+}
+
+async function exportCanvasSvg(): Promise<void> {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('xmlns', ns);
+    svg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+
+    const mx = paper.matrix();
+    const wrapper = document.createElementNS(ns, 'g');
+    wrapper.setAttribute('transform',
+        `matrix(${mx.a},${mx.b},${mx.c},${mx.d},0,0)`);
+
+    // Collect all cell views in their actual DOM order (respects z-index)
+    const cellsLayer = paper.el.querySelector('.joint-cells-layer');
+    if (!cellsLayer) return;
+    const orderedViews: SVGGElement[] = [];
+    cellsLayer.querySelectorAll(':scope > [model-id]').forEach(el => {
+        orderedViews.push(el as SVGGElement);
+    });
+
+    for (const liveEl of orderedViews) {
+        const modelId = liveEl.getAttribute('model-id');
+        if (!modelId) continue;
+        const cell = graph.getCell(modelId);
+        if (!cell) continue;
+
+        const isLink = cell.isLink();
+
+        // Skip hidden links
+        if (isLink && liveEl.querySelector('[display="none"]')?.closest('[model-id]') === liveEl) {
+            if (cell.attr('./display') === 'none') continue;
+        }
+
+        const clone = liveEl.cloneNode(true) as SVGGElement;
+
+        if (isLink) {
+            // Read the connection stroke from the LIVE DOM
+            const liveConn = (liveEl.querySelector('[joint-selector="line"]') ?? liveEl.querySelector('.connection')) as SVGElement | null;
+            const isDarkMode = document.documentElement.classList.contains('cds--g100');
+            let linkStroke = '#333333';
+            if (liveConn) {
+                const cs = window.getComputedStyle(liveConn).stroke;
+                const rgbMatch = cs.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
+                if (rgbMatch) {
+                    const [, r, g, b] = rgbMatch;
+                    linkStroke = '#' + [r, g, b].map(c => parseInt(c).toString(16).padStart(2, '0')).join('');
+                } else {
+                    linkStroke = cs;
+                }
+            } else if (isDarkMode) {
+                linkStroke = '#8d8d8d';
+            }
+
+            // Remove invisible hit-area wrapper and tools
+            clone.querySelectorAll('.connection-wrap, .joint-highlight-layer, [magnet="true"], .link-tools').forEach(e => e.remove());
+
+            // Bake connection stroke color
+            const connPath = (clone.querySelector('[joint-selector="line"]') ?? clone.querySelector('.connection')) as SVGElement | null;
+            if (connPath) connPath.setAttribute('stroke', linkStroke);
+
+            // Color ALL remaining non-connection, non-wrapper paths (= markers)
+            clone.querySelectorAll('path').forEach(p => {
+                if (p.classList.contains('connection') || p.getAttribute('joint-selector') === 'line') return;
+                if (p.classList.contains('connection-wrap')) { p.remove(); return; }
+                const strokeW = parseFloat(p.getAttribute('stroke-width') || '1');
+                if (strokeW > 5) { p.remove(); return; }
+                const d = p.getAttribute('d') ?? '';
+                if (!d) { p.remove(); return; }
+                for (const attr of ['fill', 'stroke']) {
+                    const val = p.getAttribute(attr);
+                    if (val !== 'none') {
+                        p.setAttribute(attr, linkStroke);
+                    }
+                }
+            });
+
+            // Also check non-path marker elements (e.g. polygon, circle)
+            clone.querySelectorAll('polygon, circle, rect, line').forEach(el => {
+                if (el.closest('.connection-wrap')) return;
+                for (const attr of ['fill', 'stroke']) {
+                    const val = el.getAttribute(attr);
+                    if (val === 'context-stroke' || val === 'context-fill') {
+                        el.setAttribute(attr, linkStroke);
+                    }
+                }
+            });
+        } else {
+            // Bake computed colors for elements
+            const selectors = 'path, ellipse, rect, circle, polygon, line';
+            const liveShapes = liveEl.querySelectorAll(selectors);
+            const colors: Array<{ fill: string; stroke: string }> = [];
+            liveShapes.forEach(e => {
+                const cs = window.getComputedStyle(e);
+                colors.push({ fill: cs.fill, stroke: cs.stroke });
+            });
+            const cloneShapes = clone.querySelectorAll(selectors);
+            cloneShapes.forEach((e, i) => {
+                if (!colors[i]) return;
+                const { fill, stroke } = colors[i];
+                if (fill && fill !== 'none') e.setAttribute('fill', fill);
+                if (stroke && stroke !== 'none') e.setAttribute('stroke', stroke);
+            });
+            // Fix text labels: paint-order="stroke" isn't supported everywhere.
+            // Split into two layers: stroke-only behind, fill-only on top.
+            // Bake computed colors for dark/light mode.
+            const liveTexts = liveEl.querySelectorAll('text');
+            const textColors: Array<{ fill: string; stroke: string }> = [];
+            liveTexts.forEach(t => {
+                const cs = window.getComputedStyle(t);
+                textColors.push({ fill: cs.fill, stroke: cs.stroke });
+            });
+            const cloneTexts = clone.querySelectorAll('text[paint-order]');
+            let ti = 0;
+            cloneTexts.forEach(txt => {
+                const tc = textColors[ti++] || { fill: '#333', stroke: '#fff' };
+                const bg = txt.cloneNode(true) as SVGTextElement;
+                bg.removeAttribute('paint-order');
+                bg.setAttribute('fill', 'none');
+                bg.setAttribute('stroke', tc.stroke);
+                const fg = txt.cloneNode(true) as SVGTextElement;
+                fg.removeAttribute('paint-order');
+                fg.setAttribute('stroke', 'none');
+                fg.setAttribute('fill', tc.fill);
+                txt.parentNode?.insertBefore(bg, txt);
+                txt.parentNode?.insertBefore(fg, txt);
+                txt.remove();
+            });
+
+            clone.querySelectorAll('.joint-port').forEach(e => e.remove());
+            clone.querySelectorAll('[display="none"]').forEach(e => e.remove());
+            clone.querySelectorAll('path').forEach(p => {
+                const d = p.getAttribute('d') ?? '';
+                if (!d || d === 'M 0 0') p.remove();
+            });
+            // Rasterize visible SVG icons to PNG for PowerPoint compatibility
+            const images = Array.from(clone.querySelectorAll('image'));
+            for (const img of images) {
+                const href = img.getAttribute('href') || img.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+                const w = parseFloat(img.getAttribute('width') || '0');
+                const h = parseFloat(img.getAttribute('height') || '0');
+                if (!href || w === 0 || h === 0) { img.remove(); continue; }
+                await inlineSvgImage(img as SVGImageElement, href);
+            }
+        }
+
+        wrapper.appendChild(clone);
+    }
+
+    // Copy defs, resolving context-stroke in markers to #8d8d8d (dark) or #333 (light)
+    const paperDefs = paper.el.querySelector('svg > defs');
+    if (paperDefs && paperDefs.children.length > 0) {
+        const defsCopy = paperDefs.cloneNode(true) as SVGDefsElement;
+        const isDark = document.documentElement.classList.contains('cds--g100');
+        const defaultLinkColor = isDark ? '#8d8d8d' : '#333333';
+        defsCopy.querySelectorAll('*').forEach(el => {
+            for (const attr of ['fill', 'stroke']) {
+                const val = el.getAttribute(attr);
+                if (val === 'context-stroke' || val === 'context-fill') {
+                    el.setAttribute(attr, defaultLinkColor);
+                }
+            }
+        });
+        svg.appendChild(defsCopy);
+    }
+
+    svg.appendChild(wrapper);
+
+    // Measure with all transforms applied
+    svg.style.cssText = 'position:absolute;left:-9999px;top:-9999px;overflow:visible';
+    svg.setAttribute('width', '8000');
+    svg.setAttribute('height', '8000');
+    document.body.appendChild(svg);
+    const bbox = svg.getBBox();
+    document.body.removeChild(svg);
+
+    if (bbox.width === 0 || bbox.height === 0) return;
+
+    const pad = 16;
+    svg.setAttribute('viewBox',
+        `${bbox.x - pad} ${bbox.y - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`);
+    svg.setAttribute('width', String(Math.ceil(bbox.width + pad * 2)));
+    svg.setAttribute('height', String(Math.ceil(bbox.height + pad * 2)));
+    svg.removeAttribute('style');
+
+    const svgString = new XMLSerializer().serializeToString(svg);
     const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
     const url = URL.createObjectURL(blob);
+
+    const docName = designNameEl.textContent?.trim() || 'design';
+    const filename = docName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.svg';
 
     const a = document.createElement('a');
     a.href = url;
@@ -1099,35 +1478,6 @@ function downloadSvg(clone: SVGSVGElement, filename: string): void {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-}
-
-function exportCanvasSvg(): void {
-    const svgEl = paper.el.querySelector('svg');
-    if (!svgEl) return;
-
-    const clone = svgEl.cloneNode(true) as SVGSVGElement;
-    cleanSvgForExport(clone);
-
-    // Measure content bounding box
-    clone.style.position = 'absolute';
-    clone.style.left = '-9999px';
-    document.body.appendChild(clone);
-
-    const contentGroup = clone.querySelector('.joint-cells-layer') as SVGGElement | null;
-    const bbox = contentGroup ? contentGroup.getBBox() : clone.getBBox();
-    document.body.removeChild(clone);
-
-    if (bbox.width === 0 || bbox.height === 0) return;
-
-    const pad = 16;
-    clone.setAttribute('viewBox', `${bbox.x - pad} ${bbox.y - pad} ${bbox.width + pad * 2} ${bbox.height + pad * 2}`);
-    clone.setAttribute('width', String(Math.ceil(bbox.width + pad * 2)));
-    clone.setAttribute('height', String(Math.ceil(bbox.height + pad * 2)));
-    clone.removeAttribute('style');
-
-    const docName = designNameEl.textContent?.trim() || 'design';
-    const filename = docName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '.svg';
-    downloadSvg(clone, filename);
 }
 
 // ---- Toast ----
@@ -1283,21 +1633,12 @@ function showAdjustGridModal() {
 }
 
 
-// Apply or remove the Carbon-blue edge highlight that syncs tree ↔ canvas selection.
 function setTreeHighlight(cell: IsometricShape | null) {
-    if (treeHighlightedCell) {
-        const prevView = paper.findViewByModel(treeHighlightedCell);
-        if (prevView) highlighters.mask.remove(prevView, TREE_HIGHLIGHT_ID);
-    }
+    clearSelect();
     treeHighlightedCell = cell;
     if (cell) {
         const cellView = paper.findViewByModel(cell);
-        if (cellView) {
-            highlighters.mask.add(cellView, 'base', TREE_HIGHLIGHT_ID, {
-                layer: dia.Paper.Layers.BACK,
-                attrs: { stroke: TREE_HIGHLIGHT_COLOR, 'stroke-width': 3 }
-            });
-        }
+        if (cellView) applySelect(cellView);
     }
     palette.setTreeSelection(cell ? String(cell.id) : null);
 }
@@ -1578,18 +1919,23 @@ const areaSelect = new AreaSelect({
         paper.removeTools();
         currentCell = null;
         currentFrame = null;
-        setTreeHighlight(null);
+        treeHighlightedCell = null;
+        if (cells.length > 0) {
+            palette.setTreeMultiSelection(cells.map(c => String(c.id)));
+        } else {
+            palette.setTreeSelection(null);
+        }
         hideZoneHud();
         if (cells.length === 0) {
             panel.hide();
             return;
         }
         const zones = cells.filter(c => c.get('isFrame'));
+        for (const zone of zones) {
+            (zone as Frame).addTools(paper, currentView);
+        }
         if (zones.length >= 2 && zones.length === cells.length) {
             panel.showMultiZone(zones as dia.Element[]);
-            for (const zone of zones) {
-                (zone as Frame).addTools(paper, currentView);
-            }
         } else {
             panel.hide();
         }
@@ -1611,24 +1957,13 @@ FrameCornerControl.getSiblingZones = (primary) => {
     return sel.filter(c => c.get('isFrame') && String(c.id) !== String(primary.id)) as dia.Element[];
 };
 
-// When element-tree drag-drop targets a zone, tint the zone on the canvas
-// with the same orange used by the canvas drag highlight.
 palette.setZoneDropHighlightCallback((zoneId) => {
-    // Clear previous
-    if (dropTargetZone) {
-        dropTargetZone.attr({
-            body: { fill: ZONE_DEFAULT_FILL, stroke: ZONE_DEFAULT_STROKE },
-            label: { fill: ZONE_DEFAULT_STROKE },
-        });
-        dropTargetZone = null;
-    }
+    clearZoneDropHighlight();
     if (!zoneId) return;
     const zone = graph.getCell(zoneId);
     if (!zone || !zone.get('isFrame')) return;
-    (zone as Frame).attr({
-        body: { fill: ZONE_DROP_FILL, stroke: ZONE_DROP_STROKE },
-        label: { fill: ZONE_DROP_STROKE },
-    });
+    const view = paper.findViewByModel(zone);
+    if (view) applyHover(view);
     dropTargetZone = zone as Frame;
 });
 
@@ -1700,22 +2035,12 @@ paper.on('link:pointerup', (linkView: dia.LinkView) => {
     setTreeHighlight(null);
 });
 
-// Zone-drop hint: while dragging an element across the canvas, temporarily
-// tint the target zone's own fill + stroke to orange so the user sees which
-// zone would receive the component. No extra highlighter mask — just the
-// zone's native attrs are swapped and restored.
-const ZONE_DEFAULT_FILL   = 'rgba(0, 114, 195, 0.08)';
-const ZONE_DEFAULT_STROKE = '#0072c3';
-const ZONE_DROP_FILL      = 'rgba(255, 131, 43, 0.15)';
-const ZONE_DROP_STROKE    = '#ff832b';
 let dropTargetZone: Frame | null = null;
 
 function clearZoneDropHighlight(): void {
     if (!dropTargetZone) return;
-    dropTargetZone.attr({
-        body: { fill: ZONE_DEFAULT_FILL, stroke: ZONE_DEFAULT_STROKE },
-        label: { fill: ZONE_DEFAULT_STROKE },
-    });
+    const view = paper.findViewByModel(dropTargetZone);
+    if (view) clearHover();
     dropTargetZone = null;
 }
 
@@ -1731,16 +2056,31 @@ paper.on('element:pointermove', (elementView: dia.ElementView) => {
     clearZoneDropHighlight();
 
     if (targetZone && targetZone.id !== shape.getParentCell()?.id) {
-        targetZone.attr({
-            body: { fill: ZONE_DROP_FILL, stroke: ZONE_DROP_STROKE },
-            label: { fill: ZONE_DROP_STROKE },
-        });
+        const view = paper.findViewByModel(targetZone);
+        if (view) applyHover(view);
         dropTargetZone = targetZone;
     }
 });
 
+let isDragging = false;
+
+paper.on('element:pointerdown', () => { isDragging = false; });
+paper.on('element:pointermove', () => {
+    if (!isDragging) { isDragging = true; clearHover(); }
+    syncAllRings();
+});
+
+paper.on('element:mouseenter', (elementView: dia.ElementView) => {
+    applyHover(elementView);
+});
+
+paper.on('element:mouseleave', () => {
+    if (!isDragging) clearHover();
+});
+
 paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => {
     clearZoneDropHighlight();
+    isDragging = false;
 
     const resolved = resolveComponentBase(elementView.model);
 
@@ -1748,7 +2088,8 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
         areaSelect.toggle(resolved);
         currentCell = null;
         currentFrame = null;
-        setTreeHighlight(null);
+        treeHighlightedCell = null;
+        palette.setTreeSelection(null);
         clearConnectionHighlights();
         return;
     }
@@ -1785,6 +2126,7 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
 paper.on('blank:pointerdown', (_evt: dia.Event) => {
     if (_evt.shiftKey) return;
     areaSelect.clear();
+    clearHover();
     paper.removeTools();
     currentCell = null;
     currentFrame = null;
@@ -1818,6 +2160,7 @@ const CTX_ICON_FRONT       = carbonIconToString(BringToFront16        as CarbonI
 const CTX_ICON_BACK        = carbonIconToString(SendToBack16          as CarbonIcon);
 const CTX_ICON_DISCONNECT  = carbonIconToString(ConnectionSignalOff16 as CarbonIcon);
 const CTX_ICON_CONNECT     = carbonIconToString(ConnectionSignal16    as CarbonIcon);
+const CTX_ICON_ROTATE      = carbonIconToString(Rotate16              as CarbonIcon);
 
 interface CtxAction {
     label: string;
@@ -1876,6 +2219,51 @@ function showContextMenu(clientX: number, clientY: number, actions: CtxAction[])
     ctxMenuEl = menu;
 }
 
+function switchShapeVariation(cell: IsometricShape): void {
+    const meta = (cell.get(META_KEY) as Record<string, unknown>) ?? {};
+    const shapeKey = (meta.shapeType as string) || '';
+    const def = ShapeRegistry[shapeKey];
+    if (!def?.hasVariations || !def.turned90) return;
+
+    const current = (cell.get('shapeVariation') as string) || 'default';
+    const target = current === 'default' ? 'turned90' : 'default';
+    const targetDef = target === 'turned90' ? def.turned90 : def;
+
+    const pos = cell.position();
+    const parentZone = cell.getParentCell();
+
+    graph.startBatch('switch-variation');
+
+    const factory = getPreviewFactory(shapeKey, targetDef.baseShape ?? 'cuboid');
+    const newShape = factory();
+    applyRegistryDefaults(newShape, targetDef, paper);
+    newShape.position(pos.x, pos.y);
+    newShape.set(META_KEY, meta);
+    newShape.set('shapeVariation', target);
+    newShape.toggleView(currentView);
+
+    const links = graph.getConnectedLinks(cell);
+    for (const link of links) {
+        const src = link.source() as { id?: string; port?: string };
+        const tgt = link.target() as { id?: string; port?: string };
+        if (src.id === (cell.id as string)) link.source({ ...src, id: newShape.id as string } as any);
+        if (tgt.id === (cell.id as string)) link.target({ ...tgt, id: newShape.id as string } as any);
+    }
+
+    cell.remove();
+    graph.addCell(newShape);
+    if (parentZone) (parentZone as Frame).embed(newShape);
+
+    paper.removeTools();
+    newShape.addTools(paper, currentView, []);
+    currentCell = newShape;
+    panel.show(newShape);
+    setTreeHighlight(newShape);
+
+    graph.stopBatch('switch-variation');
+    if (currentView === View.Isometric) sortElements(graph);
+}
+
 function buildActionsForCurrentSelection(): CtxAction[] {
     const actions: CtxAction[] = [];
     if (currentFrame) {
@@ -1891,6 +2279,16 @@ function buildActionsForCurrentSelection(): CtxAction[] {
     } else if (currentCell && !(currentCell instanceof Link)) {
         const cell = currentCell;
         const isHidden = !!cell.get('hideConnections');
+        const meta = (cell.get(META_KEY) as Record<string, unknown>) ?? {};
+        const shapeKey = (meta.shapeType as string) || '';
+        const shapeDef = ShapeRegistry[shapeKey];
+        if (shapeDef?.hasVariations && shapeDef.turned90) {
+            const current = (cell.get('shapeVariation') as string) || 'default';
+            const targetLabel = current === 'default' ? '90° Turned' : 'Default';
+            actions.push(
+                { label: `Switch to ${targetLabel}`, icon: CTX_ICON_ROTATE, run: () => switchShapeVariation(cell) },
+            );
+        }
         actions.push(
             { label: 'Duplicate',            icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
             { label: 'Duplicate with Links', icon: CTX_ICON_DUPLICATE, run: duplicateWithLinks },

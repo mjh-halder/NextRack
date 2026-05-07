@@ -19,7 +19,7 @@
 
     <!-- ISO: front (bottom-facing) triangular face -->
     <polygon @selector="front" @group-selector="iso"
-        :points="{{frontFacePoints([size, isometricHeight])}}"
+        :points="{{frontFacePoints([size, isometricHeight, shapeRotation])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"
@@ -27,7 +27,7 @@
 
     <!-- ISO: side (right-facing) triangular face -->
     <polygon @selector="side" @group-selector="iso"
-        :points="{{sideFacePoints([size, isometricHeight])}}"
+        :points="{{sideFacePoints([size, isometricHeight, shapeRotation])}}"
         fill="#c6c6c6"
         stroke="#333"
         stroke-linejoin="round"

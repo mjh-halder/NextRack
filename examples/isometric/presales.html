@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Xyronos — Presales</title>
+    <link rel="stylesheet" href="https://1.www.s81c.com/common/carbon/plex/sans.css"/>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=view_object_track&display=block"/>
+    <style>
+:root {
+    --bg: #000; --border: #1a1a1a; --text: #ededed; --text-2: #888; --accent: #0f62fe;
+    --accent-hover: #0353e9; --gap: clamp(48px,6vw,96px); --max-w: 1100px; --pad: clamp(20px,5vw,64px);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{font-family:'IBM Plex Sans',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.nav-brand:hover,.nav-brand:hover *{text-decoration:none}
+.c{max-width:var(--max-w);margin:0 auto;padding:0 var(--pad)}
+.s{padding:var(--gap) 0;position:relative}
+.s+.s::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:100%;max-width:var(--max-w);height:0;border-top:1px solid var(--border)}
+
+/* Nav (shared via shared-layout.js) */
+nav{position:fixed;top:0;left:0;right:0;z-index:100;height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 32px;background:rgba(0,0,0,.8);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid transparent;transition:border-color .15s}
+nav.scrolled{border-bottom-color:var(--border)}
+.logo-icon{font-family:'Material Symbols Outlined';font-weight:normal;font-style:normal;font-size:28px;line-height:1;letter-spacing:normal;text-transform:none;white-space:nowrap;word-wrap:normal;direction:ltr;-webkit-font-smoothing:antialiased;color:#fff}
+.nav-brand{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1.25rem;color:var(--text);text-decoration:none}
+.nav-brand-name{font-size:1.25rem;font-weight:600;color:var(--text);letter-spacing:-0.02em}
+.nav-links{display:flex;align-items:center;gap:32px}
+.nav-links a{color:var(--text-2);font-size:0.875rem;transition:color .15s;text-decoration:none}
+.nav-links a:hover{color:var(--text);text-decoration:none}
+.nav-links a.nav-btn,.nav-links a.nav-btn:hover{color:#fff}
+.nav-btn{display:inline-flex;align-items:center;padding:8px 16px;font-size:0.875rem;font-weight:500;color:#fff;background:var(--accent);border:none;border-radius:6px;cursor:pointer;text-decoration:none;transition:background .15s}
+.nav-btn:hover{background:var(--accent-hover)}
+.btn{background:var(--accent);color:#fff;border:none;padding:8px 18px;font:600 13px/1 'IBM Plex Sans',sans-serif;border-radius:4px;cursor:pointer;transition:background .15s;text-decoration:none;display:inline-block}
+.btn:hover{background:var(--accent-hover);text-decoration:none}
+.btn-ghost{background:transparent;color:var(--text);border:1px solid var(--border);padding:8px 18px;font:500 13px/1 'IBM Plex Sans',sans-serif;border-radius:4px;cursor:pointer;transition:all .15s;text-decoration:none}
+.btn-ghost:hover{border-color:#444;text-decoration:none}
+
+/* Page grid guides */
+.page-grid{position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:0}
+.page-grid .grid-guide{position:absolute;width:1px;top:var(--guide-top,96px);bottom:0;background:var(--border)}
+.page-grid .grid-guide--l{left:calc(50% - var(--max-w)/2)}
+.page-grid .grid-guide--r{right:calc(50% - var(--max-w)/2)}
+.grid-divider{position:relative;max-width:var(--max-w);margin:0 auto;height:0;border-top:1px solid var(--border)}
+.grid-cross--l{top:-12px;left:-12px}
+.grid-cross--r{top:-12px;right:-12px}
+
+/* Footer (shared) */
+footer{padding:48px 32px;display:flex;justify-content:space-between;align-items:center;max-width:var(--max-w);margin:0 auto;font-size:0.8125rem;color:#555;border-top:1px solid var(--border)}
+footer a{color:#555;text-decoration:none}footer a:hover{color:var(--text-2)}
+.footer-links{display:flex;gap:24px}
+
+/* Typography */
+.label{font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
+.h1{font-size:clamp(36px,5vw,56px);font-weight:600;line-height:1.08;letter-spacing:-.03em;margin-bottom:20px}
+.h2{font-size:clamp(28px,3.5vw,40px);font-weight:600;line-height:1.12;letter-spacing:-.02em;margin-bottom:16px}
+.h3{font-size:18px;font-weight:600;margin-bottom:8px}
+.desc{font-size:clamp(16px,1.6vw,18px);color:var(--text-2);line-height:1.7;max-width:600px}
+
+/* Pictogram */
+.picto{width:48px;height:48px;margin-bottom:20px;flex-shrink:0}
+.picto svg{width:100%;height:100%;fill:#fff}
+
+/* Hero */
+.hero{min-height:100vh;display:flex;align-items:center;padding-top:96px}
+.hero-inner{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+.hero .desc{margin-bottom:28px}
+.hero-actions{display:flex;gap:10px;flex-wrap:wrap}
+.ph{aspect-ratio:16/9;background:#0a0a0a;border:1px solid var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--text-2);font-size:13px;padding:20px;text-align:center}
+.ph--4x3{aspect-ratio:4/3}
+
+/* Stats */
+.stats{display:grid;grid-template-columns:repeat(3,1fr);padding:0;text-align:center;max-width:var(--max-w);margin:0 auto;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+.stats>div{padding:48px 32px;border-right:1px solid var(--border)}
+.stats>div:last-child{border-right:none}
+.stat-n{font-size:clamp(44px,6vw,64px);font-weight:700;color:#fff;letter-spacing:-.03em}
+.stat-l{font-size:13px;color:var(--text-2);margin-top:6px}
+
+/* Value Grid — tile layout with dividers */
+#presales{padding-bottom:0}
+.vgrid{display:grid;grid-template-columns:repeat(3,1fr);margin-top:40px;margin-left:calc(-1 * var(--pad));margin-right:calc(-1 * var(--pad));border-top:1px solid var(--border)}
+.vitem{padding:40px 32px;border-bottom:1px solid var(--border);border-right:1px solid var(--border)}
+.vitem:nth-child(3n){border-right:none}
+.vitem .h3{margin-top:0}
+.vitem .desc{max-width:none;font-size:15px}
+
+/* Split */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:64px;align-items:center}
+.split--r .sc{order:2}.split--r .sv{order:1}
+.features{list-style:none;display:flex;flex-direction:column;gap:10px;margin-top:20px}
+.features li{font-size:14px;color:var(--text-2);padding-left:20px;position:relative;line-height:1.5}
+.features li::before{content:'';position:absolute;left:0;top:7px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+
+/* Platforms */
+.platforms{display:flex;justify-content:center;gap:64px;margin-top:48px;flex-wrap:wrap}
+.platform{display:flex;flex-direction:column;align-items:center;gap:12px;font-size:13px;font-weight:500;color:var(--text-2)}
+.platform .picto{margin-bottom:0;opacity:.7}
+
+/* FAQ */
+.faq{max-width:720px;margin-top:40px}
+.faq-i{border-bottom:1px solid var(--border)}
+.faq-q{width:100%;background:none;border:none;color:var(--text);cursor:pointer;font:600 15px/1.4 'IBM Plex Sans',sans-serif;text-align:left;padding:18px 0;display:flex;justify-content:space-between;align-items:center}
+.faq-q::after{content:'+';font-size:22px;font-weight:300;color:var(--text-2);transition:transform .2s}
+.faq-q[aria-expanded="true"]::after{content:'−'}
+.faq-a{overflow:hidden;max-height:0;transition:max-height .3s ease,padding .3s ease;font-size:14px;color:var(--text-2);line-height:1.7}
+.faq-a.open{max-height:500px;padding-bottom:18px}
+
+/* CTA */
+.cta{text-align:center;padding:80px 0}
+.cta .desc{margin:0 auto 28px}
+
+/* Old footer classes (kept for compatibility) */
+.footer-row{display:flex;align-items:center;justify-content:space-between;width:100%}
+
+/* Grid guides */
+.grid-frame{position:relative}
+.grid-cross{position:absolute;width:25px;height:25px;pointer-events:none;z-index:2}
+.grid-cross::before,.grid-cross::after{content:'';position:absolute;background:#666}
+.grid-cross::before{width:1px;height:100%;left:50%;top:0}
+.grid-cross::after{height:1px;width:100%;top:50%;left:0}
+.grid-cross--tl{top:-12px;left:calc(50% - var(--max-w)/2 - 12px)}
+.grid-cross--tr{top:-12px;right:calc(50% - var(--max-w)/2 - 12px)}
+.grid-cross--bl{bottom:-12px;left:calc(50% - var(--max-w)/2 - 12px)}
+.grid-cross--br{bottom:-12px;right:calc(50% - var(--max-w)/2 - 12px)}
+html.light .grid-cross::before,html.light .grid-cross::after{background:#999}
+
+/* Theme switcher */
+.theme-sw{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:auto}
+.theme-sw input{position:absolute;opacity:0;width:0;height:0}
+.theme-sw label{display:flex;align-items:center;justify-content:center;width:32px;height:28px;cursor:pointer;color:var(--text-2);transition:all .15s}
+.theme-sw label:hover{color:var(--text);background:rgba(255,255,255,.05)}
+.theme-sw input:checked+label{color:var(--text);background:rgba(255,255,255,.1)}
+.theme-sw label svg{width:14px;height:14px}
+
+/* Light mode overrides */
+html.light{--bg:#fff;--border:#e5e5e5;--text:#0a0a0a;--text-2:#666;--card-bg:#fafafa}
+html.light nav{background:rgba(255,255,255,.8)}
+html.light .logo-icon{color:#0a0a0a}
+html.light .nav-brand-name{color:#0a0a0a}
+html.light .ph{background:#f5f5f5}
+html.light .picto svg{fill:#0a0a0a}
+html.light .stat-n{color:#0a0a0a}
+html.light footer{color:#666}
+html.light footer a{color:#666}
+html.light .theme-sw label:hover{background:rgba(0,0,0,.05)}
+html.light .theme-sw input:checked+label{background:rgba(0,0,0,.08)}
+
+@media(max-width:768px){
+.hero-inner,.split{grid-template-columns:1fr;gap:40px}
+.split--r .sc,.split--r .sv{order:unset}
+.stats{grid-template-columns:1fr}
+.stats>div{border-right:none;border-bottom:1px solid var(--border)}
+.stats>div:last-child{border-bottom:none}
+.vgrid{grid-template-columns:1fr}
+.vitem{border-right:none}
+.vitem:last-child{border-bottom:none}
+.nav-links a:not(.nav-btn){display:none}
+.platforms{gap:32px}
+.grid-guide,.grid-cross,.grid-divider,.page-grid{display:none}
+}
+    </style>
+</head>
+<body>
+
+<div id="shared-grid"></div>
+<div id="shared-nav"></div>
+
+<div class="grid-divider" style="margin-top:96px;z-index:2"><div class="grid-cross grid-cross--r"></div></div>
+
+<!-- Hero -->
+<section class="hero grid-frame">
+
+    <div class="c hero-inner">
+        <div>
+            <p class="label">Presales Engineering</p>
+            <h1 class="h1" style="font-size:clamp(1.75rem,3.2vw,2.75rem)">Design infrastructure visually.</h1>
+            <p class="desc">Xyronos gives presales teams a visual, collaborative platform to design end-to-end infrastructure — from rack layout to application mapping — in a fraction of the time.</p>
+            <div class="hero-actions">
+                <a href="index.html" class="btn" style="padding:10px 24px;font-size:14px">Start Designing</a>
+                <a href="#presales" class="btn-ghost">Learn More</a>
+            </div>
+        </div>
+        <div class="ph">[Screenshot: Full isometric data center view with zones, servers, networking]</div>
+    </div>
+</section>
+
+<!-- Stats -->
+<section class="s grid-frame">
+
+
+    <div class="c stats">
+        <div><div class="stat-n">40–70%</div><div class="stat-l">Faster architecture design</div></div>
+        <div><div class="stat-n">1</div><div class="stat-l">Single source of truth</div></div>
+        <div><div class="stat-n">0</div><div class="stat-l">Isolated spreadsheets</div></div>
+    </div>
+</section>
+
+<!-- Value Props -->
+<section class="s grid-frame" id="presales">
+
+
+    <div class="c">
+        <p class="label">Why Presales Teams Choose Xyronos</p>
+        <h2 class="h2">Answer the right questions at every altitude</h2>
+        <p class="desc">Whether you're scoping a single rack or designing a multi-site hybrid cloud deployment, Xyronos keeps your team aligned — from high-level capacity down to individual specs.</p>
+
+        <div class="vgrid">
+            <div class="vitem">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M9.002,31.36c-2.404,0-4.36-1.956-4.36-4.36s1.956-4.36,4.36-4.36c0.731,0,1.42,0.182,2.026,0.5l2.125-3.338	l0.607,0.387l-2.125,3.339c1.048,0.797,1.727,2.057,1.727,3.473C13.362,29.404,11.407,31.36,9.002,31.36z M9.002,23.36	c-2.007,0-3.64,1.633-3.64,3.64s1.633,3.64,3.64,3.64s3.64-1.633,3.64-3.64S11.01,23.36,9.002,23.36z M16.002,31.355	c-0.861,0-1.722-0.071-2.557-0.212l0.119-0.711c0.796,0.135,1.617,0.202,2.438,0.202c4.648,0,8.917-2.134,11.712-5.854l0.576,0.432	C25.358,29.116,20.879,31.355,16.002,31.355z M31,24.86c-0.062,0-0.126-0.017-0.182-0.05l-5.995-3.505	c-0.11-0.064-0.179-0.183-0.179-0.311s0.068-0.246,0.179-0.311l5.995-3.495c0.113-0.065,0.249-0.065,0.361-0.002	c0.111,0.064,0.181,0.184,0.181,0.312v7c0,0.129-0.069,0.248-0.182,0.312C31.124,24.844,31.062,24.86,31,24.86z M25.719,20.995	l4.921,2.877v-5.745L25.719,20.995z M3.345,24.699c-0.554-0.803-1.034-1.665-1.425-2.56l0.66-0.289	c0.373,0.854,0.829,1.675,1.357,2.44L3.345,24.699z M3.126,20.477c-0.092,0-0.184-0.035-0.254-0.105l-2.126-2.116	C0.678,18.188,0.64,18.096,0.64,18c0-0.095,0.038-0.187,0.105-0.255l2.126-2.125c0.141-0.141,0.368-0.141,0.509,0l2.122,2.121	c0.068,0.067,0.105,0.159,0.105,0.255S5.57,18.183,5.502,18.25L3.38,20.371C3.31,20.441,3.218,20.477,3.126,20.477z M1.51,17.999	l1.616,1.608l1.613-1.612l-1.612-1.612L1.51,17.999z M8.761,20.176c-0.732-1.266-1.119-2.711-1.119-4.181	c0-3.819,2.58-7.149,6.274-8.098l0.179,0.697c-3.375,0.867-5.733,3.91-5.733,7.4c0,1.343,0.354,2.664,1.022,3.819L8.761,20.176z M16.002,19.355c-1.853,0-3.36-1.508-3.36-3.36c0-1.732,1.317-3.162,3.002-3.341V6.995h0.72v5.659	c1.683,0.182,2.998,1.61,2.998,3.341C19.362,17.848,17.854,19.355,16.002,19.355z M16.002,13.355c-1.456,0-2.64,1.185-2.64,2.64	c0,1.456,1.185,2.64,2.64,2.64s2.639-1.184,2.639-2.64C18.642,14.54,17.458,13.355,16.002,13.355z M30.641,15.019	c-0.432-6.56-5.246-12.057-11.707-13.37l0.143-0.706c6.779,1.377,11.83,7.146,12.283,14.029L30.641,15.019z M24.005,14.355	c-0.062,0-0.124-0.016-0.18-0.048l-2.599-1.5c-0.111-0.064-0.181-0.184-0.181-0.312v-3c0-0.128,0.069-0.248,0.181-0.312l2.599-1.5	c0.111-0.063,0.248-0.064,0.359,0l2.598,1.5c0.111,0.064,0.181,0.183,0.181,0.312v3c0,0.128-0.069,0.248-0.181,0.312l-2.598,1.5	C24.129,14.339,24.067,14.355,24.005,14.355z M21.767,12.287l2.238,1.292l2.237-1.292V9.703l-2.237-1.292l-2.238,1.292	C21.767,9.703,21.767,12.287,21.767,12.287z M15.998,4.36c-1.024,0-1.857-0.836-1.857-1.865c0-1.023,0.833-1.855,1.857-1.855	c1.027,0,1.863,0.832,1.863,1.855C17.86,3.523,17.024,4.36,15.998,4.36z M15.998,1.36c-0.627,0-1.138,0.509-1.138,1.135	c0,0.631,0.51,1.145,1.138,1.145c0.63,0,1.142-0.514,1.142-1.145C17.14,1.869,16.627,1.36,15.998,1.36z M1.035,15.348	c-0.008,0-0.017,0-0.025-0.001c-0.198-0.015-0.347-0.177-0.333-0.375c0,0,0.001-0.021,0.001-0.022	c0.016-0.198,0.185-0.353,0.387-0.331c0.198,0.015,0.346,0.188,0.331,0.387C1.381,15.194,1.222,15.348,1.035,15.348z M1.302,12.997	h0.009H1.302z M1.836,11.05h0.009H1.836z M2.627,9.542c-0.054,0-0.108-0.012-0.159-0.039c-0.175-0.09-0.249-0.295-0.16-0.471	C2.309,9.029,2.32,9.008,2.322,9.004c0.094-0.175,0.311-0.24,0.488-0.146C2.985,8.952,3.05,9.17,2.956,9.346	C2.89,9.469,2.76,9.542,2.627,9.542z M4.926,6.231c-0.088,0-0.176-0.031-0.244-0.095C4.54,6.002,4.525,5.786,4.655,5.641	C4.66,5.637,4.678,5.618,4.683,5.613c0.141-0.141,0.368-0.141,0.509,0s0.141,0.368,0,0.509C5.12,6.194,5.022,6.231,4.926,6.231z M3.667,7.803c-0.088,0-0.176-0.031-0.244-0.095c-0.142-0.134-0.157-0.35-0.027-0.495C3.4,7.208,3.418,7.189,3.423,7.185	c0.141-0.141,0.368-0.141,0.509,0c0.141,0.141,0.141,0.368,0,0.509C3.861,7.766,3.763,7.803,3.667,7.803z M1.831,11.401	c-0.088,0-0.176-0.031-0.244-0.095c-0.142-0.134-0.157-0.35-0.027-0.495c0.004-0.005,0.022-0.024,0.027-0.028	c0.141-0.141,0.368-0.141,0.509,0s0.141,0.368,0,0.509C2.024,11.363,1.927,11.401,1.831,11.401z M1.296,13.348	c-0.088,0-0.176-0.031-0.244-0.095c-0.142-0.134-0.157-0.35-0.027-0.495c0.004-0.005,0.022-0.024,0.027-0.028	c0.141-0.141,0.368-0.141,0.509,0s0.141,0.368,0,0.509C1.49,13.311,1.392,13.348,1.296,13.348z M16.41,24.35	c-0.088,0-0.176-0.031-0.244-0.095c-0.142-0.134-0.157-0.35-0.027-0.495c0.004-0.005,0.022-0.024,0.027-0.028	c0.141-0.141,0.368-0.141,0.509,0s0.141,0.368,0,0.509C16.603,24.313,16.506,24.35,16.41,24.35z M18.417,23.983	c-0.088,0-0.176-0.031-0.244-0.095c-0.142-0.134-0.157-0.35-0.027-0.495c0.004-0.005,0.022-0.024,0.027-0.028	c0.141-0.141,0.368-0.141,0.509,0s0.141,0.368,0,0.509C18.61,23.946,18.513,23.983,18.417,23.983z M21.797,21.883	c-0.088,0-0.176-0.031-0.244-0.095c-0.142-0.134-0.157-0.35-0.027-0.495c0.004-0.005,0.022-0.024,0.027-0.028	c0.141-0.141,0.368-0.141,0.509,0s0.141,0.368,0,0.509C21.99,21.846,21.893,21.883,21.797,21.883z M23.742,18.386	c-0.088,0-0.176-0.031-0.244-0.095c-0.142-0.134-0.157-0.35-0.027-0.495c0.004-0.005,0.022-0.024,0.027-0.028	c0.141-0.141,0.368-0.141,0.509,0s0.141,0.368,0,0.509C23.936,18.349,23.839,18.386,23.742,18.386z M6.375,4.855	c-0.099,0-0.197-0.042-0.269-0.123C5.973,4.585,5.992,4.352,6.14,4.219C6.149,4.211,6.174,4.19,6.184,4.183	C6.345,4.066,6.57,4.102,6.687,4.262c0.117,0.161,0.082,0.386-0.079,0.503C6.541,4.826,6.458,4.855,6.375,4.855z M9.8,2.692	c-0.14,0-0.275-0.078-0.334-0.211C9.389,2.305,9.454,2.103,9.625,2.018c0.01-0.005,0.039-0.019,0.05-0.022	c0.186-0.071,0.394,0.021,0.465,0.207c0.071,0.186-0.021,0.394-0.207,0.465C9.891,2.684,9.845,2.692,9.8,2.692z M8.028,3.643	c-0.14,0-0.275-0.078-0.334-0.211C7.616,3.256,7.681,3.054,7.853,2.969c0.01-0.005,0.039-0.019,0.05-0.022	c0.186-0.071,0.394,0.021,0.465,0.207S8.347,3.548,8.161,3.619C8.118,3.635,8.073,3.643,8.028,3.643z M11.69,1.983	c-0.155,0-0.303-0.097-0.351-0.251c-0.059-0.19,0.039-0.389,0.229-0.447l0.019-0.006c0.187-0.058,0.391,0.048,0.45,0.238	c0.058,0.19-0.048,0.392-0.238,0.45C11.763,1.978,11.727,1.983,11.69,1.983z M14.444,24.204c-0.019,0-0.037-0.002-0.056-0.005	c-0.015-0.002-0.049-0.009-0.064-0.014c-0.191-0.054-0.302-0.254-0.247-0.444c0.054-0.191,0.252-0.304,0.445-0.247	c0.196,0.029,0.319,0.211,0.289,0.407C14.783,24.079,14.62,24.204,14.444,24.204z M20.243,23.141c-0.122,0-0.241-0.062-0.309-0.175	c-0.103-0.171-0.047-0.392,0.123-0.494c0.166-0.102,0.393-0.055,0.498,0.11c0.104,0.166,0.066,0.379-0.097,0.487	c-0.004,0.003-0.025,0.017-0.03,0.02C20.37,23.124,20.307,23.141,20.243,23.141z M22.995,20.243c-0.069,0-0.139-0.02-0.199-0.061	c-0.166-0.11-0.211-0.334-0.101-0.499c0.089-0.18,0.303-0.237,0.477-0.151c0.178,0.09,0.244,0.316,0.155,0.494	c-0.007,0.014-0.024,0.044-0.032,0.056C23.226,20.187,23.111,20.243,22.995,20.243z M24.002,16.375c-0.199,0-0.36-0.161-0.36-0.36	s0.161-0.37,0.36-0.37s0.36,0.151,0.36,0.35v0.02C24.362,16.214,24.201,16.375,24.002,16.375z"/></svg></div>
+                <h3 class="h3">End-to-end solutions, simple as LEGO</h3>
+                <p class="desc">Compose servers, storage, networking and zones by dragging visual building blocks. Every component snaps into a coherent architecture. No scripting, no guesswork.</p>
+            </div>
+            <div class="vitem">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16,31.36C7.53,31.36,0.64,24.47,0.64,16S7.53,0.64,16,0.64	c4.789,0,9.34,2.265,12.236,6.074c0.139-0.048,0.288-0.074,0.443-0.074c0.75,0,1.36,0.61,1.36,1.36c0,0.37-0.148,0.706-0.39,0.952	c1.119,2.166,1.71,4.596,1.71,7.048c0,2.453-0.591,4.884-1.71,7.049c0.241,0.245,0.39,0.581,0.39,0.951c0,0.75-0.61,1.36-1.36,1.36	c-0.155,0-0.305-0.026-0.443-0.074C25.34,29.095,20.789,31.36,16,31.36z M3.988,24.36c2.648,3.793,7.045,6.28,12.012,6.28	c4.553,0,8.88-2.147,11.642-5.762c-0.126-0.148-0.221-0.325-0.273-0.518C27.369,24.36,3.988,24.36,3.988,24.36z M28.68,23.36	c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64s0.64-0.287,0.64-0.64S29.032,23.36,28.68,23.36z M3.516,23.64h23.853	c0.158-0.575,0.687-1,1.312-1c0.12,0,0.237,0.016,0.349,0.046c1.056-2.055,1.611-4.359,1.611-6.686c0-2.326-0.557-4.629-1.612-6.685	C28.917,9.344,28.8,9.36,28.68,9.36c-0.625,0-1.153-0.424-1.312-1H3.516c-0.625,1.019-1.129,2.118-1.493,3.28h16.666	c0.158-0.576,0.687-1,1.312-1c0.75,0,1.36,0.61,1.36,1.36s-0.61,1.36-1.36,1.36c-0.625,0-1.153-0.424-1.312-1H1.818	c-0.27,1.053-0.426,2.151-0.454,3.28h25.324c0.158-0.576,0.687-1,1.312-1c0.75,0,1.36,0.61,1.36,1.36s-0.61,1.36-1.36,1.36	c-0.625,0-1.153-0.425-1.312-1H1.364c0.027,1.129,0.184,2.228,0.454,3.28h7.871c0.158-0.575,0.686-1,1.312-1	c0.75,0,1.36,0.61,1.36,1.36s-0.61,1.36-1.36,1.36c-0.625,0-1.153-0.425-1.312-1H2.023C2.386,21.521,2.89,22.622,3.516,23.64z M11,19.36c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64s0.64-0.287,0.64-0.64S11.353,19.36,11,19.36z M28,15.36	c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64s0.64-0.287,0.64-0.64S28.353,15.36,28,15.36z M20,11.36	c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64s0.64-0.287,0.64-0.64S20.353,11.36,20,11.36z M28.68,7.36	c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64S29.32,8.353,29.32,8S29.032,7.36,28.68,7.36z M3.988,7.64h23.38	c0.053-0.193,0.147-0.369,0.273-0.518C24.88,3.508,20.553,1.36,16,1.36C11.033,1.36,6.636,3.847,3.988,7.64z"/></svg></div>
+                <h3 class="h3">The right questions at every flight level</h3>
+                <p class="desc">Does the rack have capacity? How much do we add for three more workloads? How many rack units? Xyronos answers capacity and scaling questions instantly.</p>
+            </div>
+            <div class="vitem">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M26,31.36H7c-0.199,0-0.36-0.161-0.36-0.36V1c0-0.199,0.161-0.36,0.36-0.36h19	c0.199,0,0.36,0.161,0.36,0.36v30C26.36,31.199,26.199,31.36,26,31.36z M7.36,30.64h18.28V1.36H7.36V30.64z M23,26.36h-2v-0.72h2	V26.36z M23,22.36H10v-0.72h13V22.36z M23,18.36h-2v-0.72h2V18.36z M17,18.36h-7v-0.72h7V18.36z M23,14.36h-2v-0.72h2V14.36z M17,14.36h-7v-0.72h7V14.36z M23,10.36h-2V9.64h2V10.36z M17,10.36h-7V9.64h7V10.36z M23,6.36h-2V5.64h2V6.36z M17,6.36h-7V5.64h7	V6.36z"/></svg></div>
+                <h3 class="h3">Perfect BOM preparation</h3>
+                <p class="desc">Generate a structured Bill of Materials from your design. The definitive input for quoting, validating against vendor specs, and comparing proposals.</p>
+            </div>
+            <div class="vitem">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M30.312,24.045l-0.695,0.186l0.814,3.036l-8.071-4.549V16c0-0.128-0.069-0.248-0.181-0.312l-5.82-3.36	V3.864l2.385,2.39l0.51-0.509L16.006,2.49l-3.25,3.255l0.51,0.509l2.375-2.378v8.45l-5.82,3.36c-0.111,0.064-0.18,0.184-0.18,0.312	v6.718L1.57,27.265l0.814-3.036l-0.695-0.186l-1.128,4.211l4.212,1.129l0.187-0.695L1.945,27.88l8.053-4.539l5.822,3.362	c0.056,0.032,0.118,0.049,0.18,0.049s0.125-0.017,0.18-0.049l5.822-3.362l8.053,4.54l-3.013,0.809l0.188,0.695l4.211-1.13	L30.312,24.045z M15.64,25.768l-5.28-3.049v-6.095l5.28,3.048C15.64,19.672,15.64,25.768,15.64,25.768z M16,19.048l-5.281-3.049	L16,12.95l5.281,3.049L16,19.048z M21.64,22.719l-5.28,3.049v-6.096l5.28-3.048V22.719z"/></svg></div>
+                <h3 class="h3">Presentation-ready designs</h3>
+                <p class="desc">Isometric views turn your architecture into something stakeholders want to look at. Export as SVG for decks and documentation — no separate diagramming tool.</p>
+            </div>
+            <div class="vitem">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M26.36,31h-0.72v-7c0-0.151,0.096-0.287,0.238-0.339c0.852-0.308,1.762-1.012,1.762-2.062	v-4.017c0-1.807-1.379-3.223-3.14-3.223s-3.14,1.42-3.14,3.233v4.016c0,1.044,0.91,1.745,1.762,2.053	c0.143,0.052,0.238,0.188,0.238,0.339v7h-0.72v-6.755c-1.24-0.529-2-1.521-2-2.637v-4.016c0-2.216,1.696-3.953,3.86-3.953	s3.86,1.732,3.86,3.943V21.6c0,1.12-0.76,2.116-2,2.646V31z M9.36,31H8.64v-7c0-0.151,0.095-0.287,0.237-0.339	c0.852-0.308,1.763-1.012,1.763-2.062v-4.017c0-1.807-1.379-3.223-3.14-3.223s-3.14,1.42-3.14,3.233v4.016	c0,1.043,0.911,1.745,1.763,2.053C6.265,23.713,6.36,23.849,6.36,24v7H5.64v-6.755c-1.241-0.529-2-1.521-2-2.637v-4.016	c0-2.216,1.695-3.953,3.86-3.953s3.86,1.732,3.86,3.943V21.6c0,1.12-0.759,2.115-2,2.646V31z M24.201,12.832	c-1.576,0-3.153-0.594-4.354-1.781L16,7.244l-3.847,3.807c-2.402,2.374-6.308,2.373-8.708,0C2.281,9.899,1.64,8.368,1.64,6.739	c0-1.63,0.641-3.162,1.804-4.314c2.401-2.374,6.308-2.374,8.708,0L16,6.231l3.848-3.807l0,0c2.401-2.375,6.308-2.374,8.707,0	c1.165,1.152,1.806,2.685,1.806,4.314s-0.642,3.16-1.806,4.312C27.354,12.238,25.778,12.832,24.201,12.832z M16.512,6.737	l3.841,3.802c2.124,2.099,5.575,2.098,7.695,0c1.026-1.016,1.591-2.365,1.592-3.801c0-1.436-0.565-2.786-1.592-3.802	c-2.121-2.098-5.572-2.099-7.695,0L16.512,6.737z M7.799,1.363c-1.394,0-2.787,0.524-3.849,1.573C2.925,3.952,2.36,5.303,2.36,6.738	c0,1.436,0.565,2.785,1.591,3.801c2.121,2.098,5.574,2.098,7.696,0l3.841-3.802l-3.842-3.801C10.586,1.887,9.192,1.363,7.799,1.363z M24.5,9.342c-1.302,0-2.36-1.059-2.36-2.36s1.059-2.36,2.36-2.36s2.36,1.059,2.36,2.36S25.802,9.342,24.5,9.342z M24.5,5.342	c-0.904,0-1.64,0.736-1.64,1.64s0.735,1.64,1.64,1.64s1.64-0.736,1.64-1.64S25.404,5.342,24.5,5.342z M7.5,9.342	c-1.301,0-2.36-1.059-2.36-2.36s1.059-2.36,2.36-2.36s2.36,1.059,2.36,2.36S8.801,9.342,7.5,9.342z M7.5,5.342	c-0.904,0-1.64,0.736-1.64,1.64s0.736,1.64,1.64,1.64s1.64-0.736,1.64-1.64S8.404,5.342,7.5,5.342z"/></svg></div>
+                <h3 class="h3">Collaborate without silos</h3>
+                <p class="desc">Virtualization, storage, network and server specialists work on the same design. Xyronos keeps everyone consistent while each domain owns its scope.</p>
+            </div>
+            <div class="vitem">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M30,30.36H2c-0.125,0-0.241-0.065-0.306-0.171	c-0.066-0.106-0.072-0.239-0.016-0.351l6.414-12.827C7.814,16.762,7.64,16.401,7.64,16c0-0.75,0.61-1.36,1.36-1.36	c0.091,0,0.179,0.009,0.265,0.026l6.414-12.827c0.121-0.243,0.522-0.244,0.644,0l2.914,5.827C19.321,7.649,19.409,7.64,19.5,7.64	c0.75,0,1.36,0.61,1.36,1.36c0,0.401-0.175,0.763-0.452,1.012l5.827,11.654c0.086-0.018,0.174-0.026,0.265-0.026	c0.75,0,1.36,0.61,1.36,1.36c0,0.401-0.175,0.763-0.452,1.012l2.914,5.827c0.056,0.111,0.05,0.244-0.016,0.351	C30.24,30.295,30.125,30.36,30,30.36z M2.583,29.64h26.835l-2.653-5.306c-0.677,0.142-1.395-0.314-1.576-0.974H5.722L2.583,29.64z M26.5,22.36c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64s0.64-0.287,0.64-0.64S26.853,22.36,26.5,22.36z M6.083,22.64	h19.106c0.07-0.254,0.212-0.479,0.403-0.651l-2.814-5.628H10.312c-0.182,0.659-0.904,1.112-1.576,0.974L6.083,22.64z M9,15.36	c-0.353,0-0.64,0.287-0.64,0.64S8.647,16.64,9,16.64S9.64,16.353,9.64,16S9.353,15.36,9,15.36z M10.312,15.64h12.105l-2.652-5.306	c-0.677,0.137-1.395-0.314-1.576-0.974h-5.466l-2.814,5.629C10.1,15.161,10.242,15.385,10.312,15.64z M19.5,8.36	c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64S20.14,9.353,20.14,9S19.853,8.36,19.5,8.36z M13.083,8.64h5.106	c0.07-0.255,0.212-0.48,0.403-0.652L16,2.805L13.083,8.64z"/></svg></div>
+                <h3 class="h3">Excel roundtrip, no chaos</h3>
+                <p class="desc">Export as CSV, edit in Excel, import back. The visual model stays the single source of truth — spreadsheets become a transport format, not the architecture.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Split: Capacity -->
+<section class="s grid-frame">
+
+
+    <div class="c split">
+        <div class="sc">
+            <p class="label">Capacity Planning</p>
+            <h2 class="h2">How much do we need to add?</h2>
+            <p class="desc">Real-time capacity per zone. When a customer asks "Can we deploy three more applications?" — you answer in seconds.</p>
+            <ul class="features">
+                <li>Per-zone and per-rack capacity visualization</li>
+                <li>Instant what-if scenarios</li>
+                <li>Stretch cluster detection across zones</li>
+                <li>Rack space estimation from component dimensions</li>
+            </ul>
+        </div>
+        <div class="sv"><div class="ph ph--4x3">[Screenshot: Resource HUD with capacity bars and stretch clusters]</div></div>
+    </div>
+</section>
+
+<!-- Split: BOM -->
+<section class="s grid-frame">
+
+
+    <div class="c split split--r">
+        <div class="sc">
+            <p class="label">Bill of Materials</p>
+            <h2 class="h2">From design to quote in one click</h2>
+            <p class="desc">A structured, filterable view of every component. Select by type, export as CSV, hand it to procurement or the vendor.</p>
+            <ul class="features">
+                <li>Element table with per-type filtering</li>
+                <li>CSV export for procurement and vendor quoting</li>
+                <li>Product catalog with structured hardware specs</li>
+                <li>Vendor-agnostic: Dell, HPE, or any custom vendor</li>
+            </ul>
+        </div>
+        <div class="sv"><div class="ph ph--4x3">[Screenshot: Element table with CSV export]</div></div>
+    </div>
+</section>
+
+<!-- Split: Collaboration -->
+<section class="s grid-frame">
+
+
+    <div class="c split">
+        <div class="sc">
+            <p class="label">Collaboration</p>
+            <h2 class="h2">One design, every specialist</h2>
+            <p class="desc">Compute, storage, network, virtualization — each specialist sees the same model. Design decisions stay synchronized instead of diverging across email threads.</p>
+            <ul class="features">
+                <li>Shared visual canvas with domain-specific panels</li>
+                <li>Component designer for custom building blocks</li>
+                <li>Zones and connections show cross-domain dependencies</li>
+                <li>Single source of truth across all disciplines</li>
+            </ul>
+        </div>
+        <div class="sv"><div class="ph ph--4x3">[Screenshot: System Designer with zones, connections, inspector]</div></div>
+    </div>
+</section>
+
+<!-- Platforms -->
+<section class="s grid-frame" id="platforms">
+
+
+    <div class="c" style="text-align:center">
+        <p class="label">One modeling language, every platform</p>
+        <h2 class="h2">Traditional DC. Cloud. Hybrid. Multi-Cloud.</h2>
+        <p class="desc" style="margin:0 auto 16px;max-width:640px">A unified design language across all infrastructure platforms. The same visual tools, the same component model, the same rules. Silos are eliminated in the planning phase.</p>
+
+        <div class="platforms">
+            <div class="platform">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M30.396,20.229l-1.933-0.518l0.186-0.695l1.933,0.518L30.396,20.229z M1.604,20.229l-0.187-0.695	l1.932-0.518l0.187,0.695L1.604,20.229z M31,16.36h-2v-0.72h2V16.36z M3,16.36H1v-0.72h2V16.36z M28.649,12.983l-0.186-0.695	l1.933-0.518l0.186,0.695L28.649,12.983z M3.35,12.983l-1.932-0.518l0.187-0.695l1.932,0.518L3.35,12.983z M24,31.36H8	c-0.199,0-0.36-0.161-0.36-0.36V1c0-0.199,0.161-0.36,0.36-0.36h16c0.199,0,0.36,0.161,0.36,0.36v30	C24.36,31.199,24.199,31.36,24,31.36z M8.36,30.64h15.28V1.36H8.36V30.64z M20,11.36h-8v-0.72h8V11.36z M20,8.36h-8V7.64h8V8.36z M20,5.36h-8V4.64h8V5.36z"/></svg></div>
+                Traditional DC
+            </div>
+            <div class="platform">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M24,27.36H10c-5.161,0-9.36-4.199-9.36-9.36	S4.839,8.64,10,8.64c0.483,0,0.984,0.042,1.493,0.125C13.092,6.776,15.452,5.64,18,5.64c4.278,0,7.804,3.152,8.298,7.372	C29.29,13.996,31.36,16.834,31.36,20C31.36,24.059,28.059,27.36,24,27.36z M10,9.36c-4.764,0-8.64,3.876-8.64,8.64	s3.876,8.64,8.64,8.64h14c3.661,0,6.64-2.979,6.64-6.64c0-2.929-1.964-5.548-4.776-6.369c-0.143-0.042-0.245-0.166-0.258-0.314	C25.253,9.351,21.983,6.36,18,6.36c-2.395,0-4.608,1.099-6.071,3.016c-0.083,0.108-0.219,0.16-0.352,0.136	C11.03,9.41,10.514,9.36,10,9.36z"/></svg></div>
+                Public Cloud
+            </div>
+            <div class="platform">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M28,5.5	c-0.276,0-0.5-0.224-0.5-0.5s0.224-0.5,0.5-0.5s0.5,0.224,0.5,0.5S28.276,5.5,28,5.5z M28.5,9c0-0.276-0.224-0.5-0.5-0.5	S27.5,8.724,27.5,9s0.224,0.5,0.5,0.5S28.5,9.276,28.5,9z M5.36,28c0-0.042-0.002-0.083-0.005-0.124l3.609-1.354	C9.947,27.648,11.392,28.36,13,28.36h14.5c2.128,0,3.86-1.732,3.86-3.86c0-2.01-1.544-3.666-3.508-3.844	c-0.083-1.779-0.8-3.396-1.93-4.627l3.467-3.813c0.184,0.092,0.391,0.145,0.61,0.145c0.75,0,1.36-0.61,1.36-1.36	c0-0.625-0.425-1.153-1-1.312V3c0-0.199-0.161-0.36-0.36-0.36H19c-0.199,0-0.36,0.161-0.36,0.36v5.64h-0.599	c-1.255-2.438-3.798-4-6.541-4c-3.943,0-7.171,3.117-7.352,7.016C2.184,11.834,0.64,13.49,0.64,15.5c0,2.128,1.731,3.86,3.86,3.86H7	v-0.72H4.5c-1.731,0-3.14-1.408-3.14-3.14s1.409-3.14,3.14-3.14c0.199,0,0.36-0.161,0.36-0.36c0-3.661,2.979-6.64,6.64-6.64	c2.543,0,4.895,1.49,5.992,3.795c0.06,0.125,0.187,0.205,0.325,0.205h0.822V11c0,0.199,0.161,0.36,0.36,0.36h9.688	c0.037,0.134,0.094,0.259,0.167,0.374l-3.445,3.789c-1.303-1.17-3.025-1.882-4.91-1.882c-1.945,0-3.791,0.786-5.146,2.113	l-3.245-3.966c0.158-0.222,0.251-0.494,0.251-0.787c0-0.75-0.61-1.36-1.36-1.36S9.64,10.25,9.64,11s0.61,1.36,1.36,1.36	c0.196,0,0.383-0.042,0.552-0.117l3.308,4.043c-0.346,0.413-0.649,0.865-0.9,1.354H13c-2.956,0-5.36,2.405-5.36,5.36	c0,1.078,0.32,2.083,0.87,2.924l-3.409,1.278C4.854,26.861,4.452,26.64,4,26.64c-0.75,0-1.36,0.61-1.36,1.36S3.25,29.36,4,29.36	S5.36,28.75,5.36,28z M4.64,28c0,0.353-0.287,0.64-0.64,0.64S3.36,28.353,3.36,28S3.647,27.36,4,27.36S4.64,27.647,4.64,28z M17.942,23.155c0.405,0.719,1.176,1.205,2.058,1.205c1.302,0,2.36-1.059,2.36-2.36c0-0.559-0.195-1.073-0.521-1.479l3.598-3.958	C26.495,17.74,27.14,19.297,27.14,21c0,0.199,0.161,0.36,0.36,0.36c1.731,0,3.14,1.408,3.14,3.14s-1.408,3.14-3.14,3.14H13	c-1.294,0-2.466-0.532-3.309-1.39L17.942,23.155z M14.183,18.36c0.139,0,0.266-0.08,0.325-0.206	c1.097-2.305,3.449-3.794,5.992-3.794c1.699,0,3.251,0.642,4.427,1.695l-3.619,3.981c-0.375-0.25-0.824-0.396-1.308-0.396	c-1.302,0-2.36,1.059-2.36,2.36c0,0.165,0.018,0.326,0.05,0.481l-8.486,3.183C8.672,24.91,8.36,23.99,8.36,23	c0-2.559,2.082-4.64,4.64-4.64H14.183z M21.64,22c0,0.904-0.735,1.64-1.64,1.64s-1.64-0.735-1.64-1.64s0.735-1.64,1.64-1.64	S21.64,21.096,21.64,22z M30.64,11c0,0.353-0.287,0.64-0.64,0.64s-0.64-0.287-0.64-0.64s0.287-0.64,0.64-0.64S30.64,10.647,30.64,11	z M11.64,11c0,0.353-0.287,0.64-0.64,0.64s-0.64-0.287-0.64-0.64s0.287-0.64,0.64-0.64S11.64,10.647,11.64,11z M19.36,7.36h10.28	v2.329c-0.461,0.126-0.824,0.491-0.951,0.952H19.36V7.36z M19.36,3.36h10.28v3.28H19.36V3.36z M26,8.64h-5v0.72h5V8.64z M26,4.64h-5	v0.72h5V4.64z"/></svg></div>
+                Hybrid Cloud
+            </div>
+            <div class="platform">
+                <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M31.255,0.746	C31.188,0.678,31.096,0.64,31,0.64L1.046,0.643c-0.085-0.009-0.174,0.01-0.248,0.059C0.699,0.769,0.64,0.88,0.64,1v30	c0,0.199,0.161,0.36,0.36,0.36h30c0.199,0,0.36-0.161,0.36-0.36V1C31.36,0.904,31.322,0.813,31.255,0.746z M1.36,20.363l9.771-0.003	L1.36,30.131V20.363z M11.64,30.64H1.869l9.771-9.771C11.64,20.869,11.64,30.64,11.64,30.64z M30.64,30.64H12.36V20.15L25.64,6.87V9	h0.721V5.64H23v0.72h2.131l-13.28,13.28L1.36,19.643V1.363L30.64,1.36V30.64z"/></svg></div>
+                Multi-Cloud
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- FAQ -->
+<section class="s grid-frame" id="faq">
+
+
+    <div class="c">
+        <p class="label">FAQ</p>
+        <h2 class="h2">Frequently asked questions</h2>
+        <div class="faq">
+            <div class="faq-i"><button class="faq-q" aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.classList.toggle('open')">Who is Xyronos for?</button><div class="faq-a">Presales engineers, solution architects, infrastructure consultants and IT planning teams who design data center and cloud infrastructure. If you create architecture designs, capacity plans or Bills of Materials — this is for you.</div></div>
+            <div class="faq-i"><button class="faq-q" aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.classList.toggle('open')">Does it replace Visio or draw.io?</button><div class="faq-a">Xyronos is not a generic diagramming tool. Components have properties, connections carry metadata, zones track capacity. You get a visual design and a structured data model — not just boxes and lines.</div></div>
+            <div class="faq-i"><button class="faq-q" aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.classList.toggle('open')">Can I still use Excel?</button><div class="faq-a">Yes. Export as CSV, edit in Excel, import back. The visual model stays the single source of truth.</div></div>
+            <div class="faq-i"><button class="faq-q" aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.classList.toggle('open')">Does it support multi-vendor environments?</button><div class="faq-a">Absolutely. Define any vendor's hardware. Import AWS, GCP, Azure icon packs. The product catalog stores structured specs per vendor.</div></div>
+            <div class="faq-i"><button class="faq-q" aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.classList.toggle('open')">Where is my data stored?</button><div class="faq-a">Everything runs locally in your browser. No cloud, no telemetry, no accounts. Export as JSON or SVG at any time.</div></div>
+            <div class="faq-i"><button class="faq-q" aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.classList.toggle('open')">How does it speed up work by 40–70%?</button><div class="faq-a">Visual composition replaces manual drawing. A single-source model eliminates version confusion. Structured export keeps the BOM in sync with the design — no transcription step.</div></div>
+            <div class="faq-i"><button class="faq-q" aria-expanded="false" onclick="this.setAttribute('aria-expanded',this.getAttribute('aria-expanded')==='true'?'false':'true');this.nextElementSibling.classList.toggle('open')">Is Xyronos free?</button><div class="faq-a">Currently in early access. The editor is fully functional and free to use. Enterprise features are on the roadmap.</div></div>
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="s cta grid-frame">
+
+
+    <div class="c">
+        <h2 class="h2">Ready to design your next infrastructure?</h2>
+        <p class="desc" style="margin:0 auto 28px">No signup. No installation. No cloud dependency.</p>
+        <a href="index.html" class="btn" style="padding:12px 28px;font-size:15px">Open Editor</a>
+    </div>
+</section>
+
+<div id="shared-footer"></div>
+
+<script src="shared-layout.js"></script>
+
+</body>
+</html>

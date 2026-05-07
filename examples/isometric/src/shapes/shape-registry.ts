@@ -40,7 +40,7 @@ export interface ShapeDefinition {
     /** Human-readable display name shown as the shape label */
     displayName?: string;
     /** Which face the icon is placed on in isometric view */
-    iconFace?: 'top' | 'front';
+    iconFace?: 'top' | 'front' | 'side';
     /** ID of the selected icon from the asset library */
     icon?: string;
     /** Icon size in grid units (default 1 = GRID_SIZE px) */
@@ -75,7 +75,10 @@ export interface ShapeDefinition {
     chamferSize?: number;
     chamferStart?: number;
     collection?: string;
-    customVerts?: [number, number][];
+    customVerts?: [number, number][] | [number, number][][];
+    rotation?: number;
+    hasVariations?: boolean;
+    turned90?: ShapeDefinition;
     taper?: number;
     twist?: number;
     scaleTopX?: number;

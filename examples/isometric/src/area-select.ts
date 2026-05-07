@@ -1,7 +1,7 @@
-import { dia, g, highlighters } from '@joint/core';
+import { dia, g } from '@joint/core';
 import IsometricShape from './shapes/isometric-shape';
 import { COMPLEX_COMPONENT_TYPE } from './shapes/complex-component';
-import { HIGHLIGHT_COLOR } from './theme';
+import { applySelect as applySelectRing, clearSelectFor } from './hover-highlight';
 
 const HIGHLIGHT_ID = 'area-select';
 
@@ -64,10 +64,11 @@ export class AreaSelect {
         if (this.selected.has(resolved)) {
             this.selected.delete(resolved);
             const view = this.paper.findViewByModel(resolved);
-            if (view) highlighters.mask.remove(view, HIGHLIGHT_ID);
+            if (view) clearSelectFor(view);
         } else {
             this.selected.add(resolved);
-            this.addHighlight(resolved);
+            const view = this.paper.findViewByModel(resolved);
+            if (view) applySelectRing(view);
         }
         this.onSelectionChange(this.selection);
     }
@@ -75,7 +76,7 @@ export class AreaSelect {
     clear(): void {
         this.selected.forEach(cell => {
             const view = this.paper.findViewByModel(cell);
-            if (view) highlighters.mask.remove(view, HIGHLIGHT_ID);
+            if (view) clearSelectFor(view);
         });
         this.selected.clear();
         this.onSelectionChange([]);
@@ -213,7 +214,11 @@ export class AreaSelect {
             const id = String(resolved.id);
             if (seen.has(id)) return;
             const bbox = resolved.getBBox();
-            if (!localRect.intersect(bbox)) return;
+            if (resolved.get('isFrame')) {
+                if (!localRect.containsPoint(bbox.origin()) || !localRect.containsPoint(bbox.corner())) return;
+            } else {
+                if (!localRect.intersect(bbox)) return;
+            }
             seen.add(id);
             this.selected.add(resolved);
             this.addHighlight(resolved);
@@ -235,13 +240,6 @@ export class AreaSelect {
 
     private addHighlight(cell: dia.Cell): void {
         const view = this.paper.findViewByModel(cell);
-        if (!view) return;
-        const isZone = !!cell.get('isFrame');
-        highlighters.mask.add(view, this.highlightSelector(cell), HIGHLIGHT_ID, {
-            layer: dia.Paper.Layers.BACK,
-            attrs: isZone
-                ? { stroke: HIGHLIGHT_COLOR, 'stroke-width': 1.5, 'stroke-dasharray': '4,3', 'stroke-opacity': 0.6 }
-                : { stroke: HIGHLIGHT_COLOR, 'stroke-width': 3, 'stroke-dasharray': '6,3' },
-        });
+        if (view) applySelectRing(view);
     }
 }

@@ -17,7 +17,8 @@ import DragVertical16 from '@carbon/icons/es/drag--vertical/16.js';
 import Add16 from '@carbon/icons/es/add/16.js';
 import SubVolume16 from '@carbon/icons/es/watson-health/sub-volume/16.js';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
-import { getIconById } from './icon-catalog';
+import { getIconById, onCatalogChange } from './icon-catalog';
+import { buildComponentPanel, formatLabel, ComponentTreeItem } from './component-tree';
 import { listCanvases, CanvasRecord } from './canvas-store';
 
 const ICON_ADD = carbonIconToString(Add16 as CarbonIcon);
@@ -41,8 +42,6 @@ interface PaletteItem {
     create: () => IsometricShape;
     /** Optional raw SVG markup rendered as a leading icon. */
     iconSvg?: string;
-    /** When true, the icon preserves its original colors (no dark-mode invert). */
-    iconColor?: boolean;
 }
 
 const CONTAINER_ITEMS: PaletteItem[] = [
@@ -87,6 +86,8 @@ export class ComponentPalette {
     private canvasPickerBtn: HTMLButtonElement | null = null;
     private canvasLabelEl: HTMLSpanElement | null = null;
     private activeCanvasId = '';
+    private componentPanelHandle: { rebuild: () => void } | null = null;
+    private componentPanelEl: HTMLDivElement | null = null;
 
     constructor(
         el: HTMLElement,
@@ -104,15 +105,13 @@ export class ComponentPalette {
 
         graph.on('add remove reset change:meta change:parent change:z', () => this.refreshElementTree());
         document.addEventListener('nextrack:registry-changed', () => this.refresh());
+        onCatalogChange(() => { this.refresh(); this.refreshElementTree(); });
     }
 
     /** Update tree selection highlight without triggering the onTreeSelect callback.
      *  Also scrolls the tree viewport so the selected item is visible. */
     setTreeSelection(id: string | null) {
-        if (this.selectedTreeId) {
-            const prev = this.treeItemEls.get(this.selectedTreeId);
-            if (prev) prev.classList.remove('nr-tree-element--selected');
-        }
+        this.clearTreeSelection();
         this.selectedTreeId = id;
         if (id) {
             const el = this.treeItemEls.get(id);
@@ -121,6 +120,20 @@ export class ComponentPalette {
                 this.scrollTreeToItem(el);
             }
         }
+    }
+
+    setTreeMultiSelection(ids: string[]) {
+        this.clearTreeSelection();
+        this.selectedTreeId = ids[0] || null;
+        for (const id of ids) {
+            const el = this.treeItemEls.get(id);
+            if (el) el.classList.add('nr-tree-element--selected');
+        }
+    }
+
+    private clearTreeSelection() {
+        this.treeItemEls.forEach(el => el.classList.remove('nr-tree-element--selected'));
+        this.selectedTreeId = null;
     }
 
     /** Register a callback invoked when an element-tree drag-drop operation
@@ -234,9 +247,7 @@ export class ComponentPalette {
 
     /** Rebuild only the component + container list when the registry changes. */
     refresh() {
-        this.listEl.innerHTML = '';
         this.buildList();
-        this.applyComponentSearchFilter();
     }
 
     /** Rebuild the element tree when the graph changes. */
@@ -428,30 +439,15 @@ export class ComponentPalette {
             treeViewport.scrollTop = Math.max(0, Math.min(maxScroll, target));
         });
 
-        // Search Components input — filters items in Components/Zoning sections.
-        const componentSearchBox = document.createElement('div');
-        componentSearchBox.className = 'nr-palette-search';
-        const componentSearchIcon = document.createElement('span');
-        componentSearchIcon.className = 'nr-palette-search-icon';
-        componentSearchIcon.innerHTML = ICON_SEARCH;
-        componentSearchIcon.setAttribute('aria-hidden', 'true');
-        const componentSearch = document.createElement('input');
-        componentSearch.type = 'search';
-        componentSearch.className = 'nr-palette-search-input';
-        componentSearch.placeholder = 'Search components';
-        componentSearch.setAttribute('aria-label', 'Search components');
-        componentSearch.addEventListener('input', () => {
-            this.componentSearchTerm = componentSearch.value;
-            this.applyComponentSearchFilter();
-        });
-        componentSearchBox.appendChild(componentSearchIcon);
-        componentSearchBox.appendChild(componentSearch);
-        this.el.appendChild(componentSearchBox);
+        // Component panel (shared tree/grid with header & search)
+        this.componentPanelEl = document.createElement('div');
+        this.componentPanelEl.className = 'nr-palette-scrollable';
+        this.el.appendChild(this.componentPanelEl);
 
-        // Components + Zoning sections (scrollable remainder)
+        // Zoning section below the component panel
         this.listEl = document.createElement('div');
-        this.listEl.className = 'nr-palette-scrollable';
         this.el.appendChild(this.listEl);
+
         this.buildList();
     }
 
@@ -483,12 +479,11 @@ export class ComponentPalette {
         filterUl(this.elementTreeListEl);
     }
 
-    /** Hide palette items whose label doesn't match. Empty sections stay
-        visible (header still shown) so the user knows the section exists. */
     private applyComponentSearchFilter(): void {
+        // Component tree filtering is handled by the shared component-tree module.
+        // This only needs to filter the flat Zoning section.
         const term = this.componentSearchTerm.trim().toLowerCase();
-        const items = this.listEl.querySelectorAll<HTMLElement>('.nr-palette-item');
-        items.forEach(btn => {
+        this.listEl.querySelectorAll<HTMLElement>('.nr-palette-item').forEach(btn => {
             const lbl = btn.querySelector<HTMLElement>('.nr-palette-item-label')?.textContent
                      ?? btn.textContent ?? '';
             const match = !term || lbl.toLowerCase().includes(term);
@@ -639,7 +634,8 @@ export class ComponentPalette {
             || ShapeRegistry[shapeKey]?.displayName
             || shapeKey
             || 'Element';
-        const iconId = shapeKey ? ShapeRegistry[shapeKey]?.icon : undefined;
+        const iconId = (cell.prop('meta/icon') as string | undefined)
+            || (shapeKey ? ShapeRegistry[shapeKey]?.icon : undefined);
         const iconEntry = iconId ? getIconById(iconId) : undefined;
 
         const li = document.createElement('li');
@@ -651,7 +647,7 @@ export class ComponentPalette {
 
         if (iconEntry?.svg) {
             const iconSpan = document.createElement('span');
-            iconSpan.className = 'nr-tree-icon' + (iconEntry.source === 'aws' ? ' nr-icon-color' : '');
+            iconSpan.className = 'nr-tree-icon';
             iconSpan.innerHTML = iconEntry.svg;
             iconSpan.setAttribute('aria-hidden', 'true');
             row.appendChild(iconSpan);
@@ -828,18 +824,35 @@ export class ComponentPalette {
     }
 
     private buildList() {
-        const componentItems: PaletteItem[] = Object.entries(ShapeRegistry).filter(([id]) => !BUILT_IN_SHAPE_IDS.has(id)).map(([id, defaults]) => {
-            const iconEntry = defaults.icon ? getIconById(defaults.icon) : undefined;
-            return {
-                label: defaults.displayName ?? id.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-                kind: id,
-                create: () => getPreviewFactory(id, defaults.baseShape ?? 'cuboid')(),
-                iconSvg: iconEntry?.svg,
-                iconColor: iconEntry?.source === 'aws',
-            };
+        // Build component tree items with PaletteItem as data payload
+        const items: ComponentTreeItem[] = Object.entries(ShapeRegistry)
+            .filter(([id]) => !BUILT_IN_SHAPE_IDS.has(id))
+            .map(([id, defaults]) => {
+                const iconEntry = defaults.icon ? getIconById(defaults.icon) : undefined;
+                const paletteItem: PaletteItem = {
+                    label: defaults.displayName ?? formatLabel(id),
+                    kind: id,
+                    create: () => getPreviewFactory(id, defaults.baseShape ?? 'cuboid')(),
+                    iconSvg: iconEntry?.svg || undefined,
+                };
+                return {
+                    id,
+                    label: paletteItem.label,
+                    iconSvg: paletteItem.iconSvg,
+                    collection: defaults.collection || 'General',
+                    data: paletteItem,
+                };
+            });
+
+        this.componentPanelHandle = buildComponentPanel(this.componentPanelEl!, {
+            items,
+            onSelect: (_id: string, data?: unknown) => {
+                this.addToGraph(data as PaletteItem);
+            },
+            showCreateButton: false,
         });
 
-        this.listEl.appendChild(this.buildSection('Components', componentItems, false));
+        this.listEl.innerHTML = '';
         this.listEl.appendChild(this.buildSection('Zoning', CONTAINER_ITEMS, true));
     }
 
@@ -855,7 +868,7 @@ export class ComponentPalette {
 
             if (item.iconSvg) {
                 const iconSpan = document.createElement('span');
-                iconSpan.className = 'nr-palette-item-icon' + (item.iconColor ? ' nr-icon-color' : '');
+                iconSpan.className = 'nr-palette-item-icon';
                 iconSpan.innerHTML = item.iconSvg;
                 iconSpan.setAttribute('aria-hidden', 'true');
                 btn.appendChild(iconSpan);
@@ -918,6 +931,7 @@ export class ComponentPalette {
                 cc.set('iconFace', defaults.iconFace ?? 'top');
                 cc.set('iconLayerIndex', defaults.iconLayerIndex ?? 0);
             }
+            if (defaults.rotation) cc.set('shapeRotation', defaults.rotation);
 
             cc.toggleView(view);
             this.graph.addCell(cc);

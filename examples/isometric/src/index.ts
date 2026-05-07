@@ -9,6 +9,7 @@ import { initDataModel } from './data-model';
 import { initProductCatalog } from './product-catalog';
 import { initKnowledgeBase, navigateToTopic } from './docs/knowledge-base';
 import { initAppDesigner } from './app-designer';
+import { initClusterView, refreshClusterView } from './cluster-view';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Sun20 from '@carbon/icons/es/sun/20.js';
 import Moon20 from '@carbon/icons/es/moon/20.js';
@@ -51,11 +52,13 @@ document.getElementById('nav-theme')?.addEventListener('click', () => {
 const navGridBtn      = document.getElementById('nav-grid')            as HTMLButtonElement;
 const navShapesBtn    = document.getElementById('nav-shapes')          as HTMLButtonElement;
 const navAppsBtn      = document.getElementById('nav-apps')            as HTMLButtonElement;
+const navClustersBtn  = document.getElementById('nav-clusters')        as HTMLButtonElement;
 const navCatalogBtn   = document.getElementById('nav-catalog')         as HTMLButtonElement;
 const navDocsBtn      = document.getElementById('nav-docs')            as HTMLButtonElement;
 const navAdminBtn     = document.getElementById('nav-admin')           as HTMLButtonElement;
 const cdEl            = document.getElementById('component-designer')  as HTMLDivElement;
 const appDesignerEl   = document.getElementById('app-designer')        as HTMLDivElement;
+const clusterViewEl   = document.getElementById('cluster-view')        as HTMLDivElement;
 const catalogEl       = document.getElementById('product-catalog')     as HTMLDivElement;
 const kbEl            = document.getElementById('knowledge-base')      as HTMLDivElement;
 const adminEl         = document.getElementById('admin')               as HTMLDivElement;
@@ -66,17 +69,19 @@ initAdmin(adminEl);
 initDataModel(document.getElementById('data-model') as HTMLDivElement);
 initProductCatalog(catalogEl);
 initAppDesigner(appDesignerEl);
+initClusterView(clusterViewEl);
 initKnowledgeBase(kbEl);
 
-type AppView = 'grid' | 'shapes' | 'apps' | 'catalog' | 'docs' | 'admin';
+type AppView = 'grid' | 'shapes' | 'apps' | 'clusters' | 'catalog' | 'docs' | 'admin';
 
 function setAppView(view: AppView) {
-    const isGrid    = view === 'grid';
-    const isShapes  = view === 'shapes';
-    const isApps    = view === 'apps';
-    const isCatalog = view === 'catalog';
-    const isDocs    = view === 'docs';
-    const isAdmin   = view === 'admin';
+    const isGrid     = view === 'grid';
+    const isShapes   = view === 'shapes';
+    const isApps     = view === 'apps';
+    const isClusters = view === 'clusters';
+    const isCatalog  = view === 'catalog';
+    const isDocs     = view === 'docs';
+    const isAdmin    = view === 'admin';
 
     navGridBtn.classList.toggle('nr-rail-item--active', isGrid);
     navGridBtn.setAttribute('aria-current', isGrid ? 'page' : 'false');
@@ -84,6 +89,8 @@ function setAppView(view: AppView) {
     navShapesBtn.setAttribute('aria-current', isShapes ? 'page' : 'false');
     navAppsBtn.classList.toggle('nr-rail-item--active', isApps);
     navAppsBtn.setAttribute('aria-current', isApps ? 'page' : 'false');
+    navClustersBtn.classList.toggle('nr-rail-item--active', isClusters);
+    navClustersBtn.setAttribute('aria-current', isClusters ? 'page' : 'false');
     navCatalogBtn.classList.toggle('nr-rail-item--active', isCatalog);
     navCatalogBtn.setAttribute('aria-current', isCatalog ? 'page' : 'false');
     navDocsBtn.classList.toggle('nr-rail-item--active', isDocs);
@@ -99,6 +106,7 @@ function setAppView(view: AppView) {
     (document.getElementById('resource-bar') as HTMLElement).style.display = isGrid ? '' : 'none';
     (document.getElementById('layout-bar') as HTMLElement).style.display = isGrid ? '' : 'none';
     (document.getElementById('zoom-control') as HTMLElement).style.display = isGrid ? '' : 'none';
+    (document.getElementById('element-table-btn') as HTMLElement).style.display = isGrid ? '' : 'none';
     if (!isGrid) {
         designNameEl.style.display = 'none';
         (document.getElementById('workload-table') as HTMLElement).style.display = 'none';
@@ -108,9 +116,14 @@ function setAppView(view: AppView) {
     cdEl.setAttribute('aria-hidden', String(!isShapes));
     cdEl.style.display = isShapes ? 'flex' : 'none';
 
-    // App Designer
+    // App Designer (Workloads)
     appDesignerEl.setAttribute('aria-hidden', String(!isApps));
-    appDesignerEl.style.display = isApps ? 'flex' : 'none';
+    appDesignerEl.style.display = isApps ? 'block' : 'none';
+
+    // Cluster Assignment
+    clusterViewEl.setAttribute('aria-hidden', String(!isClusters));
+    clusterViewEl.style.display = isClusters ? 'block' : 'none';
+    if (isClusters) refreshClusterView();
 
     // Product Catalog
     catalogEl.setAttribute('aria-hidden', String(!isCatalog));
@@ -132,6 +145,7 @@ function setAppView(view: AppView) {
 navGridBtn.addEventListener('click',      () => setAppView('grid'));
 navShapesBtn.addEventListener('click',    () => setAppView('shapes'));
 navAppsBtn.addEventListener('click',      () => setAppView('apps'));
+navClustersBtn.addEventListener('click',  () => setAppView('clusters'));
 navCatalogBtn.addEventListener('click',   () => setAppView('catalog'));
 navDocsBtn.addEventListener('click',      () => setAppView('docs'));
 navAdminBtn.addEventListener('click',     () => setAppView('admin'));
@@ -145,6 +159,9 @@ document.addEventListener('nextrack:open-docs', ((e: CustomEvent<{ topic: string
     navigateToTopic(e.detail.topic);
     setAppView('docs');
 }) as EventListener);
+
+// Default view: Workloads
+setAppView('apps');
 
 // ---- Top header ----
 

@@ -43,15 +43,16 @@
       background: rgba(10,10,10,0.8);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--border);
+      border-bottom: 1px solid transparent;
       z-index: 100;
+      transition: border-color 150ms;
     }
 
     .logo-icon {
       font-family: 'Material Symbols Outlined';
       font-weight: normal;
       font-style: normal;
-      font-size: 24px;
+      font-size: 28px;
       line-height: 1;
       letter-spacing: normal;
       text-transform: none;
@@ -65,19 +66,15 @@
     .nav-brand {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 8px;
       text-decoration: none;
     }
 
-    .nav-brand .logo-icon {
-      font-size: 22px;
-    }
-
     .nav-brand-name {
-      font-size: 1rem;
+      font-size: 1.25rem;
       font-weight: 600;
       color: var(--fg);
-      letter-spacing: -0.01em;
+      letter-spacing: -0.02em;
     }
 
     .nav-links { display: flex; gap: 32px; align-items: center; }
@@ -90,38 +87,86 @@
     }
 
     .nav-links a:hover { color: var(--fg); }
+    .nav-links a.nav-btn, .nav-links a.nav-btn:hover { color: #fff; }
 
     .nav-btn {
       display: inline-flex; align-items: center;
       padding: 8px 16px;
       font-size: 0.875rem; font-weight: 500;
-      color: var(--bg);
-      background: var(--fg);
+      color: #fff;
+      background: var(--accent);
       border: none; border-radius: 6px;
       cursor: pointer;
       text-decoration: none;
-      transition: opacity 150ms;
+      transition: background 150ms;
     }
 
-    .nav-btn:hover { opacity: 0.85; }
+    .nav-btn:hover { background: var(--accent-hover); }
+    nav.scrolled { border-bottom-color: var(--border); }
 
     /* ── HERO ────────────────────────────────────────────────────────────── */
 
     .hero {
-      min-height: 100vh;
+      min-height: 60vh;
       display: flex; flex-direction: column;
       align-items: center; justify-content: center;
       text-align: center;
-      padding: 120px 24px 80px;
+      padding: 80px 24px 100px;
+      max-width: var(--max-w);
+      margin: 0 auto;
       position: relative;
       overflow: hidden;
+      border-left: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      background: linear-gradient(180deg, #05070a 0%, var(--bg) 100%);
     }
 
-    .hero::before {
+    .hero-cube-section {
+      position: relative;
+      height: 40vh;
+      min-height: 300px;
+      margin-top: -80px;
+      max-width: var(--max-w);
+      margin-left: auto;
+      margin-right: auto;
+      overflow: hidden;
+      border-left: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      background: linear-gradient(135deg, rgba(165,110,255,0.08) 0%, rgba(69,137,255,0.07) 25%, rgba(51,177,255,0.06) 50%, rgba(8,189,186,0.06) 75%, rgba(255,126,182,0.08) 100%), var(--bg);
+    }
+
+    .hero-cube-section::before {
       content: '';
-      position: absolute; inset: 0;
-      background: radial-gradient(ellipse 60% 50% at 50% 30%, rgba(15,98,254,0.08) 0%, transparent 70%);
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 120px;
+      background: linear-gradient(180deg, var(--bg) 0%, transparent 100%);
+      z-index: 1;
       pointer-events: none;
+    }
+
+    .hero-cube-section::after {
+      content: '';
+      position: absolute;
+      top: 30%; left: 50%;
+      width: 600px; height: 500px;
+      background: radial-gradient(ellipse, rgba(59,130,246,0.07) 0%, rgba(139,92,246,0.04) 40%, transparent 70%);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    .hero-cube-section svg {
+      position: absolute;
+      top: 45%; left: 50%;
+      width: 140%;
+      height: auto;
+      transform: translate(-50%, -50%);
+      animation: cube-drift 25s ease-in-out infinite;
+    }
+
+    @keyframes cube-drift {
+      0%, 100% { transform: translate(-50%, -50%); }
+      50% { transform: translate(-50%, calc(-50% - 6px)); }
     }
 
     .hero-buttons {
@@ -131,51 +176,37 @@
     }
 
     .hero-btn-primary {
-      display: inline-flex; align-items: center;
-      height: 48px; padding: 0 28px;
+      display: inline-flex; align-items: center; gap: 8px;
+      height: 48px; padding: 0 32px;
       font-family: inherit; font-size: 0.9375rem; font-weight: 500;
-      color: #fff; background: var(--accent);
-      border: none; border-radius: 6px;
+      color: var(--bg); background: var(--fg);
+      border: none; border-radius: 9999px;
       cursor: pointer; text-decoration: none;
-      transition: background 150ms;
+      transition: opacity 150ms;
     }
 
-    .hero-btn-primary:hover { background: var(--accent-hover); }
+    .hero-btn-primary:hover { opacity: 0.85; }
 
     .hero-btn-secondary {
       display: inline-flex; align-items: center;
-      height: 48px; padding: 0 28px;
+      height: 48px; padding: 0 32px;
       font-family: inherit; font-size: 0.9375rem; font-weight: 500;
       color: var(--fg); background: transparent;
-      border: 1px solid #333; border-radius: 6px;
+      border: 1px solid #333; border-radius: 9999px;
       cursor: pointer; text-decoration: none;
       transition: border-color 150ms, background 150ms;
     }
 
     .hero-btn-secondary:hover { border-color: #555; background: rgba(255,255,255,0.04); }
 
-    .hero-badge {
-      display: inline-block;
-      padding: 4px 14px;
-      font-size: 0.75rem;
-      font-weight: 500;
-      letter-spacing: 0.04em;
-      color: var(--accent);
-      border: 1px solid rgba(15,98,254,0.3);
-      border-radius: 9999px;
-      margin-bottom: 24px;
-    }
-
     .hero h1 {
-      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-size: clamp(1.75rem, 3.2vw, 2.75rem);
       font-weight: 600;
       letter-spacing: -0.03em;
       line-height: 1.1;
-      max-width: 900px;
+      white-space: nowrap;
       margin-bottom: 24px;
     }
-
-    .hero h1 span { color: var(--fg2); }
 
     .hero p {
       font-size: 1.25rem;
@@ -199,55 +230,37 @@
       color: var(--fg);
       background: var(--card-bg);
       border: 1px solid #333;
-      border-radius: 6px;
+      border-radius: 9999px;
       outline: none;
     }
 
     .hero-form input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(15,98,254,0.15);
+      border-color: var(--fg2);
+      box-shadow: 0 0 0 3px rgba(255,255,255,0.08);
     }
 
     .hero-form input::placeholder { color: #555; }
 
     .hero-form button {
       height: 48px;
-      padding: 0 24px;
+      padding: 0 28px;
       font-family: inherit;
       font-size: 0.9375rem;
       font-weight: 500;
-      color: #fff;
-      background: var(--accent);
-      border: none; border-radius: 6px;
+      color: var(--bg);
+      background: var(--fg);
+      border: none; border-radius: 9999px;
       cursor: pointer;
       white-space: nowrap;
-      transition: background 150ms;
+      transition: opacity 150ms;
     }
 
-    .hero-form button:hover { background: var(--accent-hover); }
+    .hero-form button:hover { opacity: 0.85; }
 
     .hero-subtext {
       margin-top: 12px;
       font-size: 0.8125rem;
       color: #555;
-    }
-
-    /* ── HERO SCREENSHOT ─────────────────────────────────────────────────── */
-
-    .hero-screenshot {
-      margin-top: 64px;
-      width: 100%;
-      max-width: var(--max-w);
-      aspect-ratio: 16 / 9;
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      display: flex; align-items: center; justify-content: center;
-      color: var(--fg2);
-      font-size: 0.875rem;
-      text-align: center;
-      padding: 24px;
-      line-height: 1.6;
     }
 
     /* ── SECTIONS (shared) ───────────────────────────────────────────────── */
@@ -289,17 +302,23 @@
     .features-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 1px;
-      background: var(--card-border);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      overflow: hidden;
+      border-top: 1px solid var(--border);
+      margin-left: -24px;
+      margin-right: -24px;
     }
 
+    #features { padding-bottom: 0; }
+
     .feature-card {
-      background: var(--card-bg);
       padding: 40px 32px;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
     }
+
+    .feature-card:nth-child(3n) { border-right: none; }
+
+    .feature-card .picto { width: 48px; height: 48px; margin-bottom: 20px; }
+    .feature-card .picto svg { width: 100%; height: 100%; fill: var(--fg); }
 
     .feature-card h3 {
       font-size: 1.125rem;
@@ -379,12 +398,9 @@
     /* ── SECURITY BANNER ─────────────────────────────────────────────────── */
 
     .security-banner {
-      margin: var(--section-gap) auto;
+      margin: 0 auto;
       max-width: var(--max-w);
-      padding: 64px;
-      background: var(--card-bg);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
+      padding: var(--section-gap) 24px;
       text-align: center;
     }
 
@@ -395,42 +411,42 @@
       margin-bottom: 16px;
     }
 
-    .security-banner p {
+    .security-banner p.security-desc {
       font-size: 1.0625rem;
       color: var(--fg2);
       max-width: 640px;
-      margin: 0 auto 32px;
+      margin: 0 auto 48px;
       line-height: 1.6;
     }
 
-    .security-points {
-      display: flex;
-      justify-content: center;
-      gap: 48px;
-      flex-wrap: wrap;
+    .security-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      border-top: 1px solid var(--border);
+      margin-left: -24px;
+      margin-right: -24px;
     }
 
-    .security-point {
-      text-align: center;
-      max-width: 200px;
+    .security-banner { padding-bottom: 0; }
+
+    .security-tile {
+      padding: 40px 32px;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
     }
 
-    .security-point .icon {
-      width: 48px; height: 48px;
-      margin: 0 auto 12px;
-      background: rgba(15,98,254,0.1);
-      border-radius: 12px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 1.25rem;
-    }
+    .security-tile:last-child { border-right: none; }
 
-    .security-point h4 {
+    .security-tile .picto { width: 48px; height: 48px; margin: 0 auto 20px; }
+    .security-tile .picto svg { width: 100%; height: 100%; fill: var(--fg); }
+
+    .security-tile h4 {
       font-size: 0.9375rem;
       font-weight: 600;
       margin-bottom: 4px;
     }
 
-    .security-point p {
+    .security-tile p {
       font-size: 0.8125rem;
       color: var(--fg2);
       margin: 0;
@@ -466,16 +482,15 @@
       margin: 0 auto;
     }
 
-    .cta-form input { flex: 1; height: 48px; padding: 0 16px; font-family: inherit; font-size: 0.9375rem; color: var(--fg); background: var(--card-bg); border: 1px solid #333; border-radius: 6px; outline: none; }
-    .cta-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(15,98,254,0.15); }
+    .cta-form input { flex: 1; height: 48px; padding: 0 16px; font-family: inherit; font-size: 0.9375rem; color: var(--fg); background: var(--card-bg); border: 1px solid #333; border-radius: 9999px; outline: none; }
+    .cta-form input:focus { border-color: var(--fg2); box-shadow: 0 0 0 3px rgba(255,255,255,0.08); }
     .cta-form input::placeholder { color: #555; }
-    .cta-form button { height: 48px; padding: 0 24px; font-family: inherit; font-size: 0.9375rem; font-weight: 500; color: #fff; background: var(--accent); border: none; border-radius: 6px; cursor: pointer; white-space: nowrap; transition: background 150ms; }
-    .cta-form button:hover { background: var(--accent-hover); }
+    .cta-form button { height: 48px; padding: 0 28px; font-family: inherit; font-size: 0.9375rem; font-weight: 500; color: var(--bg); background: var(--fg); border: none; border-radius: 9999px; cursor: pointer; white-space: nowrap; transition: opacity 150ms; }
+    .cta-form button:hover { opacity: 0.85; }
 
     /* ── FOOTER ───────────────────────────────────────────────────────────── */
 
     footer {
-      border-top: 1px solid var(--border);
       padding: 48px 32px;
       display: flex;
       justify-content: space-between;
@@ -491,54 +506,148 @@
 
     .footer-links { display: flex; gap: 24px; }
 
+    /* Theme switcher */
+    .theme-sw{display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:auto;padding:0;background:transparent}
+    .theme-sw input{position:absolute;opacity:0;width:0;height:0}
+    .theme-sw label{display:flex;align-items:center;justify-content:center;width:32px;height:28px;cursor:pointer;color:#555;transition:all .15s}
+    .theme-sw label:hover{color:var(--fg);background:rgba(255,255,255,.05)}
+    .theme-sw input:checked+label{color:var(--fg);background:rgba(255,255,255,.1)}
+    .theme-sw label svg{width:14px;height:14px}
+
+    /* Light mode */
+    html.light{--bg:#fff;--fg:#0a0a0a;--fg2:#666;--accent:#0f62fe;--border:#e5e5e5;--card-bg:#fafafa;--card-border:#e5e5e5}
+    html.light .hero{background:#fff}
+    html.light .hero-cube-section{background:linear-gradient(135deg,rgba(165,110,255,0.25) 0%,rgba(69,137,255,0.20) 25%,rgba(51,177,255,0.18) 50%,rgba(8,189,186,0.20) 75%,rgba(255,126,182,0.25) 100%),#fff}
+    html.light .hero-cube-section svg{opacity:1}
+    html.light .hero-cube-section::before{background:linear-gradient(180deg,#fff 0%,transparent 100%)}
+    html.light .hero-btn-secondary{border-color:#ccc}
+    html.light .hero-btn-secondary:hover{border-color:#999;background:rgba(0,0,0,0.04)}
+    html.light .cta-form input{border-color:#ccc}
+    html.light .cta-form input:focus{border-color:#666;box-shadow:0 0 0 3px rgba(0,0,0,0.06)}
+    html.light nav{background:rgba(255,255,255,.8)}
+    html.light .logo-icon{color:#0a0a0a}
+    html.light .nav-brand-name{color:#0a0a0a}
+    html.light footer{color:#666}
+    html.light footer a{color:#666}
+    html.light .theme-sw label:hover{background:rgba(0,0,0,.05)}
+    html.light .theme-sw input:checked+label{background:rgba(0,0,0,.08)}
+
+    /* ── GRID GUIDES ─────────────────────────────────────────────────────── */
+
+    .page-grid{position:fixed;top:0;left:0;right:0;bottom:0;pointer-events:none;z-index:0}
+    .page-grid .grid-guide{position:absolute;width:1px;top:var(--guide-top,96px);bottom:0;background:var(--border);transition:top 0s}
+    .page-grid .grid-guide--l{left:calc(50% - var(--max-w)/2)}
+    .page-grid .grid-guide--r{right:calc(50% - var(--max-w)/2)}
+
+    .grid-divider{position:relative;max-width:var(--max-w);margin:0 auto;height:0;border-top:1px solid var(--border)}
+    .grid-cross{position:absolute;width:25px;height:25px;pointer-events:none}
+    .grid-cross::before,.grid-cross::after{content:'';position:absolute;background:#666}
+    .grid-cross::before{width:1px;height:100%;left:50%;top:0}
+    .grid-cross::after{height:1px;width:100%;top:50%;left:0}
+    .grid-cross--l{top:-12px;left:-12px}
+    .grid-cross--r{top:-12px;right:-12px}
+    html.light .grid-cross::before,html.light .grid-cross::after{background:#999}
+
     /* ── RESPONSIVE ──────────────────────────────────────────────────────── */
 
     @media (max-width: 768px) {
       .features-grid { grid-template-columns: 1fr; }
+      .feature-card { border-right: none; }
+      .feature-card:last-child { border-bottom: none; }
       .split { grid-template-columns: 1fr; gap: 40px; }
       .split.reverse { direction: ltr; }
-      .security-points { flex-direction: column; align-items: center; }
+      .security-grid { grid-template-columns: 1fr; }
+      .security-tile { border-right: none; }
+      .security-tile:last-child { border-bottom: none; }
       .hero-form, .cta-form { flex-direction: column; }
       .hero-form button, .cta-form button { width: 100%; }
       nav { padding: 0 16px; }
       .nav-links a { display: none; }
+      .page-grid,.grid-divider,.grid-cross{display:none}
+      .hero,.hero-cube-section{border-left:none;border-right:none}
+      .hero-cube-section{height:30vh;min-height:200px;opacity:0.35}
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .hero-cube-section svg { animation: none; }
     }
   </style>
 </head>
 <body>
 
-<!-- ── NAV ──────────────────────────────────────────────────────────────── -->
+<div id="shared-grid"></div>
+<div id="shared-nav"></div>
 
-<nav>
-  <a href="#" class="nav-brand">
-    <span class="logo-icon">view_object_track</span>
-    <span class="nav-brand-name">Xyronos</span>
-  </a>
-  <div class="nav-links">
-    <a href="#features">Features</a>
-    <a href="#modeling">Modeling</a>
-    <a href="#capacity">Capacity</a>
-    <a href="#security">Security</a>
-    <a href="index.html" class="nav-btn">Open Editor</a>
-  </div>
-</nav>
+<div class="grid-divider" style="margin-top:96px;z-index:2"><div class="grid-cross grid-cross--r"></div></div>
 
 <!-- ── HERO ─────────────────────────────────────────────────────────────── -->
 
 <div class="hero">
-  <span class="hero-badge">Now in early access</span>
-  <h1>Model your infrastructure.<br/><span>Ship with confidence.</span></h1>
-  <p>The visual infrastructure editor for data centers, colocation, cloud, and server rooms. Design, calculate, and document — all in your browser.</p>
+  <h1>Architect your infrastructure visually.</h1>
+  <p>Visual infrastructure editor for data centers, colocation, cloud, and server rooms. Design, calculate, and document in your browser.</p>
 
   <div class="hero-buttons">
-    <a href="index.html" class="hero-btn-primary">Open Editor</a>
-    <a href="#features" class="hero-btn-secondary">Show Demo ↓</a>
-  </div>
-
-  <div class="hero-screenshot">
-    [Screenshot: Full System Designer view showing an isometric data center layout with servers, switches, and zones. Multiple components connected with links. HUD showing aggregated power, cores, RAM. Minimap visible in the corner.]
+    <a href="index.html" class="hero-btn-primary"><span class="logo-icon" style="font-size:18px;color:inherit">view_object_track</span> Open Editor</a>
+    <a href="#features" class="hero-btn-secondary">Learn More ↓</a>
   </div>
 </div>
+
+<!-- ── HERO CUBE ──────────────────────────────────────────────────────────── -->
+
+<div class="hero-cube-section">
+  <svg viewBox="0 0 1200 960" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <linearGradient id="cg" x1="167" y1="200" x2="1033" y2="700" gradientUnits="userSpaceOnUse">
+        <stop offset="0%" stop-color="#a56eff"/>
+        <stop offset="25%" stop-color="#4589ff"/>
+        <stop offset="50%" stop-color="#33b1ff"/>
+        <stop offset="75%" stop-color="#08bdba"/>
+        <stop offset="100%" stop-color="#ff7eb6"/>
+      </linearGradient>
+      <pattern id="bgrid" width="48" height="48" patternUnits="userSpaceOnUse">
+        <path d="M48 0L0 0 0 48" fill="none" stroke="rgba(255,255,255,0.025)" stroke-width="0.5"/>
+      </pattern>
+    </defs>
+    <rect width="1200" height="960" fill="url(#bgrid)"/>
+    <g stroke="url(#cg)" stroke-width="1">
+      <path d="M600,-20L1033,230L1033,730L600,980L167,730L167,230Z M600,480L600,-20 M600,480L1033,730 M600,480L167,730" opacity="0.02"/>
+      <path d="M600,-6L1020.9,237L1020.9,723L600,966L179.1,723L179.1,237Z M600,480L600,-6 M600,480L1020.9,723 M600,480L179.1,723" opacity="0.04"/>
+      <path d="M600,8L1008.8,244L1008.8,716L600,952L191.2,716L191.2,244Z M600,480L600,8 M600,480L1008.8,716 M600,480L191.2,716" opacity="0.065"/>
+      <path d="M600,22L996.6,251L996.6,709L600,938L203.4,709L203.4,251Z M600,480L600,22 M600,480L996.6,709 M600,480L203.4,709" opacity="0.088"/>
+      <path d="M600,36L984.5,258L984.5,702L600,924L215.5,702L215.5,258Z M600,480L600,36 M600,480L984.5,702 M600,480L215.5,702" opacity="0.11"/>
+      <path d="M600,50L972.4,265L972.4,695L600,910L227.6,695L227.6,265Z M600,480L600,50 M600,480L972.4,695 M600,480L227.6,695" opacity="0.133"/>
+      <path d="M600,64L960.3,272L960.3,688L600,896L239.7,688L239.7,272Z M600,480L600,64 M600,480L960.3,688 M600,480L239.7,688" opacity="0.155"/>
+      <path d="M600,78L948.1,279L948.1,681L600,882L251.9,681L251.9,279Z M600,480L600,78 M600,480L948.1,681 M600,480L251.9,681" opacity="0.178"/>
+      <path d="M600,92L936,292L936,674L600,868L264,674L264,292Z M600,480L600,92 M600,480L936,674 M600,480L264,674" opacity="0.20"/>
+      <path d="M600,106L923.9,293L923.9,667L600,854L276.1,667L276.1,293Z M600,480L600,106 M600,480L923.9,667 M600,480L276.1,667" opacity="0.223"/>
+      <path d="M600,120L911.8,300L911.8,660L600,840L288.2,660L288.2,300Z M600,480L600,120 M600,480L911.8,660 M600,480L288.2,660" opacity="0.245"/>
+      <path d="M600,134L899.6,307L899.6,653L600,826L300.4,653L300.4,307Z M600,480L600,134 M600,480L899.6,653 M600,480L300.4,653" opacity="0.268"/>
+      <path d="M600,148L887.5,314L887.5,646L600,812L312.5,646L312.5,314Z M600,480L600,148 M600,480L887.5,646 M600,480L312.5,646" opacity="0.29"/>
+      <path d="M600,162L875.4,321L875.4,639L600,798L324.6,639L324.6,321Z M600,480L600,162 M600,480L875.4,639 M600,480L324.6,639" opacity="0.313"/>
+      <path d="M600,176L863.3,328L863.3,632L600,784L336.7,632L336.7,328Z M600,480L600,176 M600,480L863.3,632 M600,480L336.7,632" opacity="0.335"/>
+      <path d="M600,190L851.1,335L851.1,625L600,770L348.9,625L348.9,335Z M600,480L600,190 M600,480L851.1,625 M600,480L348.9,625" opacity="0.358"/>
+      <path d="M600,204L839,342L839,618L600,756L361,618L361,342Z M600,480L600,204 M600,480L839,618 M600,480L361,618" opacity="0.38"/>
+      <path d="M600,218L826.9,349L826.9,611L600,742L373.1,611L373.1,349Z M600,480L600,218 M600,480L826.9,611 M600,480L373.1,611" opacity="0.403"/>
+      <path d="M600,232L814.8,356L814.8,604L600,728L385.2,604L385.2,356Z M600,480L600,232 M600,480L814.8,604 M600,480L385.2,604" opacity="0.425"/>
+      <path d="M600,246L802.6,363L802.6,597L600,714L397.4,597L397.4,363Z M600,480L600,246 M600,480L802.6,597 M600,480L397.4,597" opacity="0.448"/>
+      <path d="M600,260L790.5,370L790.5,590L600,700L409.5,590L409.5,370Z M600,480L600,260 M600,480L790.5,590 M600,480L409.5,590" opacity="0.47"/>
+      <path d="M600,274L778.4,377L778.4,583L600,686L421.6,583L421.6,377Z M600,480L600,274 M600,480L778.4,583 M600,480L421.6,583" opacity="0.493"/>
+      <path d="M600,288L766.3,384L766.3,576L600,672L433.7,576L433.7,384Z M600,480L600,288 M600,480L766.3,576 M600,480L433.7,576" opacity="0.515"/>
+      <path d="M600,302L754.1,391L754.1,569L600,658L445.9,569L445.9,391Z M600,480L600,302 M600,480L754.1,569 M600,480L445.9,569" opacity="0.538"/>
+      <path d="M600,316L742,398L742,562L600,644L458,562L458,398Z M600,480L600,316 M600,480L742,562 M600,480L458,562" opacity="0.56"/>
+      <path d="M600,330L729.9,405L729.9,555L600,630L470.1,555L470.1,405Z M600,480L600,330 M600,480L729.9,555 M600,480L470.1,555" opacity="0.583"/>
+      <path d="M600,344L717.8,412L717.8,548L600,616L482.2,548L482.2,412Z M600,480L600,344 M600,480L717.8,548 M600,480L482.2,548" opacity="0.605"/>
+      <path d="M600,358L705.6,419L705.6,541L600,602L494.4,541L494.4,419Z M600,480L600,358 M600,480L705.6,541 M600,480L494.4,541" opacity="0.628"/>
+      <path d="M600,372L693.5,426L693.5,534L600,588L506.5,534L506.5,426Z M600,480L600,372 M600,480L693.5,534 M600,480L506.5,534" opacity="0.65"/>
+      <path d="M600,386L681.4,433L681.4,527L600,574L518.6,527L518.6,433Z M600,480L600,386 M600,480L681.4,527 M600,480L518.6,527" opacity="0.673"/>
+      <path d="M600,400L669.3,440L669.3,520L600,560L530.7,520L530.7,440Z M600,480L600,400 M600,480L669.3,520 M600,480L530.7,520" opacity="0.695"/>
+      <path d="M600,414L657.2,447L657.2,513L600,546L542.8,513L542.8,447Z M600,480L600,414 M600,480L657.2,513 M600,480L542.8,513" opacity="0.718"/>
+      <path d="M600,428L645,454L645,506L600,532L555,506L555,454Z M600,480L600,428 M600,480L645,506 M600,480L555,506" opacity="0.74"/>
+    </g>
+  </svg>
+</div>
+
+<div class="grid-divider"><div class="grid-cross grid-cross--l"></div><div class="grid-cross grid-cross--r"></div></div>
 
 <!-- ── FEATURES GRID ───────────────────────────────────────────────────── -->
 
@@ -549,26 +658,32 @@
 
   <div class="features-grid">
     <div class="feature-card">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M22.213,13.066	c-1.606,0-3.114,0.419-4.427,1.148c0.73-1.313,1.148-2.821,1.148-4.427c0-5.044-4.104-9.147-9.147-9.147S0.64,4.743,0.64,9.787	s4.103,9.147,9.147,9.147c1.606,0,3.114-0.419,4.427-1.148c-0.729,1.313-1.148,2.821-1.148,4.427c0,5.044,4.103,9.147,9.147,9.147	s9.147-4.104,9.147-9.147S27.257,13.066,22.213,13.066z M1.36,9.787c0-4.646,3.781-8.427,8.427-8.427s8.427,3.781,8.427,8.427	c0,2.194-0.85,4.188-2.229,5.689l-4.808-4.808C11.29,10.47,11.36,10.244,11.36,10c0-0.75-0.61-1.36-1.36-1.36S8.64,9.25,8.64,10	s0.61,1.36,1.36,1.36c0.244,0,0.47-0.07,0.668-0.183l4.808,4.808c-1.501,1.379-3.495,2.229-5.689,2.229	C5.141,18.214,1.36,14.434,1.36,9.787z M10,10.64c-0.353,0-0.64-0.287-0.64-0.64S9.647,9.36,10,9.36s0.64,0.287,0.64,0.64	S10.353,10.64,10,10.64z M22.213,30.64c-4.646,0-8.427-3.78-8.427-8.427c0-2.194,0.85-4.188,2.229-5.689l7.116,7.116H21v0.721h3.36	V21h-0.72v2.13l-7.116-7.116c1.501-1.379,3.495-2.229,5.689-2.229c4.646,0,8.427,3.781,8.427,8.427S26.859,30.64,22.213,30.64z"/></svg></div>
       <h3>Visual Modeling</h3>
       <p>Drag and drop servers, switches, firewalls, and storage into an isometric canvas. Connect them visually. Make infrastructure understandable at a glance.</p>
     </div>
     <div class="feature-card">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M31,31.36H1c-0.199,0-0.36-0.161-0.36-0.36V1c0-0.199,0.161-0.36,0.36-0.36h30	c0.199,0,0.36,0.161,0.36,0.36v30C31.36,31.199,31.199,31.36,31,31.36z M1.36,30.64h29.28V12.36H1.36V30.64z M13.36,11.64h17.28	V1.36H13.36V11.64z M1.36,11.64h11.28V1.36H1.36V11.64z M9,27.36c-2.956,0-5.36-2.405-5.36-5.36h0.72c0,2.559,2.082,4.64,4.64,4.64	s4.64-2.081,4.64-4.64S11.559,17.36,9,17.36v-0.72c2.956,0,5.36,2.405,5.36,5.36S11.956,27.36,9,27.36z M27.36,27h-0.72V16h0.721	L27.36,27L27.36,27z M23.36,27h-0.72v-8h0.721L23.36,27L23.36,27z M19.36,27h-0.72v-3h0.721L19.36,27L19.36,27z"/></svg></div>
       <h3>Capacity Planning</h3>
       <p>See aggregated power, CPU cores, RAM, and storage in real time. Per zone, per cluster, or across the entire setup. Always know what you have and what you need.</p>
     </div>
     <div class="feature-card">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M23,30.36c-0.062,0-0.123-0.017-0.179-0.048 L16,26.415l-6.821,3.897c-0.111,0.062-0.246,0.062-0.357,0l-5.862-3.35C2.713,27.208,2.374,27.36,2,27.36 c-0.75,0-1.36-0.61-1.36-1.36c0-0.625,0.424-1.153,1-1.312V18c0-0.129,0.069-0.248,0.181-0.312l6.819-3.896V7.312 c-0.576-0.158-1-0.686-1-1.312c0-0.75,0.61-1.36,1.36-1.36c0.374,0,0.713,0.152,0.959,0.397l5.862-3.35 c0.111-0.063,0.246-0.063,0.357,0l7,4C23.291,5.751,23.36,5.871,23.36,6v6.688c0.575,0.158,1,0.686,1,1.312 c0,0.117-0.015,0.23-0.043,0.338l5.861,3.349c0.112,0.064,0.182,0.184,0.182,0.312v8c0,0.129-0.069,0.248-0.182,0.312l-7,4 C23.123,30.344,23.062,30.36,23,30.36z M16.36,25.791L23,29.585l6.64-3.794v-7.582l-5.68-3.246c-0.492,0.49-1.428,0.49-1.92,0 l-5.68,3.246V25.791z M3.317,26.338L9,29.585l6.64-3.794v-7.582L9,14.415l-6.64,3.794v6.479c0.576,0.158,1,0.687,1,1.312 C3.36,26.117,3.345,26.23,3.317,26.338z M2,25.36c-0.353,0-0.64,0.287-0.64,0.64S1.647,26.64,2,26.64S2.64,26.353,2.64,26 S2.353,25.36,2,25.36z M9.36,13.791L16,17.585l5.683-3.247C21.654,14.23,21.64,14.117,21.64,14c0-0.625,0.425-1.153,1-1.312V6.209 L16,2.415l-5.683,3.247C10.345,5.77,10.36,5.883,10.36,6c0,0.625-0.424,1.153-1,1.312V13.791z M23,13.36 c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64s0.64-0.287,0.64-0.64S23.353,13.36,23,13.36z M9,5.36 C8.647,5.36,8.36,5.647,8.36,6S8.647,6.64,9,6.64S9.64,6.353,9.64,6S9.353,5.36,9,5.36z"/></svg></div>
       <h3>Workload Views</h3>
       <p>Define applications and map them to infrastructure layers. See where workloads run, what they consume, and how replication affects your resource footprint.</p>
     </div>
     <div class="feature-card">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M30.396,20.229l-1.933-0.518l0.186-0.695l1.933,0.518L30.396,20.229z M1.604,20.229l-0.187-0.695	l1.932-0.518l0.187,0.695L1.604,20.229z M31,16.36h-2v-0.72h2V16.36z M3,16.36H1v-0.72h2V16.36z M28.649,12.983l-0.186-0.695	l1.933-0.518l0.186,0.695L28.649,12.983z M3.35,12.983l-1.932-0.518l0.187-0.695l1.932,0.518L3.35,12.983z M24,31.36H8	c-0.199,0-0.36-0.161-0.36-0.36V1c0-0.199,0.161-0.36,0.36-0.36h16c0.199,0,0.36,0.161,0.36,0.36v30	C24.36,31.199,24.199,31.36,24,31.36z M8.36,30.64h15.28V1.36H8.36V30.64z M20,11.36h-8v-0.72h8V11.36z M20,8.36h-8V7.64h8V8.36z M20,5.36h-8V4.64h8V5.36z"/></svg></div>
       <h3>Product Catalog</h3>
       <p>Build a catalog of server models, NICs, and components with real specs. Assign them to nodes on the canvas and auto-populate hardware details.</p>
     </div>
     <div class="feature-card">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16,31.36C7.53,31.36,0.64,24.47,0.64,16	S7.53,0.64,16,0.64c2.889,0,5.689,0.801,8.123,2.321C24.36,2.761,24.666,2.64,25,2.64c0.75,0,1.36,0.61,1.36,1.36	c0,0.197-0.042,0.384-0.118,0.553C29.499,7.468,31.36,11.623,31.36,16C31.36,24.47,24.47,31.36,16,31.36z M16,1.36	C7.927,1.36,1.36,7.927,1.36,16c0,8.072,6.567,14.64,14.64,14.64c8.072,0,14.64-6.567,14.64-14.64c0-4.162-1.765-8.112-4.854-10.89	c-0.322,0.227-0.777,0.309-1.162,0.196l-9.632,15.763C15.22,21.312,15.36,21.641,15.36,22c0,0.75-0.61,1.36-1.36,1.36	s-1.36-0.61-1.36-1.36c0-0.354,0.136-0.679,0.36-0.921l-3.61-5.776C9.266,15.34,9.135,15.36,9,15.36c-0.75,0-1.36-0.61-1.36-1.36	S8.25,12.64,9,12.64s1.36,0.61,1.36,1.36c0,0.355-0.137,0.678-0.36,0.921l3.61,5.776c0.243-0.073,0.522-0.075,0.767-0.004	L24.009,4.93C23.78,4.687,23.64,4.359,23.64,4c0-0.156,0.026-0.306,0.075-0.445C21.402,2.118,18.742,1.36,16,1.36z M14,21.36	c-0.353,0-0.64,0.287-0.64,0.64s0.287,0.64,0.64,0.64s0.64-0.287,0.64-0.64S14.353,21.36,14,21.36z M9,13.36	c-0.353,0-0.64,0.287-0.64,0.64S8.647,14.64,9,14.64S9.64,14.353,9.64,14S9.353,13.36,9,13.36z M25,3.36	c-0.353,0-0.64,0.287-0.64,0.64S24.647,4.64,25,4.64S25.64,4.353,25.64,4S25.353,3.36,25,3.36z"/></svg></div>
       <h3>Compatibility Checks</h3>
       <p>Validate component combinations. Catch mismatches between hardware, form factors, and requirements before they become costly mistakes in the data center.</p>
     </div>
     <div class="feature-card">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M26,31.36H7c-0.199,0-0.36-0.161-0.36-0.36V1c0-0.199,0.161-0.36,0.36-0.36h19	c0.199,0,0.36,0.161,0.36,0.36v30C26.36,31.199,26.199,31.36,26,31.36z M7.36,30.64h18.28V1.36H7.36V30.64z M23,26.36h-2v-0.72h2	V26.36z M23,22.36H10v-0.72h13V22.36z M23,18.36h-2v-0.72h2V18.36z M17,18.36h-7v-0.72h7V18.36z M23,14.36h-2v-0.72h2V14.36z M17,14.36h-7v-0.72h7V14.36z M23,10.36h-2V9.64h2V10.36z M17,10.36h-7V9.64h7V10.36z M23,6.36h-2V5.64h2V6.36z M17,6.36h-7V5.64h7	V6.36z"/></svg></div>
       <h3>BOM Management</h3>
       <p>Generate hardware and software bills of materials from your designs. Export what you need for procurement, audits, and documentation.</p>
     </div>
@@ -596,6 +711,8 @@
   </div>
 </section>
 
+<div class="grid-divider"><div class="grid-cross grid-cross--l"></div></div>
+
 <!-- ── SPLIT: CAPACITY ───────────────────────────────────────────────── -->
 
 <section id="capacity">
@@ -616,6 +733,8 @@
     </div>
   </div>
 </section>
+
+<div class="grid-divider"><div class="grid-cross grid-cross--r"></div></div>
 
 <!-- ── SPLIT: APPLICATIONS ───────────────────────────────────────────── -->
 
@@ -638,6 +757,8 @@
   </div>
 </section>
 
+<div class="grid-divider"><div class="grid-cross grid-cross--l"></div></div>
+
 <!-- ── SPLIT: COMPONENT DESIGNER ─────────────────────────────────────── -->
 
 <section>
@@ -659,25 +780,27 @@
   </div>
 </section>
 
+<div class="grid-divider"><div class="grid-cross grid-cross--l"></div><div class="grid-cross grid-cross--r"></div></div>
+
 <!-- ── SECURITY BANNER ───────────────────────────────────────────────── -->
 
 <div class="security-banner" id="security">
   <h2>Your data never leaves your machine.</h2>
-  <p>Xyronos is a browser-based editor that stores everything locally. No cloud uploads, no accounts required for core editing, no third-party data access. Your infrastructure designs stay where they belong — with you.</p>
+  <p class="security-desc">Xyronos is a browser-based editor that stores everything locally. No cloud uploads, no accounts required for core editing, no third-party data access. Your infrastructure designs stay where they belong — with you.</p>
 
-  <div class="security-points">
-    <div class="security-point">
-      <div class="icon">🔒</div>
+  <div class="security-grid">
+    <div class="security-tile">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16,31.36C9.185,31.36,3.64,25.815,3.64,19V6c0-0.199,0.161-0.36,0.36-0.36c4.354,0,8.635-1.784,11.746-4.895 c0.141-0.141,0.368-0.141,0.509,0C19.365,3.856,23.646,5.64,28,5.64c0.199,0,0.36,0.161,0.36,0.36v13 C28.36,25.815,22.815,31.36,16,31.36z M4.36,6.356V19c0,6.418,5.222,11.64,11.64,11.64S27.64,25.418,27.64,19V6.356 C23.339,6.263,19.134,4.511,16,1.504C12.866,4.511,8.661,6.263,4.36,6.356z M21.36,22h-0.72v-1.5c0-2.088-1.379-3.864-3.433-4.419 c-0.146-0.04-0.25-0.165-0.265-0.314c-0.014-0.15,0.066-0.292,0.201-0.358c0.909-0.439,1.496-1.385,1.496-2.409 c0-1.456-1.184-2.64-2.64-2.64s-2.64,1.185-2.64,2.64c0,1.023,0.587,1.969,1.497,2.409c0.135,0.065,0.216,0.208,0.202,0.358 c-0.014,0.149-0.12,0.274-0.265,0.314c-2.054,0.555-3.434,2.332-3.434,4.419V22h-0.72v-1.5c0-2.163,1.275-4.036,3.243-4.866 C13.111,14.999,12.64,14.03,12.64,13c0-1.853,1.507-3.36,3.36-3.36s3.36,1.507,3.36,3.36c0,1.03-0.471,1.999-1.243,2.634 c1.968,0.83,3.243,2.703,3.243,4.866V22z"/></svg></div>
       <h4>Local-first</h4>
       <p>All data lives in your browser's local storage. Nothing is sent to a server.</p>
     </div>
-    <div class="security-point">
-      <div class="icon">📁</div>
+    <div class="security-tile">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M16,31.36H1c-0.199,0-0.36-0.161-0.36-0.36V9c0-0.199,0.161-0.36,0.36-0.36h7.155V5	c0-0.199,0.161-0.36,0.36-0.36h7.125V1c0-0.199,0.161-0.36,0.36-0.36h15c0.199,0,0.36,0.161,0.36,0.36v22	c0,0.199-0.161,0.36-0.36,0.36h-7.124V27c0,0.199-0.161,0.36-0.36,0.36H16.36V31C16.36,31.199,16.199,31.36,16,31.36z M1.36,30.64	h14.28V9.36H1.36V30.64z M16.36,26.64h6.795V5.36H8.875v3.28H16c0.199,0,0.36,0.161,0.36,0.36V26.64z M23.876,22.64h6.764V1.36	H16.36v3.28h7.156c0.199,0,0.36,0.161,0.36,0.36C23.876,5,23.876,22.64,23.876,22.64z"/></svg></div>
       <h4>File-based export</h4>
       <p>Save and load designs as local JSON files. Full control over your data.</p>
     </div>
-    <div class="security-point">
-      <div class="icon">🛡️</div>
+    <div class="security-tile">
+      <div class="picto"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path d="M30.64,10c0-3.11-2.529-5.64-5.64-5.64H10V3.64h15c3.507,0,6.36,2.853,6.36,6.359	c0,3.507-2.854,6.36-6.36,6.36h-3v-0.72h3C28.11,15.64,30.64,13.11,30.64,10z M1.36,22.001c0-3.11,2.53-5.641,5.64-5.641h3v-0.72H7	c-3.507,0-6.36,2.853-6.36,6.361c0,3.507,2.853,6.359,6.36,6.359h15v-0.72H7C3.89,27.64,1.36,25.11,1.36,22.001z M0.64,4	c0-1.853,1.507-3.36,3.36-3.36S7.36,2.147,7.36,4S5.853,7.36,4,7.36S0.64,5.853,0.64,4z M1.36,4c0,1.456,1.185,2.64,2.64,2.64	S6.64,5.456,6.64,4S5.456,1.36,4,1.36S1.36,2.544,1.36,4z M31.36,28c0,1.853-1.508,3.36-3.36,3.36s-3.36-1.508-3.36-3.36	s1.508-3.36,3.36-3.36S31.36,26.147,31.36,28z M30.64,28c0-1.456-1.184-2.64-2.64-2.64s-2.64,1.184-2.64,2.64s1.184,2.64,2.64,2.64	S30.64,29.456,30.64,28z M16.75,16c0-0.414-0.336-0.75-0.75-0.75s-0.75,0.336-0.75,0.75c0,0.281,0.161,0.517,0.39,0.645v1.105	c0,0.199,0.161,0.36,0.36,0.36s0.36-0.161,0.36-0.36v-1.105C16.589,16.517,16.75,16.281,16.75,16z M18.36,10.495v2.349	c1.2,0.777,2,2.122,2,3.656c0,2.404-1.956,4.36-4.36,4.36s-4.36-1.956-4.36-4.36c0-1.534,0.8-2.878,2-3.656v-2.349	c0-1.299,1.059-2.355,2.36-2.355C17.302,8.14,18.36,9.196,18.36,10.495z M14.36,12.466c0.507-0.207,1.059-0.326,1.64-0.326	c0.581,0,1.133,0.119,1.64,0.326v-1.971c0-0.901-0.735-1.635-1.64-1.635s-1.64,0.734-1.64,1.635	C14.36,10.495,14.36,12.466,14.36,12.466z M16,12.86c-2.007,0-3.64,1.633-3.64,3.64s1.633,3.64,3.64,3.64s3.64-1.633,3.64-3.64	S18.007,12.86,16,12.86z"/></svg></div>
       <h4>No telemetry</h4>
       <p>No analytics, no tracking, no usage data collection. Private by design.</p>
     </div>
@@ -696,16 +819,13 @@
   </form>
 </div>
 
+<div class="grid-divider"><div class="grid-cross grid-cross--r"></div></div>
+
 <!-- ── FOOTER ─────────────────────────────────────────────────────────── -->
 
-<footer>
-  <span><span class="logo-icon" style="font-size:16px;margin-right:2px;vertical-align:middle;">view_object_track</span>Xyronos © 2026. All rights reserved.</span>
-  <div class="footer-links">
-    <a href="#">Privacy</a>
-    <a href="#">Terms</a>
-    <a href="#">GitHub</a>
-  </div>
-</footer>
+<div id="shared-footer"></div>
+
+<script src="shared-layout.js"></script>
 
 </body>
 </html>

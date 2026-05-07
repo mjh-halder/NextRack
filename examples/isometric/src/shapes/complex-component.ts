@@ -217,8 +217,8 @@ interface ComplexComponentAttributes extends dia.Element.Attributes {
     iconHref: string;
     /** Rendered icon size in px (applied to width/height of the <image>). */
     iconSize: number;
-    /** Face the icon lives on: 'top' (default) or 'front'. */
-    iconFace: 'top' | 'front';
+    /** Face the icon lives on: 'top' (default), 'front', or 'side'. */
+    iconFace: 'top' | 'front' | 'side';
     /** Index of the layer carrying the icon. Defaults to 0 (main layer). */
     iconLayerIndex: number;
 }
@@ -309,7 +309,7 @@ export class ComplexComponentView extends dia.ElementView {
         const baseLayer = layers[0];
         const iconHref  = (this.model.get('iconHref') as string | undefined)  ?? '';
         const iconSize  = Number(this.model.get('iconSize')) || 0;
-        const iconFace  = (this.model.get('iconFace') as 'top' | 'front' | undefined) ?? 'top';
+        const iconFace  = (this.model.get('iconFace') as 'top' | 'front' | 'side' | undefined) ?? 'top';
         const iconLayerIdxRaw = Number(this.model.get('iconLayerIndex'));
         // Clamp against the current layer count so a stale or out-of-range
         // index (e.g. after a layer was removed) falls back to the main layer.
@@ -369,7 +369,7 @@ function appendIcon(
     group: SVGGElement,
     href: string,
     iconSize: number,
-    iconFace: 'top' | 'front',
+    iconFace: 'top' | 'front' | 'side',
     layer: ShapeLayer,
     isIso: boolean,
 ): void {
@@ -380,10 +380,6 @@ function appendIcon(
     el.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 
     if (isIso && iconFace === 'front') {
-        // Front-face placement — same local coords + matrix used by the
-        // existing simple-shape templates (see applyRegistryDefaults).
-        // Counter-rotate 180° around the icon's centre so it reads right-side
-        // up; the projection matrix flips the y-axis.
         const localX = (layer.width - iconSize) / 2;
         const localY = (layer.depth - iconSize) / 2;
         const cx = localX + iconSize / 2;
@@ -391,6 +387,14 @@ function appendIcon(
         el.setAttribute('x', String(localX));
         el.setAttribute('y', String(localY));
         el.setAttribute('transform', `matrix(1,0,-1,-1,0,${layer.height}) rotate(180,${cx},${cy})`);
+    } else if (isIso && iconFace === 'side') {
+        const localX = (layer.height - iconSize) / 2;
+        const localY = (layer.depth - iconSize) / 2;
+        const cx = localX + iconSize / 2;
+        const cy = localY + iconSize / 2;
+        el.setAttribute('x', String(localX));
+        el.setAttribute('y', String(localY));
+        el.setAttribute('transform', `matrix(0,1,-1,-1,${layer.width},0) rotate(180,${cx},${cy})`);
     } else {
         const lift = isIso ? layer.depth : 0;
         el.setAttribute('x', String((layer.width  - iconSize) / 2 - lift));

@@ -2,6 +2,10 @@ import IsometricShape from './isometric-shape';
 import { Computer, Database, Firewall, Switch, Router, KubernetesWorkerNode } from './index';
 import { Pyramid } from './pyramid/pyramid';
 import { Octagon } from './octagon/octagon';
+import { Tube } from './tube/tube';
+import { Pipe } from './pipe/pipe';
+import { Duct } from './duct/duct';
+import { Channel } from './channel/channel';
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape';
 
 const DEFAULT_CUSTOM_VERTS: [number, number][] = [
@@ -33,6 +37,10 @@ export const FORM_FACTOR_PREVIEWS: Record<string, () => IsometricShape> = {
     'cuboid':    () => new Computer(),
     'cylinder':  () => new Database(),
     'pyramid':   () => new Pyramid(),
+    'tube':      () => new Tube(),
+    'pipe':      () => new Pipe(),
+    'duct':      () => new Duct(),
+    'channel':   () => new Channel(),
     'octagon':   () => new Octagon(),
     'custom':    () => { const s = new SvgPolygonShape(); s.set('normalizedVerts', DEFAULT_CUSTOM_VERTS); return s; },
 };

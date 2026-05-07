@@ -18,12 +18,15 @@
   },
   "dependencies": {
     "@carbon/icons": "^11.78.0",
+    "@carbon/pictograms": "^12.74.0",
     "@carbon/styles": "^1.104.0",
     "@joint/core": "workspace:^",
     "@joint/decorators": "workspace:^",
     "@joint/layout-directed-graph": "workspace:^",
+    "d3-hierarchy": "^3.1.2",
     "fflate": "^0.8.2",
-    "marked": "^15.0.0"
+    "marked": "^15.0.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "css-loader": "^6.8.1",

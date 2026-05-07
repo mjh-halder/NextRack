@@ -1,11 +1,13 @@
 import { getDataType, FieldDefinition } from './schema-registry';
 import { carbonIconToString, CarbonIcon } from './icons';
+import { toCSV, fromCSV, downloadCSV, uploadCSV, coerceValue, CsvColumn } from './csv-utils';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
 import ArrowUp16 from '@carbon/icons/es/arrow--up/16.js';
 import ArrowDown16 from '@carbon/icons/es/arrow--down/16.js';
 import Save16 from '@carbon/icons/es/save/16.js';
 import Download16 from '@carbon/icons/es/download/16.js';
+import Upload16 from '@carbon/icons/es/upload/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
 
 const ICON_TRASH = carbonIconToString(TrashCan16 as CarbonIcon);
@@ -15,10 +17,18 @@ const ICON_SORT_ASC = carbonIconToString(ArrowUp16 as CarbonIcon);
 const ICON_SORT_DESC = carbonIconToString(ArrowDown16 as CarbonIcon);
 const ICON_SAVE = carbonIconToString(Save16 as CarbonIcon);
 const ICON_DOWNLOAD = carbonIconToString(Download16 as CarbonIcon);
+const ICON_UPLOAD = carbonIconToString(Upload16 as CarbonIcon);
 
 const STORAGE_KEY = 'nextrack-product-catalog-v1';
 
 const COMPONENT_TYPES = ['Server', 'Firewall', 'Switch', 'Storage', 'NIC'];
+
+const ENTITY_CATEGORIES: Array<{ id: string; label: string }> = [];
+
+function getSchemaId(category: string): string {
+    if (ENTITY_CATEGORIES.some(e => e.id === category)) return category;
+    return category.toLowerCase().replace(/\s+/g, '-');
+}
 
 export interface ProductEntry {
     id: string;
@@ -92,51 +102,54 @@ function render(): void {
 }
 
 function buildTypeList(container: HTMLElement): void {
-    const header = document.createElement('div');
-    header.className = 'nr-dm__left-header';
-    const title = document.createElement('h2');
-    title.className = 'nr-dm__left-title';
-    title.textContent = 'Component Types';
-    header.appendChild(title);
-    container.appendChild(header);
+    function addSection(titleText: string, entries: Array<{ key: string; label: string }>) {
+        const header = document.createElement('div');
+        header.className = 'nr-dm__left-header';
+        const title = document.createElement('h2');
+        title.className = 'nr-dm__left-title';
+        title.textContent = titleText;
+        header.appendChild(title);
+        container.appendChild(header);
 
-    const list = document.createElement('div');
-    list.className = 'nr-dm__type-list';
-    list.setAttribute('role', 'listbox');
+        const list = document.createElement('div');
+        list.className = 'nr-dm__type-list';
+        list.setAttribute('role', 'listbox');
 
-    for (const ct of COMPONENT_TYPES) {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'nr-dm__type-item';
-        item.setAttribute('role', 'option');
-        if (ct === selectedType) {
-            item.classList.add('nr-dm__type-item--selected');
-            item.setAttribute('aria-selected', 'true');
+        for (const entry of entries) {
+            const item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'nr-dm__type-item';
+            item.setAttribute('role', 'option');
+            if (entry.key === selectedType) {
+                item.classList.add('nr-dm__type-item--selected');
+                item.setAttribute('aria-selected', 'true');
+            }
+            item.addEventListener('click', () => {
+                selectedType = entry.key;
+                searchTerm = '';
+                render();
+            });
+
+            const label = document.createElement('span');
+            label.className = 'nr-dm__type-label';
+            label.textContent = entry.label;
+            item.appendChild(label);
+
+            const count = document.createElement('span');
+            count.className = 'nr-dm__type-count';
+            count.textContent = String(getProductsByType(entry.key).length);
+            item.appendChild(count);
+
+            list.appendChild(item);
         }
-        item.addEventListener('click', () => {
-            selectedType = ct;
-            searchTerm = '';
-            render();
-        });
-
-        const label = document.createElement('span');
-        label.className = 'nr-dm__type-label';
-        label.textContent = ct;
-        item.appendChild(label);
-
-        const count = document.createElement('span');
-        count.className = 'nr-dm__type-count';
-        count.textContent = String(getProductsByType(ct).length);
-        item.appendChild(count);
-
-        list.appendChild(item);
+        container.appendChild(list);
     }
 
-    container.appendChild(list);
+    addSection('Component Types', COMPONENT_TYPES.map(ct => ({ key: ct, label: ct })));
 }
 
 function buildProductList(container: HTMLElement): void {
-    const typeId = selectedType.toLowerCase().replace(/\s+/g, '-');
+    const typeId = getSchemaId(selectedType);
     const typeDef = getDataType(typeId);
 
     const products = getProductsByType(selectedType);
@@ -180,12 +193,27 @@ function buildProductList(container: HTMLElement): void {
     newBtn.className = 'cds--btn cds--btn--primary nr-dt__add-btn';
     newBtn.textContent = 'Add new';
     newBtn.addEventListener('click', () => {
-        const id = 'product-' + Date.now().toString(36);
+        const prefix = ENTITY_CATEGORIES.some(e => e.id === selectedType) ? selectedType : 'product';
+        const id = prefix + '-' + Date.now().toString(36);
         const values: Record<string, unknown> = { name: '' };
         saveProduct({ id, componentType: selectedType, values });
         render();
     });
     toolbarActions.appendChild(newBtn);
+
+    const exportAllBtn = document.createElement('button');
+    exportAllBtn.type = 'button';
+    exportAllBtn.className = 'cds--btn cds--btn--tertiary nr-dt__add-btn';
+    exportAllBtn.innerHTML = `Export CSV<span style="margin-left:6px;display:inline-flex">${ICON_DOWNLOAD}</span>`;
+    exportAllBtn.addEventListener('click', () => exportProductCSV(selectedType, null));
+    toolbarActions.appendChild(exportAllBtn);
+
+    const importBtn = document.createElement('button');
+    importBtn.type = 'button';
+    importBtn.className = 'cds--btn cds--btn--tertiary nr-dt__add-btn';
+    importBtn.innerHTML = `Import CSV<span style="margin-left:6px;display:inline-flex">${ICON_UPLOAD}</span>`;
+    importBtn.addEventListener('click', () => importProductCSV(selectedType));
+    toolbarActions.appendChild(importBtn);
 
     toolbar.appendChild(toolbarActions);
 
@@ -200,6 +228,8 @@ function buildProductList(container: HTMLElement): void {
         ? products.filter(p => Object.values(p.values).some(v => String(v ?? '').toLowerCase().includes(term)))
         : [...products];
 
+    // Stable default sort by ID; user sort overrides
+    filtered.sort((a, b) => a.id.localeCompare(b.id));
     if (sortKey) {
         filtered.sort((a, b) => {
             const av = String(a.values[sortKey] ?? '').toLowerCase();
@@ -233,7 +263,10 @@ function buildProductList(container: HTMLElement): void {
     const batchDownloadBtn = document.createElement('button');
     batchDownloadBtn.type = 'button';
     batchDownloadBtn.className = 'nr-dt__batch-btn';
-    batchDownloadBtn.innerHTML = `Download<span class="nr-dt__batch-btn-icon">${ICON_DOWNLOAD}</span>`;
+    batchDownloadBtn.innerHTML = `Export CSV<span class="nr-dt__batch-btn-icon">${ICON_DOWNLOAD}</span>`;
+    batchDownloadBtn.addEventListener('click', () => {
+        exportProductCSV(selectedType, selected);
+    });
     batchActions.appendChild(batchDownloadBtn);
 
     const batchDuplicateBtn = document.createElement('button');
@@ -382,30 +415,38 @@ function buildProductList(container: HTMLElement): void {
                 td.className = 'nr-dt__cell';
 
                 let input: HTMLInputElement | HTMLSelectElement;
-                if (col.type === 'select' && (col as FieldDefinition).options?.length) {
-                    input = document.createElement('select');
-                    input.className = 'nr-dt__input';
-                    const emptyOpt = document.createElement('option');
-                    emptyOpt.value = '';
-                    emptyOpt.textContent = '';
-                    input.appendChild(emptyOpt);
-                    for (const opt of (col as FieldDefinition).options!) {
-                        const el = document.createElement('option');
-                        el.value = opt;
-                        el.textContent = opt;
-                        input.appendChild(el);
-                    }
-                } else {
-                    input = document.createElement('input');
-                    input.type = col.type === 'number' ? 'number' : 'text';
-                    input.className = 'nr-dt__input';
-                }
+                const fieldDef = col as FieldDefinition;
 
-                input.value = String(product.values[col.key] ?? '');
-                input.addEventListener('change', () => {
-                    product.values[col.key] = input.value;
-                    saveProduct(product);
-                });
+                {
+                    if (col.type === 'select' && fieldDef.options?.length) {
+                        input = document.createElement('select');
+                        input.className = 'nr-dt__input';
+                        const emptyOpt = document.createElement('option');
+                        emptyOpt.value = '';
+                        emptyOpt.textContent = '';
+                        input.appendChild(emptyOpt);
+                        for (const opt of fieldDef.options!) {
+                            const el = document.createElement('option');
+                            el.value = opt;
+                            el.textContent = opt;
+                            input.appendChild(el);
+                        }
+                        input.value = String(product.values[col.key] ?? '');
+                        input.addEventListener('change', () => {
+                            product.values[col.key] = input.value;
+                            saveProduct(product);
+                        });
+                    } else {
+                        input = document.createElement('input');
+                        input.type = col.type === 'number' ? 'number' : 'text';
+                        input.className = 'nr-dt__input';
+                        input.value = String(product.values[col.key] ?? '');
+                        input.addEventListener('change', () => {
+                            product.values[col.key] = input.value;
+                            saveProduct(product);
+                        });
+                    }
+                }
                 td.appendChild(input);
                 tr.appendChild(td);
             }
@@ -426,6 +467,7 @@ function buildProductList(container: HTMLElement): void {
             tr.appendChild(tdActions);
 
             tbody.appendChild(tr);
+
         }
     }
 
@@ -474,5 +516,76 @@ function buildProductList(container: HTMLElement): void {
         };
         setTimeout(() => document.addEventListener('mousedown', close, true), 0);
     }
+}
+
+// ── CSV Export / Import ──────────────────────────────────────────────────────
+
+function getProductColumns(componentType: string): CsvColumn[] {
+    const typeId = getSchemaId(componentType);
+    const typeDef = getDataType(typeId);
+    const cols: CsvColumn[] = [{ key: 'id', label: 'ID' }];
+    if (typeDef) {
+        for (const f of typeDef.fields) {
+            if (f.key === 'id') continue;
+            cols.push({ key: f.key, label: f.label });
+        }
+    } else {
+        cols.push({ key: 'name', label: 'Name' });
+    }
+    return cols;
+}
+
+function exportProductCSV(componentType: string, selectedIds: Set<string> | null): void {
+    const products = getProductsByType(componentType);
+    const filtered = selectedIds && selectedIds.size > 0
+        ? products.filter(p => selectedIds.has(p.id))
+        : products;
+    const columns = getProductColumns(componentType);
+    const rows = filtered.map(p => {
+        const row: Record<string, unknown> = { id: p.id };
+        for (const col of columns) {
+            if (col.key === 'id') continue;
+            row[col.key] = p.values[col.key] ?? '';
+        }
+        return row;
+    });
+    const csv = toCSV(columns, rows);
+    const safeName = getSchemaId(componentType);
+    downloadCSV(csv, `${safeName}-products.csv`);
+}
+
+function importProductCSV(componentType: string): void {
+    const columns = getProductColumns(componentType);
+    const typeId = getSchemaId(componentType);
+    const typeDef = getDataType(typeId);
+    const fieldMap = new Map<string, FieldDefinition>();
+    if (typeDef) {
+        for (const f of typeDef.fields) fieldMap.set(f.label, f);
+    }
+
+    uploadCSV(({ headers, rows: csvRows }) => {
+        for (const csvRow of csvRows) {
+            const existingId = csvRow['ID'] ?? '';
+            const existing = existingId ? getProduct(existingId) : undefined;
+            const values: Record<string, unknown> = existing ? { ...existing.values } : {};
+
+            for (const h of headers) {
+                if (h === 'ID') continue;
+                const field = fieldMap.get(h);
+                const raw = csvRow[h] ?? '';
+                if (field) {
+                    values[field.key] = coerceValue(raw, field.type ?? 'text', field.options);
+                }
+            }
+
+            const entry: ProductEntry = {
+                id: existingId || ('product-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)),
+                componentType,
+                values,
+            };
+            saveProduct(entry);
+        }
+        render();
+    });
 }
 

@@ -1,5 +1,7 @@
 import { dia, elementTools, g, util } from '@joint/core';
-import { GRID_SIZE, HIGHLIGHT_COLOR } from '../theme';
+import { GRID_SIZE } from '../theme';
+
+const ZONE_RESIZE_COLOR = '#4589ff';
 
 const S = 8;    // visual L-handle size
 const H = 12;   // transparent hit-area half-size
@@ -13,33 +15,33 @@ type Corner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 const BR_MARKUP: dia.MarkupJSON = util.svg`
     <g @selector="handle" cursor="nwse-resize">
         <rect stroke="none" fill="transparent" width="${H}" height="${H}"/>
-        <path d="M 0 ${S} ${S} ${S} ${S} 0" fill="${HIGHLIGHT_COLOR}" stroke="none"/>
+        <path d="M 0 ${S} ${S} ${S} ${S} 0" fill="${ZONE_RESIZE_COLOR}" stroke="none"/>
     </g>
-    <rect @selector="extras" pointer-events="none" fill="none" stroke="${HIGHLIGHT_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
+    <rect @selector="extras" pointer-events="none" fill="none" stroke="${ZONE_RESIZE_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
 `;
 
 const BL_MARKUP: dia.MarkupJSON = util.svg`
     <g @selector="handle" cursor="nesw-resize">
         <rect stroke="none" fill="transparent" width="${H}" height="${H}" x="${-H}"/>
-        <path d="M 0 ${S} ${-S} ${S} ${-S} 0" fill="${HIGHLIGHT_COLOR}" stroke="none"/>
+        <path d="M 0 ${S} ${-S} ${S} ${-S} 0" fill="${ZONE_RESIZE_COLOR}" stroke="none"/>
     </g>
-    <rect @selector="extras" pointer-events="none" fill="none" stroke="${HIGHLIGHT_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
+    <rect @selector="extras" pointer-events="none" fill="none" stroke="${ZONE_RESIZE_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
 `;
 
 const TR_MARKUP: dia.MarkupJSON = util.svg`
     <g @selector="handle" cursor="nesw-resize">
         <rect stroke="none" fill="transparent" width="${H}" height="${H}" y="${-H}"/>
-        <path d="M 0 ${-S} ${S} ${-S} ${S} 0" fill="${HIGHLIGHT_COLOR}" stroke="none"/>
+        <path d="M 0 ${-S} ${S} ${-S} ${S} 0" fill="${ZONE_RESIZE_COLOR}" stroke="none"/>
     </g>
-    <rect @selector="extras" pointer-events="none" fill="none" stroke="${HIGHLIGHT_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
+    <rect @selector="extras" pointer-events="none" fill="none" stroke="${ZONE_RESIZE_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
 `;
 
 const TL_MARKUP: dia.MarkupJSON = util.svg`
     <g @selector="handle" cursor="nwse-resize">
         <rect stroke="none" fill="transparent" width="${H}" height="${H}" x="${-H}" y="${-H}"/>
-        <path d="M 0 ${-S} ${-S} ${-S} ${-S} 0" fill="${HIGHLIGHT_COLOR}" stroke="none"/>
+        <path d="M 0 ${-S} ${-S} ${-S} ${-S} 0" fill="${ZONE_RESIZE_COLOR}" stroke="none"/>
     </g>
-    <rect @selector="extras" pointer-events="none" fill="none" stroke="${HIGHLIGHT_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
+    <rect @selector="extras" pointer-events="none" fill="none" stroke="${ZONE_RESIZE_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
 `;
 
 /**
@@ -64,6 +66,38 @@ export class FrameCornerControl extends elementTools.Control {
             case 'top-right':    this.children = TR_MARKUP; break;
             case 'top-left':     this.children = TL_MARKUP; break;
         }
+    }
+
+    private _lastColor = '';
+    private _colorListener: (() => void) | null = null;
+
+    private applyColor() {
+        const model = this.relatedView?.model;
+        const color = (model?.get('zoneColor') as string) || '#0072c3';
+        if (color === this._lastColor) return;
+        this._lastColor = color;
+        this.el.querySelectorAll('path[fill]').forEach((p: SVGElement) => {
+            p.setAttribute('fill', color);
+        });
+        this.el.querySelectorAll('rect[stroke]').forEach((r: SVGElement) => {
+            if (r.getAttribute('stroke') !== 'none') r.setAttribute('stroke', color);
+        });
+    }
+
+    update() {
+        const proto = Object.getPrototypeOf(Object.getPrototypeOf(this));
+        if (proto.update) proto.update.call(this);
+        this.applyColor();
+        if (!this._colorListener && this.relatedView?.model) {
+            const handler = () => { this._lastColor = ''; this.applyColor(); };
+            this.relatedView.model.on('change:zoneColor', handler);
+            this._colorListener = () => this.relatedView.model.off('change:zoneColor', handler);
+        }
+    }
+
+    onRemove() {
+        this._colorListener?.();
+        this._colorListener = null;
     }
 
     protected getPosition(view: dia.ElementView): g.Point {

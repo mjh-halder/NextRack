@@ -82,6 +82,8 @@ export function updateMinimapView(view: View, gridCount: number): void {
     scheduleUpdate();
 }
 
+export function scheduleMinimapUpdate(): void { scheduleUpdate(); }
+
 function scheduleUpdate(): void {
     if (rafId) return;
     rafId = requestAnimationFrame(() => {
@@ -93,7 +95,7 @@ function scheduleUpdate(): void {
 function updateMinimap(): void {
     if (!minimapPaper || !mainPaper) return;
 
-    // Get the same base transformation the main paper uses (without zoom/scroll)
+    // Base transformation WITHOUT sidebar inset — defines the grid-only world extent
     const baseMx = transformationMatrix(currentView, 20, 0, currentGridCount);
 
     // Compute the bounding box of the grid area in screen space (at zoom=1)
@@ -168,10 +170,10 @@ function updateMinimap(): void {
     const rr = Math.max(mmTL.x, mmBR.x);
     const rb = Math.max(mmTL.y, mmBR.y);
 
-    viewportRect.setAttribute('x', String(Math.max(0, rx)));
-    viewportRect.setAttribute('y', String(Math.max(0, ry)));
-    viewportRect.setAttribute('width', String(Math.max(0, Math.min(MINIMAP_W, rr) - Math.max(0, rx))));
-    viewportRect.setAttribute('height', String(Math.max(0, Math.min(MINIMAP_H, rb) - Math.max(0, ry))));
+    viewportRect.setAttribute('x', String(rx));
+    viewportRect.setAttribute('y', String(ry));
+    viewportRect.setAttribute('width', String(Math.max(1, rr - rx)));
+    viewportRect.setAttribute('height', String(Math.max(1, rb - ry)));
 }
 
 function applyMatrix(x: number, y: number, mx: SVGMatrix | DOMMatrix): { x: number; y: number } {
@@ -182,12 +184,12 @@ function applyMatrix(x: number, y: number, mx: SVGMatrix | DOMMatrix): { x: numb
 }
 
 function scrollToMinimapPoint(px: number, py: number): void {
-    // Minimap pixel → model coords
+    // Minimap pixel → model coords via inverse minimap matrix
     const mmMx = minimapPaper.matrix();
     const mmInv = V.createSVGMatrix().multiply(mmMx).inverse();
     const modelPt = applyMatrix(px, py, mmInv);
 
-    // Model → main paper screen coords
+    // Model → screen coords via main paper matrix
     const mainMx = mainPaper.matrix();
     const screenPt = applyMatrix(modelPt.x, modelPt.y, mainMx);
 
@@ -196,10 +198,12 @@ function scrollToMinimapPoint(px: number, py: number): void {
     const vpW = window.innerWidth - sidebarW;
     const vpH = window.innerHeight - headerH;
 
-    window.scroll(
-        Math.max(0, screenPt.x - sidebarW - vpW / 2),
-        Math.max(0, screenPt.y - headerH - vpH / 2),
-    );
+    // Scroll so that screenPt is at the center of the usable viewport
+    window.scroll({
+        left: Math.max(0, screenPt.x - sidebarW - vpW / 2),
+        top: Math.max(0, screenPt.y - headerH - vpH / 2),
+        behavior: 'instant',
+    });
 }
 
 export function showMinimap(): void {
