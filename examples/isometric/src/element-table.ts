@@ -3,11 +3,18 @@ import { ShapeRegistry } from './shapes/shape-registry';
 import { getDataType } from './schema-registry';
 import { META_KEY } from './inspector';
 import { getProduct, getProductsByType } from './product-catalog';
+import { listWorkloads } from './app-store';
 import { toCSV, downloadCSV, CsvColumn } from './csv-utils';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Download16 from '@carbon/icons/es/download/16.js';
+import Search16 from '@carbon/icons/es/search/16.js';
+import * as XLSX from 'xlsx';
 
 const ICON_DOWNLOAD = carbonIconToString(Download16 as CarbonIcon);
+const ICON_SEARCH = carbonIconToString(Search16 as CarbonIcon);
+
+let etSearchOpen = false;
+let etSearchTerm = '';
 
 interface ElementRow {
     cellId: string;
@@ -55,88 +62,188 @@ function getComponentTypes(rows: ElementRow[]): Array<{ type: string; count: num
         .sort((a, b) => a.type.localeCompare(b.type));
 }
 
+interface UnifiedRow {
+    id: string;
+    category: 'element' | 'workload';
+    name: string;
+    type: string;
+    zone: string;
+    vCpu: string;
+    ram: string;
+    storage: string;
+    network: string;
+    product: string;
+    cellId?: string;
+}
+
+function getUnifiedRows(graph: dia.Graph): UnifiedRow[] {
+    const rows: UnifiedRow[] = [];
+
+    for (const el of graph.getElements()) {
+        if (el.get('isFrame') || el.get('componentRole') === 'child') continue;
+        const meta: Record<string, unknown> = el.get(META_KEY) ?? {};
+        const shapeKey = (meta.shapeType as string) || '';
+        const def = ShapeRegistry[shapeKey];
+        const ct = def?.componentType || (meta.componentType as string) || '';
+        if (!ct) continue;
+        const parent = el.getParentCell();
+        const zone = parent?.get('isFrame') ? (parent.attr('label/text') as string || 'Zone') : '';
+        const productId = meta.productId as string | undefined;
+        const product = productId ? getProduct(productId) : null;
+        const pv = product?.values ?? {};
+        rows.push({
+            id: String(el.id),
+            category: 'element',
+            name: (meta.name as string) || def?.displayName || shapeKey || '',
+            type: ct,
+            zone,
+            vCpu: String(meta.coreCount ?? pv.coreCount ?? ''),
+            ram: String(meta.ram ?? pv.ram ?? ''),
+            storage: String(meta.storageGB ?? pv.storageGB ?? ''),
+            network: String(meta.bandwidthMbps ?? pv.bandwidthMbps ?? ''),
+            product: product ? String(product.values.name || product.id) : '',
+            cellId: String(el.id),
+        });
+    }
+
+    for (const el of graph.getElements()) {
+        if (!el.get('isArea') && !el.get('isGridLabel')) continue;
+        const kind = el.get('isArea') ? 'Area' : 'Label';
+        const name = (el.attr('label/text') as string) || kind;
+        const parent = el.getParentCell();
+        const zone = parent?.get('isFrame') ? (parent.attr('label/text') as string || 'Zone') : '';
+        rows.push({
+            id: String(el.id),
+            category: 'element',
+            name,
+            type: kind,
+            zone,
+            vCpu: '',
+            ram: '',
+            storage: '',
+            network: '',
+            product: '',
+            cellId: String(el.id),
+        });
+    }
+
+    for (const wl of listWorkloads()) {
+        rows.push({
+            id: wl.id,
+            category: 'workload',
+            name: wl.name || wl.id,
+            type: wl.deploymentModel || 'Workload',
+            zone: '',
+            vCpu: wl.vCpuCores,
+            ram: wl.ramGB,
+            storage: wl.storageCapacityGB,
+            network: wl.bandwidthMbps,
+            product: '',
+        });
+    }
+
+    return rows;
+}
+
 function render(): void {
     if (!modalEl || !graphRef) return;
     const content = modalEl.querySelector('.nr-et__body') as HTMLElement;
     if (!content) return;
     content.innerHTML = '';
 
-    const allRows = getElementRows(graphRef);
-    const types = getComponentTypes(allRows);
-    if (!selectedType && types.length > 0) selectedType = types[0].type;
-
-    // Left panel
-    const left = document.createElement('div');
-    left.className = 'nr-dm__left';
-
-    const leftHeader = document.createElement('div');
-    leftHeader.className = 'nr-dm__left-header';
-    const leftTitle = document.createElement('h2');
-    leftTitle.className = 'nr-dm__left-title';
-    leftTitle.textContent = 'Component Types';
-    leftHeader.appendChild(leftTitle);
-    left.appendChild(leftHeader);
-
-    const typeList = document.createElement('div');
-    typeList.className = 'nr-dm__type-list';
-    typeList.setAttribute('role', 'listbox');
-    for (const t of types) {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'nr-dm__type-item' + (t.type === selectedType ? ' nr-dm__type-item--selected' : '');
-        item.setAttribute('role', 'option');
-        if (t.type === selectedType) item.setAttribute('aria-selected', 'true');
-        item.addEventListener('click', () => { selectedType = t.type; render(); });
-        const label = document.createElement('span');
-        label.className = 'nr-dm__type-label';
-        label.textContent = t.type;
-        item.appendChild(label);
-        const count = document.createElement('span');
-        count.className = 'nr-dm__type-count';
-        count.textContent = String(t.count);
-        item.appendChild(count);
-        typeList.appendChild(item);
-    }
-    left.appendChild(typeList);
-    content.appendChild(left);
-
-    // Right panel
-    const right = document.createElement('div');
-    right.className = 'nr-dm__right';
-    const filtered = allRows.filter(r => r.componentType === selectedType);
-    const selected = new Set<string>();
-
-    // Columns
-    const typeId = selectedType.toLowerCase().replace(/\s+/g, '-');
-    const typeDef = getDataType(typeId);
-    const columns: Array<{ key: string; label: string }> = [
+    const allRows = getUnifiedRows(graphRef);
+    const columns: Array<{ key: keyof UnifiedRow; label: string }> = [
         { key: 'name', label: 'Name' },
-        { key: '_product', label: 'Product' },
+        { key: 'category', label: 'Category' },
+        { key: 'type', label: 'Type' },
         { key: 'zone', label: 'Zone' },
+        { key: 'product', label: 'Product' },
+        { key: 'vCpu', label: 'vCPU' },
+        { key: 'ram', label: 'RAM' },
+        { key: 'storage', label: 'Storage' },
+        { key: 'network', label: 'Network' },
     ];
-    if (typeDef) {
-        for (const f of typeDef.fields) {
-            if (f.key === 'id' || f.key === 'name') continue;
-            columns.push({ key: f.key, label: f.label });
-        }
+
+    const term = etSearchTerm.toLowerCase();
+    const displayRows = term
+        ? allRows.filter(r => columns.some(c => (r[c.key] || '').toLowerCase().includes(term)))
+        : allRows;
+
+    const modalSubtitle = modalEl!.querySelector('.nr-et__subtitle') as HTMLElement | null;
+    if (modalSubtitle) {
+        modalSubtitle.textContent = `${displayRows.length} item${displayRows.length !== 1 ? 's' : ''}${term ? ` (filtered from ${allRows.length})` : ''}`;
     }
 
-    // Header
-    const header = document.createElement('div');
-    header.className = 'nr-dt__header';
-    const hTitle = document.createElement('h3');
-    hTitle.className = 'nr-dt__header-title';
-    hTitle.textContent = selectedType;
-    header.appendChild(hTitle);
-    const hDesc = document.createElement('p');
-    hDesc.className = 'nr-dt__header-desc';
-    hDesc.textContent = `${filtered.length} element${filtered.length !== 1 ? 's' : ''} on canvas`;
-    header.appendChild(hDesc);
-    right.appendChild(header);
-
-    // Toolbar with batch bar
+    // Toolbar
     const toolbar = document.createElement('div');
     toolbar.className = 'nr-dt__toolbar';
+
+    const toolbarActions = document.createElement('div');
+    toolbarActions.className = 'nr-dt__toolbar-actions';
+
+    // Search
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'nr-dt__search-wrap' + (etSearchOpen ? ' nr-dt__search-wrap--open' : '');
+
+    const searchBtn = document.createElement('button');
+    searchBtn.type = 'button';
+    searchBtn.className = 'nr-dt__toolbar-icon-btn';
+    searchBtn.title = 'Search';
+    searchBtn.innerHTML = ICON_SEARCH;
+    searchBtn.addEventListener('click', () => {
+        etSearchOpen = !etSearchOpen;
+        searchWrap.classList.toggle('nr-dt__search-wrap--open', etSearchOpen);
+        if (etSearchOpen) {
+            searchInput.focus();
+        } else {
+            etSearchTerm = '';
+            searchInput.value = '';
+            render();
+        }
+    });
+    searchWrap.appendChild(searchBtn);
+
+    const searchInput = document.createElement('input');
+    searchInput.autocomplete = 'off';
+    searchInput.className = 'nr-dt__search-input';
+    searchInput.placeholder = 'Filter table';
+    searchInput.type = 'search';
+    searchInput.value = etSearchTerm;
+    searchInput.addEventListener('input', () => {
+        etSearchTerm = searchInput.value;
+        render();
+    });
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && etSearchTerm) {
+            e.stopPropagation();
+            etSearchOpen = false;
+            etSearchTerm = '';
+            searchInput.value = '';
+            searchWrap.classList.remove('nr-dt__search-wrap--open');
+            render();
+        }
+    });
+    searchInput.addEventListener('blur', () => {
+        if (etSearchOpen && !etSearchTerm) {
+            etSearchOpen = false;
+            searchWrap.classList.remove('nr-dt__search-wrap--open');
+        }
+    });
+    searchWrap.appendChild(searchInput);
+    toolbarActions.appendChild(searchWrap);
+
+    // Export
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'nr-dt__toolbar-icon-btn';
+    exportBtn.title = 'Export XLSX';
+    exportBtn.innerHTML = ICON_DOWNLOAD;
+    exportBtn.addEventListener('click', () => {
+        exportXlsx(displayRows, columns);
+    });
+    toolbarActions.appendChild(exportBtn);
+
+    // Batch bar
     const batchBar = document.createElement('div');
     batchBar.className = 'nr-dt__batch';
     const batchCount = document.createElement('span');
@@ -147,30 +254,34 @@ function render(): void {
     const batchExportBtn = document.createElement('button');
     batchExportBtn.type = 'button';
     batchExportBtn.className = 'nr-dt__batch-btn';
-    batchExportBtn.innerHTML = `Export CSV<span class="nr-dt__batch-btn-icon">${ICON_DOWNLOAD}</span>`;
+    batchExportBtn.innerHTML = `Export XLSX<span class="nr-dt__batch-btn-icon">${ICON_DOWNLOAD}</span>`;
     batchExportBtn.addEventListener('click', () => {
-        exportElementCSV(selectedType, allRows, filtered.filter(r => selected.has(r.cellId)));
+        const sel = displayRows.filter(r => selected.has(r.id));
+        exportXlsx(sel, columns);
     });
     batchActions.appendChild(batchExportBtn);
-
     const batchCancel = document.createElement('button');
     batchCancel.type = 'button';
     batchCancel.className = 'nr-dt__batch-btn nr-dt__batch-btn--cancel';
     batchCancel.textContent = 'Cancel';
-    batchCancel.addEventListener('click', () => { selected.clear(); syncSelection(); });
+    batchCancel.addEventListener('click', () => { selected.clear(); syncSel(); });
     batchActions.appendChild(batchCancel);
     batchBar.appendChild(batchActions);
     toolbar.appendChild(batchBar);
 
-    right.appendChild(toolbar);
+    toolbar.appendChild(toolbarActions);
+    content.appendChild(toolbar);
+
+    const selected = new Set<string>();
 
     // Table
     const tableWrap = document.createElement('div');
     tableWrap.className = 'nr-dt';
+    tableWrap.style.flex = '1';
+    tableWrap.style.overflow = 'auto';
     const table = document.createElement('table');
     table.className = 'nr-dt__table';
 
-    // Thead
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
 
@@ -183,8 +294,8 @@ function render(): void {
     selectAllCb.setAttribute('aria-label', 'Select all');
     selectAllCb.addEventListener('change', () => {
         selected.clear();
-        if (selectAllCb.checked) filtered.forEach(r => selected.add(r.cellId));
-        syncSelection();
+        if (selectAllCb.checked) displayRows.forEach(r => selected.add(r.id));
+        syncSel();
     });
     selectAllWrap.appendChild(selectAllCb);
     thCb.appendChild(selectAllWrap);
@@ -199,18 +310,17 @@ function render(): void {
     thead.appendChild(headRow);
     table.appendChild(thead);
 
-    // Tbody
     const tbody = document.createElement('tbody');
-    if (filtered.length === 0) {
+    if (displayRows.length === 0) {
         const tr = document.createElement('tr');
         const td = document.createElement('td');
         td.colSpan = columns.length + 1;
         td.className = 'nr-dt__empty';
-        td.textContent = 'No elements of this type on the canvas.';
+        td.textContent = term ? 'No matching items.' : 'No elements or workloads defined.';
         tr.appendChild(td);
         tbody.appendChild(tr);
     } else {
-        for (const row of filtered) {
+        for (const row of displayRows) {
             const tr = document.createElement('tr');
             tr.className = 'nr-dt__row';
 
@@ -220,14 +330,11 @@ function render(): void {
             cbWrap.className = 'nr-dt__checkbox-wrap';
             const cb = document.createElement('input');
             cb.type = 'checkbox';
-            cb.checked = selected.has(row.cellId);
-            cb.dataset.cellId = row.cellId;
+            cb.checked = selected.has(row.id);
             cb.setAttribute('aria-label', `Select ${row.name}`);
             cb.addEventListener('change', () => {
-                if (cb.checked) selected.add(row.cellId); else selected.delete(row.cellId);
-                selectAllCb.checked = selected.size === filtered.length;
-                selectAllCb.indeterminate = selected.size > 0 && selected.size < filtered.length;
-                syncSelection();
+                if (cb.checked) selected.add(row.id); else selected.delete(row.id);
+                syncSel();
             });
             cbWrap.appendChild(cb);
             tdCb.appendChild(cbWrap);
@@ -237,46 +344,14 @@ function render(): void {
                 const td = document.createElement('td');
                 td.className = 'nr-dt__cell';
                 td.style.whiteSpace = 'nowrap';
-
-                if (col.key === 'name') {
-                    td.textContent = row.name;
-                } else if (col.key === '_product') {
-                    const products = getProductsByType(row.componentType);
-                    const currentProductId = row.values.productId as string | undefined;
-                    const sel = document.createElement('select');
-                    sel.className = 'nr-dt__inline-select';
-                    const noneOpt = document.createElement('option');
-                    noneOpt.value = '';
-                    noneOpt.textContent = '— none —';
-                    if (!currentProductId) noneOpt.selected = true;
-                    sel.appendChild(noneOpt);
-                    for (const p of products) {
-                        const opt = document.createElement('option');
-                        opt.value = p.id;
-                        opt.textContent = String(p.values.name || p.id);
-                        if (p.id === currentProductId) opt.selected = true;
-                        sel.appendChild(opt);
-                    }
-                    sel.addEventListener('change', () => {
-                        if (!graphRef) return;
-                        const cell = graphRef.getCell(row.cellId);
-                        if (!cell) return;
-                        const meta = cell.get(META_KEY) ?? {};
-                        meta.productId = sel.value || undefined;
-                        cell.set(META_KEY, { ...meta });
-                        render();
-                    });
-                    td.appendChild(sel);
-                } else if (col.key === 'zone') {
-                    td.textContent = row.zone;
+                const val = row[col.key];
+                if (col.key === 'category') {
+                    const tag = document.createElement('span');
+                    tag.className = `cds--tag cds--tag--sm cds--tag--${row.category === 'element' ? 'teal' : 'purple'}`;
+                    tag.textContent = row.category === 'element' ? 'Element' : 'Workload';
+                    td.appendChild(tag);
                 } else {
-                    const productId = row.values.productId as string | undefined;
-                    let val = row.values[col.key];
-                    if (productId) {
-                        const product = getProduct(productId);
-                        if (product?.values[col.key] != null) val = product.values[col.key];
-                    }
-                    td.textContent = val != null ? String(val) : '';
+                    td.textContent = val || '\u2014';
                 }
                 tr.appendChild(td);
             }
@@ -285,16 +360,17 @@ function render(): void {
     }
     table.appendChild(tbody);
     tableWrap.appendChild(table);
-    right.appendChild(tableWrap);
-    content.appendChild(right);
+    content.appendChild(tableWrap);
 
-    function syncSelection() {
-        batchBar.classList.toggle('nr-dt__batch--active', selected.size > 0);
-        batchCount.textContent = `${selected.size} selected`;
-        selectAllCb.checked = selected.size === filtered.length && filtered.length > 0;
-        selectAllCb.indeterminate = selected.size > 0 && selected.size < filtered.length;
-        tbody.querySelectorAll<HTMLInputElement>('.nr-dt__checkbox-wrap input[data-cell-id]').forEach(cb => {
-            cb.checked = selected.has(cb.dataset.cellId ?? '');
+    function syncSel() {
+        const count = selected.size;
+        batchBar.classList.toggle('nr-dt__batch--active', count > 0);
+        toolbar.classList.toggle('nr-dt__toolbar--batch-active', count > 0);
+        batchCount.textContent = `${count} item${count !== 1 ? 's' : ''} selected`;
+        selectAllCb.checked = count === displayRows.length && displayRows.length > 0;
+        selectAllCb.indeterminate = count > 0 && count < displayRows.length;
+        tbody.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach((cb, i) => {
+            if (i < displayRows.length) cb.checked = selected.has(displayRows[i].id);
         });
     }
 }
@@ -315,10 +391,15 @@ export function showElementTable(graph: dia.Graph): void {
 
     const headerBar = document.createElement('div');
     headerBar.className = 'nr-et__header';
+    const titleWrap = document.createElement('div');
     const title = document.createElement('h2');
     title.className = 'nr-et__title';
-    title.textContent = 'Canvas Elements';
-    headerBar.appendChild(title);
+    title.textContent = 'Elements in Grid';
+    titleWrap.appendChild(title);
+    const subtitle = document.createElement('p');
+    subtitle.className = 'nr-et__subtitle';
+    titleWrap.appendChild(subtitle);
+    headerBar.appendChild(titleWrap);
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'nr-et__close';
@@ -329,7 +410,10 @@ export function showElementTable(graph: dia.Graph): void {
     dialog.appendChild(headerBar);
 
     const body = document.createElement('div');
-    body.className = 'nr-et__body nr-dm__body';
+    body.className = 'nr-et__body';
+    body.style.display = 'flex';
+    body.style.flexDirection = 'column';
+    body.style.overflow = 'hidden';
     dialog.appendChild(body);
 
     modalEl.appendChild(dialog);
@@ -343,6 +427,8 @@ export function hideElementTable(): void {
     if (modalEl) { modalEl.remove(); modalEl = null; }
     document.body.style.overflow = '';
     document.removeEventListener('keydown', onEsc);
+    etSearchOpen = false;
+    etSearchTerm = '';
 }
 
 function onEsc(e: KeyboardEvent): void {
@@ -393,5 +479,17 @@ function exportElementCSV(componentType: string, allRows: ElementRow[], rows: El
     const csv = toCSV(columns, csvRows);
     const safeName = componentType.toLowerCase().replace(/\s+/g, '-');
     downloadCSV(csv, `${safeName}-elements.csv`);
+}
+
+function exportXlsx(rows: UnifiedRow[], columns: Array<{ key: keyof UnifiedRow; label: string }>): void {
+    const data = rows.map(r => {
+        const obj: Record<string, string> = {};
+        for (const c of columns) obj[c.label] = r[c.key] || '';
+        return obj;
+    });
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Elements');
+    XLSX.writeFile(wb, 'elements-workloads.xlsx');
 }
 

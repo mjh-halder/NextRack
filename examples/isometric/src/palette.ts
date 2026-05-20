@@ -1,6 +1,6 @@
 import { dia } from '@joint/core';
 import IsometricShape, { View } from './shapes/isometric-shape';
-import { Frame } from './shapes';
+import { Frame, Area, DoubleArrow, GridLabel, Icon } from './shapes';
 import { ComplexComponent } from './shapes/complex-component';
 import { META_KEY, NodeMeta } from './inspector';
 import { GRID_SIZE } from './theme';
@@ -12,13 +12,20 @@ import { carbonIconToString, CarbonIcon } from './icons';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import CaretRight16 from '@carbon/icons/es/caret--right/16.js';
 import Area16 from '@carbon/icons/es/area/16.js';
+import AreaCustom16 from '@carbon/icons/es/area--custom/16.js';
+import ArrowsHorizontal16 from '@carbon/icons/es/arrows--horizontal/16.js';
+import TextShortParagraph16 from '@carbon/icons/es/text--short-paragraph/16.js';
+import Svg16 from '@carbon/icons/es/SVG/16.js';
 import Search16 from '@carbon/icons/es/search/16.js';
 import DragVertical16 from '@carbon/icons/es/drag--vertical/16.js';
 import Add16 from '@carbon/icons/es/add/16.js';
+import Minimize16 from '@carbon/icons/es/minimize/16.js';
+import Maximize16 from '@carbon/icons/es/maximize/16.js';
+import SettingsAdjust16 from '@carbon/icons/es/settings--adjust/16.js';
 import SubVolume16 from '@carbon/icons/es/watson-health/sub-volume/16.js';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import { getIconById, onCatalogChange } from './icon-catalog';
-import { buildComponentPanel, formatLabel, ComponentTreeItem } from './component-tree';
+import { buildComponentPanel, formatLabel, ComponentTreeItem, setComponentViewMode, getComponentViewMode } from './component-tree';
 import { listCanvases, CanvasRecord } from './canvas-store';
 
 const ICON_ADD = carbonIconToString(Add16 as CarbonIcon);
@@ -40,12 +47,26 @@ interface PaletteItem {
     label: string;
     kind: string;
     create: () => IsometricShape;
-    /** Optional raw SVG markup rendered as a leading icon. */
     iconSvg?: string;
+    iconSvgMono?: string;
+    iconBgColor?: string;
+    iconIsVendor?: boolean;
 }
+
+const ICON_AREA_CUSTOM = carbonIconToString(AreaCustom16 as CarbonIcon);
+const ICON_DOUBLE_ARROW = carbonIconToString(ArrowsHorizontal16 as CarbonIcon);
+const ICON_TEXT_LABEL = carbonIconToString(TextShortParagraph16 as CarbonIcon);
+const ICON_SVG = carbonIconToString(Svg16 as CarbonIcon);
 
 const CONTAINER_ITEMS: PaletteItem[] = [
     { label: 'Zone', kind: 'zone', create: () => new Frame(), iconSvg: ICON_TREE_ZONE },
+];
+
+const DESIGN_ITEMS: PaletteItem[] = [
+    { label: 'Area', kind: 'area', create: () => new Area(), iconSvg: ICON_AREA_CUSTOM },
+    { label: 'Double Arrow', kind: 'double-arrow', create: () => new DoubleArrow(), iconSvg: ICON_DOUBLE_ARROW },
+    { label: 'Label', kind: 'grid-label', create: () => new GridLabel(), iconSvg: ICON_TEXT_LABEL },
+    { label: 'Icon', kind: 'icon', create: () => new Icon(), iconSvg: ICON_SVG },
 ];
 
 // Stagger new elements so they don't land on top of each other
@@ -62,6 +83,7 @@ export class ComponentPalette {
     private el: HTMLElement;
     private graph: dia.Graph;
     private getView: () => View;
+    private getViewportCenter: (() => { x: number; y: number }) | null = null;
     private onCreated: OnCreatedCallback;
     private onTreeSelect: OnTreeSelectCallback;
     private placeCount = 0;
@@ -78,6 +100,7 @@ export class ComponentPalette {
     // Callback fired when a zone should be highlighted in the canvas during
     // element-tree drag-drop (zoneId = highlight, null = clear).
     private onZoneDropHighlight: ((zoneId: string | null) => void) | null = null;
+    private treeCollapseBtn: HTMLButtonElement | null = null;
     private getActiveZone: (() => Frame | null) | null = null;
     private onTreeContextMenu: ((cellId: string, clientX: number, clientY: number) => void) | null = null;
     private onCanvasSwitch: ((id: string) => void) | null = null;
@@ -86,7 +109,7 @@ export class ComponentPalette {
     private canvasPickerBtn: HTMLButtonElement | null = null;
     private canvasLabelEl: HTMLSpanElement | null = null;
     private activeCanvasId = '';
-    private componentPanelHandle: { rebuild: () => void } | null = null;
+    private componentPanelHandle: { rebuild: () => void; setSearchTerm: (term: string) => void } | null = null;
     private componentPanelEl: HTMLDivElement | null = null;
 
     constructor(
@@ -144,6 +167,10 @@ export class ComponentPalette {
 
     setActiveZoneGetter(fn: () => Frame | null): void {
         this.getActiveZone = fn;
+    }
+
+    setViewportCenterCallback(cb: () => { x: number; y: number }): void {
+        this.getViewportCenter = cb;
     }
 
     setTreeContextMenuCallback(cb: (cellId: string, clientX: number, clientY: number) => void): void {
@@ -237,12 +264,26 @@ export class ComponentPalette {
     /** Scroll the tree viewport so the given <li> is visible. */
     private scrollTreeToItem(li: HTMLElement): void {
         if (!this.treeViewport) return;
-        const vp = this.treeViewport;
-        const liRect = li.getBoundingClientRect();
-        const vpRect = vp.getBoundingClientRect();
-        if (liRect.top < vpRect.top || liRect.bottom > vpRect.bottom) {
-            li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        // Expand all collapsed parent zones so the item becomes visible
+        let parent = li.parentElement;
+        while (parent && parent !== this.elementTreeListEl) {
+            if (parent.tagName === 'LI' && parent.getAttribute('aria-expanded') === 'false') {
+                parent.setAttribute('aria-expanded', 'true');
+                const children = parent.querySelector<HTMLElement>('.nr-tree-children');
+                if (children) children.style.display = '';
+            }
+            parent = parent.parentElement;
         }
+        // Also ensure the Element Tree section itself is expanded
+        const treeSection = this.elementTreeListEl.closest('.nr-palette-section');
+        if (treeSection?.classList.contains('nr-palette-section--collapsed')) {
+            treeSection.classList.remove('nr-palette-section--collapsed');
+            const heading = treeSection.querySelector('.nr-section-header');
+            if (heading) heading.setAttribute('aria-expanded', 'true');
+        }
+        requestAnimationFrame(() => {
+            li.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        });
     }
 
     /** Rebuild only the component + container list when the registry changes. */
@@ -327,6 +368,7 @@ export class ComponentPalette {
         treeSearch.addEventListener('input', () => {
             this.treeSearchTerm = treeSearch.value;
             this.applyTreeSearchFilter();
+            this.componentPanelHandle?.setSearchTerm(treeSearch.value);
         });
         treeSearchBox.appendChild(treeSearchIcon);
         treeSearchBox.appendChild(treeSearch);
@@ -358,6 +400,34 @@ export class ComponentPalette {
 
         const treeSection = this.buildCollapsibleSection('Element Tree', treeWrap, { bodyClass: 'nr-section-body--tree' });
         treeSection.classList.add('nr-palette-section--tree');
+
+        // Add collapse/expand all button to the Element Tree header
+        let treeAllExpanded = true;
+        this.treeCollapseBtn = document.createElement('button');
+        const treeCollapseBtn = this.treeCollapseBtn;
+        treeCollapseBtn.type = 'button';
+        treeCollapseBtn.className = 'nr-section-collapse-btn';
+        treeCollapseBtn.title = 'Collapse all';
+        treeCollapseBtn.setAttribute('aria-label', 'Collapse all');
+        treeCollapseBtn.innerHTML = carbonIconToString(Minimize16 as CarbonIcon);
+        treeCollapseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            treeAllExpanded = !treeAllExpanded;
+            this.elementTreeListEl.querySelectorAll<HTMLLIElement>('[aria-expanded]').forEach(li => {
+                li.setAttribute('aria-expanded', String(treeAllExpanded));
+                const children = li.querySelector<HTMLElement>('.nr-tree-children');
+                if (children) children.style.display = treeAllExpanded ? '' : 'none';
+            });
+            treeCollapseBtn.innerHTML = treeAllExpanded
+                ? carbonIconToString(Minimize16 as CarbonIcon)
+                : carbonIconToString(Maximize16 as CarbonIcon);
+            treeCollapseBtn.title = treeAllExpanded ? 'Collapse all' : 'Expand all';
+        });
+        const treeSectionHeader = treeSection.querySelector('.nr-section-header');
+        if (treeSectionHeader) {
+            treeSectionHeader.insertBefore(treeCollapseBtn, treeSectionHeader.querySelector('.nr-section-chevron'));
+        }
+
         this.el.appendChild(treeSection);
         this.buildElementTree();
 
@@ -442,7 +512,126 @@ export class ComponentPalette {
         // Component panel (shared tree/grid with header & search)
         this.componentPanelEl = document.createElement('div');
         this.componentPanelEl.className = 'nr-palette-scrollable';
-        this.el.appendChild(this.componentPanelEl);
+
+        const compScrollWrap = document.createElement('div');
+        compScrollWrap.className = 'nr-tree-scroll-wrap';
+        compScrollWrap.style.flex = '1';
+        compScrollWrap.style.minHeight = '0';
+
+        this.componentPanelEl.style.cssText = 'min-height:0;max-height:45vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-ms-overflow-style:none;padding-right:4px;';
+
+        const compTrack = document.createElement('div');
+        compTrack.className = 'nr-tree-scroll-track';
+        const compThumb = document.createElement('div');
+        compThumb.className = 'nr-tree-scroll-thumb';
+        compTrack.appendChild(compThumb);
+
+        compScrollWrap.appendChild(this.componentPanelEl);
+        compScrollWrap.appendChild(compTrack);
+
+        const compSection = this.buildCollapsibleSection('Components', compScrollWrap);
+        compSection.classList.add('nr-palette-section--components');
+        compSection.style.minHeight = '0';
+        compSection.style.display = 'flex';
+        compSection.style.flexDirection = 'column';
+
+        // Add collapse-all and view-switcher buttons to the section header
+        const compSectionHeader = compSection.querySelector('.nr-section-header')!;
+        const compChevron = compSectionHeader.querySelector('.nr-section-chevron')!;
+
+        let compAllExpanded = true;
+        const compCollapseBtn = document.createElement('button');
+        compCollapseBtn.type = 'button';
+        compCollapseBtn.className = 'nr-section-collapse-btn';
+        compCollapseBtn.title = 'Collapse all';
+        compCollapseBtn.setAttribute('aria-label', 'Collapse all');
+        compCollapseBtn.innerHTML = carbonIconToString(Minimize16 as CarbonIcon);
+        compCollapseBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            compAllExpanded = !compAllExpanded;
+            this.componentPanelEl!.querySelectorAll<HTMLElement>('.nr-comp-tree__node--folder, .nr-palette-section').forEach(el => {
+                el.setAttribute('aria-expanded', String(compAllExpanded));
+                el.classList.toggle('nr-palette-section--collapsed', !compAllExpanded);
+            });
+            compCollapseBtn.innerHTML = compAllExpanded
+                ? carbonIconToString(Minimize16 as CarbonIcon)
+                : carbonIconToString(Maximize16 as CarbonIcon);
+            compCollapseBtn.title = compAllExpanded ? 'Collapse all' : 'Expand all';
+        });
+
+        const compViewBtn = document.createElement('button');
+        compViewBtn.type = 'button';
+        compViewBtn.className = 'nr-section-collapse-btn';
+        compViewBtn.title = 'View options';
+        compViewBtn.setAttribute('aria-label', 'View options');
+        compViewBtn.innerHTML = carbonIconToString(SettingsAdjust16 as CarbonIcon);
+        compViewBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const existing = document.querySelector('.nr-palette-ctx');
+            if (existing) { existing.remove(); return; }
+
+            const menu = document.createElement('div');
+            menu.className = 'nr-palette-ctx';
+            menu.setAttribute('role', 'menu');
+
+            for (const mode of [
+                { key: 'list' as const, label: 'Folder View' },
+                { key: 'svg' as const, label: 'Tile View' },
+            ]) {
+                const item = document.createElement('button');
+                item.type = 'button';
+                item.className = 'nr-ctx-menu__item' + (getComponentViewMode() === mode.key ? ' nr-ctx-menu__item--active' : '');
+                item.setAttribute('role', 'menuitem');
+                const label = document.createElement('span');
+                label.className = 'nr-ctx-menu__label';
+                label.textContent = mode.label;
+                item.appendChild(label);
+                item.addEventListener('click', () => {
+                    menu.remove();
+                    setComponentViewMode(mode.key);
+                    this.buildList();
+                });
+                menu.appendChild(item);
+            }
+
+            const rect = compViewBtn.getBoundingClientRect();
+            menu.style.position = 'fixed';
+            menu.style.left = rect.left + 'px';
+            menu.style.top = rect.bottom + 2 + 'px';
+            document.body.appendChild(menu);
+
+            const dismiss = (ev: MouseEvent) => {
+                if (!menu.contains(ev.target as Node)) { menu.remove(); document.removeEventListener('mousedown', dismiss); }
+            };
+            setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
+        });
+
+        compSectionHeader.insertBefore(compViewBtn, compChevron);
+        compSectionHeader.insertBefore(compCollapseBtn, compChevron);
+
+        this.el.appendChild(compSection);
+
+        const updateCompThumb = () => {
+            const vh = this.componentPanelEl!.clientHeight;
+            const ch = this.componentPanelEl!.scrollHeight;
+            if (ch <= vh || vh === 0) {
+                compThumb.style.height = '100%';
+                compThumb.style.top = '0';
+                compTrack.style.opacity = '0';
+                return;
+            }
+            compTrack.style.opacity = '1';
+            const ratio = vh / ch;
+            const thumbH = Math.max(20, Math.round(vh * ratio));
+            const maxScroll = ch - vh;
+            const maxTop = vh - thumbH;
+            const top = maxScroll === 0 ? 0 : Math.round((this.componentPanelEl!.scrollTop / maxScroll) * maxTop);
+            compThumb.style.height = `${thumbH}px`;
+            compThumb.style.top = `${top}px`;
+        };
+        this.componentPanelEl.addEventListener('scroll', updateCompThumb);
+        new ResizeObserver(updateCompThumb).observe(this.componentPanelEl);
+        requestAnimationFrame(updateCompThumb);
 
         // Zoning section below the component panel
         this.listEl = document.createElement('div');
@@ -476,7 +665,20 @@ export class ComponentPalette {
             }
             return anyVisible;
         };
-        filterUl(this.elementTreeListEl);
+        const anyVisible = filterUl(this.elementTreeListEl);
+
+        let emptyMsg = this.elementTreeListEl.querySelector('.nr-palette-empty-msg') as HTMLElement;
+        if (term && !anyVisible) {
+            if (!emptyMsg) {
+                emptyMsg = document.createElement('li');
+                emptyMsg.className = 'nr-palette-empty-msg';
+                emptyMsg.textContent = 'Keine Ergebnisse';
+                this.elementTreeListEl.appendChild(emptyMsg);
+            }
+            emptyMsg.style.display = '';
+        } else if (emptyMsg) {
+            emptyMsg.style.display = 'none';
+        }
     }
 
     private applyComponentSearchFilter(): void {
@@ -554,6 +756,10 @@ export class ComponentPalette {
             empty.className = 'nr-tree-empty';
             empty.textContent = 'No elements';
             this.elementTreeListEl.appendChild(empty);
+        }
+
+        if (this.treeCollapseBtn) {
+            this.treeCollapseBtn.style.display = rootFrames.length > 0 ? '' : 'none';
         }
     }
 
@@ -645,10 +851,19 @@ export class ComponentPalette {
         const row = document.createElement('div');
         row.className = 'nr-tree-row';
 
+        let iconSvgHtml: string | null = null;
         if (iconEntry?.svg) {
+            const isVendor = iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure';
+            iconSvgHtml = isVendor ? (iconEntry.svgMono || iconEntry.svg) : iconEntry.svg;
+        } else if (cell.get('isDoubleArrow')) {
+            iconSvgHtml = ICON_DOUBLE_ARROW;
+        } else if (cell.get('isArea')) {
+            iconSvgHtml = ICON_AREA_CUSTOM;
+        }
+        if (iconSvgHtml) {
             const iconSpan = document.createElement('span');
             iconSpan.className = 'nr-tree-icon';
-            iconSpan.innerHTML = iconEntry.svg;
+            iconSpan.innerHTML = iconSvgHtml;
             iconSpan.setAttribute('aria-hidden', 'true');
             row.appendChild(iconSpan);
         }
@@ -829,17 +1044,24 @@ export class ComponentPalette {
             .filter(([id]) => !BUILT_IN_SHAPE_IDS.has(id))
             .map(([id, defaults]) => {
                 const iconEntry = defaults.icon ? getIconById(defaults.icon) : undefined;
+                const isVendorIcon = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
                 const paletteItem: PaletteItem = {
                     label: defaults.displayName ?? formatLabel(id),
                     kind: id,
                     create: () => getPreviewFactory(id, defaults.baseShape ?? 'cuboid')(),
                     iconSvg: iconEntry?.svg || undefined,
+                    iconSvgMono: isVendorIcon ? iconEntry.svgMono : undefined,
+                    iconBgColor: isVendorIcon ? iconEntry.bgColor : undefined,
+                    iconIsVendor: !!isVendorIcon,
                 };
                 return {
                     id,
                     label: paletteItem.label,
                     iconSvg: paletteItem.iconSvg,
-                    collection: defaults.collection || 'General',
+                    iconSvgMono: paletteItem.iconSvgMono,
+                    iconBgColor: paletteItem.iconBgColor,
+                    iconIsVendor: paletteItem.iconIsVendor,
+                    collection: defaults.collection || 'User Components',
                     data: paletteItem,
                 };
             });
@@ -850,10 +1072,19 @@ export class ComponentPalette {
                 this.addToGraph(data as PaletteItem);
             },
             showCreateButton: false,
+            hideSearch: true,
         });
 
+        // Remove the internal "Components" header — the collapsible section provides it
+        this.componentPanelEl!.querySelectorAll('.nr-palette-comp-header').forEach(h => h.remove());
+
         this.listEl.innerHTML = '';
-        this.listEl.appendChild(this.buildSection('Zoning', CONTAINER_ITEMS, true));
+        const zoningSection = this.buildSection('Zoning', CONTAINER_ITEMS, true);
+        zoningSection.classList.add('nr-palette-section--zoning');
+        this.listEl.appendChild(zoningSection);
+        const designSection = this.buildSection('Design', DESIGN_ITEMS, true);
+        designSection.classList.add('nr-palette-section--design');
+        this.listEl.appendChild(designSection);
     }
 
     private buildSection(title: string, items: PaletteItem[], separator: boolean): HTMLElement {
@@ -869,7 +1100,7 @@ export class ComponentPalette {
             if (item.iconSvg) {
                 const iconSpan = document.createElement('span');
                 iconSpan.className = 'nr-palette-item-icon';
-                iconSpan.innerHTML = item.iconSvg;
+                iconSpan.innerHTML = (item.iconIsVendor && item.iconSvgMono) ? item.iconSvgMono : item.iconSvg;
                 iconSpan.setAttribute('aria-hidden', 'true');
                 btn.appendChild(iconSpan);
             }
@@ -888,10 +1119,11 @@ export class ComponentPalette {
     }
 
     private addToGraph(item: PaletteItem) {
+        const center = this.getViewportCenter?.() ?? { x: BASE_X, y: BASE_Y };
         const col = this.placeCount % STAGGER_COLS;
         const row = Math.floor(this.placeCount / STAGGER_COLS);
-        const x = BASE_X + col * STAGGER;
-        const y = BASE_Y + row * STAGGER;
+        const x = center.x + (col - STAGGER_COLS / 2) * STAGGER;
+        const y = center.y + row * STAGGER;
         this.placeCount++;
 
         const defaults = ShapeRegistry[item.kind];
@@ -904,7 +1136,8 @@ export class ComponentPalette {
         if (defaults?.complexShape && defaults.layers?.length) {
             const baseLayer = defaults.layers[0];
             const cc = new ComplexComponent();
-            cc.resize(baseLayer.width, baseLayer.height);
+            const haSize = defaults.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
+            cc.resize(haSize.width, haSize.height);
             cc.set('isometricHeight',        baseLayer.depth);
             cc.set('defaultIsometricHeight', baseLayer.depth);
             cc.set('defaultSize',            { width: baseLayer.width, height: baseLayer.height });
@@ -920,17 +1153,6 @@ export class ComponentPalette {
                 ? defaults.displayName : '';
             if (displayLabel) cc.attr('label/text', displayLabel);
 
-            // Icon — stored as model attrs; the view renders it imperatively on
-            // Layer 0 using the actual layer geometry (respects offsetX/offsetY/
-            // baseElevation), which avoids the "floats next to the shape" issue
-            // that the generic applyRegistryDefaults formula causes for layers
-            // with non-zero offsets.
-            if (defaults.iconHref) {
-                cc.set('iconHref', defaults.iconHref);
-                cc.set('iconSize', (defaults.iconSize ?? 1) * GRID_SIZE);
-                cc.set('iconFace', defaults.iconFace ?? 'top');
-                cc.set('iconLayerIndex', defaults.iconLayerIndex ?? 0);
-            }
             if (defaults.rotation) cc.set('shapeRotation', defaults.rotation);
 
             cc.toggleView(view);
@@ -947,6 +1169,15 @@ export class ComponentPalette {
         }
         shape.position(x, y);
         shape.set(META_KEY, meta);
+
+        if (shape.get('isDoubleArrow')) {
+            const count = this.graph.getElements().filter(e => e.get('isDoubleArrow')).length;
+            shape.attr('label/text', `Double Arrow ${count + 1}`);
+        } else if (shape.get('isArea')) {
+            const count = this.graph.getElements().filter(e => e.get('isArea') && !e.get('isDoubleArrow')).length;
+            shape.attr('label/text', `Area ${count + 1}`);
+        }
+        if (defaults?.baseShape) shape.set('currentBaseShape', defaults.baseShape);
         shape.toggleView(view);
 
         this.graph.addCell(shape);
@@ -956,7 +1187,7 @@ export class ComponentPalette {
 
     /** If a zone is currently selected on the canvas, embed the new element
      *  into it and reposition to the zone's lower-left corner. */
-    private embedIntoActiveZone(element: IsometricShape): void {
+    embedIntoActiveZone(element: IsometricShape): void {
         const zone = this.getActiveZone?.() ?? null;
         if (!zone) return;
         zone.embed(element);

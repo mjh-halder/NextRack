@@ -1,47 +1,26 @@
 import { dia, elementTools, g, util } from '@joint/core';
+import { refreshSelect } from '../hover-highlight';
 import { GRID_SIZE } from '../theme';
 
 const ZONE_RESIZE_COLOR = '#4589ff';
 
-const S = 8;    // visual L-handle size
 const H = 12;   // transparent hit-area half-size
-const MIN_SIZE = GRID_SIZE * 2;
+const MIN_SIZE = 5;
 
 type Corner = 'bottom-right' | 'bottom-left' | 'top-right' | 'top-left';
 
-// Each markup draws an L-shape that points inward toward the element centre,
-// with a transparent hit area sized for comfortable interaction.
-
-const BR_MARKUP: dia.MarkupJSON = util.svg`
+// Tool handles are invisible — the selection squares from hover-highlight
+// serve as the visual resize affordance. Only the hit area matters here.
+const HANDLE_MARKUP: dia.MarkupJSON = util.svg`
     <g @selector="handle" cursor="nwse-resize">
-        <rect stroke="none" fill="transparent" width="${H}" height="${H}"/>
-        <path d="M 0 ${S} ${S} ${S} ${S} 0" fill="${ZONE_RESIZE_COLOR}" stroke="none"/>
+        <rect stroke="none" fill="transparent" x="${-H/2}" y="${-H/2}" width="${H}" height="${H}"/>
     </g>
-    <rect @selector="extras" pointer-events="none" fill="none" stroke="${ZONE_RESIZE_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
 `;
 
-const BL_MARKUP: dia.MarkupJSON = util.svg`
+const HANDLE_MARKUP_NESW: dia.MarkupJSON = util.svg`
     <g @selector="handle" cursor="nesw-resize">
-        <rect stroke="none" fill="transparent" width="${H}" height="${H}" x="${-H}"/>
-        <path d="M 0 ${S} ${-S} ${S} ${-S} 0" fill="${ZONE_RESIZE_COLOR}" stroke="none"/>
+        <rect stroke="none" fill="transparent" x="${-H/2}" y="${-H/2}" width="${H}" height="${H}"/>
     </g>
-    <rect @selector="extras" pointer-events="none" fill="none" stroke="${ZONE_RESIZE_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
-`;
-
-const TR_MARKUP: dia.MarkupJSON = util.svg`
-    <g @selector="handle" cursor="nesw-resize">
-        <rect stroke="none" fill="transparent" width="${H}" height="${H}" y="${-H}"/>
-        <path d="M 0 ${-S} ${S} ${-S} ${S} 0" fill="${ZONE_RESIZE_COLOR}" stroke="none"/>
-    </g>
-    <rect @selector="extras" pointer-events="none" fill="none" stroke="${ZONE_RESIZE_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
-`;
-
-const TL_MARKUP: dia.MarkupJSON = util.svg`
-    <g @selector="handle" cursor="nwse-resize">
-        <rect stroke="none" fill="transparent" width="${H}" height="${H}" x="${-H}" y="${-H}"/>
-        <path d="M 0 ${-S} ${-S} ${-S} ${-S} 0" fill="${ZONE_RESIZE_COLOR}" stroke="none"/>
-    </g>
-    <rect @selector="extras" pointer-events="none" fill="none" stroke="${ZONE_RESIZE_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
 `;
 
 /**
@@ -60,49 +39,25 @@ export class FrameCornerControl extends elementTools.Control {
     preinitialize() {
         this.options.selector = 'body';
         const corner: Corner = this.options.corner ?? 'bottom-right';
-        switch (corner) {
-            case 'bottom-right': this.children = BR_MARKUP; break;
-            case 'bottom-left':  this.children = BL_MARKUP; break;
-            case 'top-right':    this.children = TR_MARKUP; break;
-            case 'top-left':     this.children = TL_MARKUP; break;
-        }
+        const isNesw = corner === 'bottom-left' || corner === 'top-right';
+        this.children = isNesw ? HANDLE_MARKUP_NESW : HANDLE_MARKUP;
     }
 
-    private _lastColor = '';
-    private _colorListener: (() => void) | null = null;
-
-    private applyColor() {
-        const model = this.relatedView?.model;
-        const color = (model?.get('zoneColor') as string) || '#0072c3';
-        if (color === this._lastColor) return;
-        this._lastColor = color;
-        this.el.querySelectorAll('path[fill]').forEach((p: SVGElement) => {
-            p.setAttribute('fill', color);
-        });
-        this.el.querySelectorAll('rect[stroke]').forEach((r: SVGElement) => {
-            if (r.getAttribute('stroke') !== 'none') r.setAttribute('stroke', color);
-        });
-    }
-
-    update() {
-        const proto = Object.getPrototypeOf(Object.getPrototypeOf(this));
-        if (proto.update) proto.update.call(this);
-        this.applyColor();
-        if (!this._colorListener && this.relatedView?.model) {
-            const handler = () => { this._lastColor = ''; this.applyColor(); };
-            this.relatedView.model.on('change:zoneColor', handler);
-            this._colorListener = () => this.relatedView.model.off('change:zoneColor', handler);
-        }
-    }
-
-    onRemove() {
-        this._colorListener?.();
-        this._colorListener = null;
-    }
 
     protected getPosition(view: dia.ElementView): g.Point {
         const { width, height } = view.model.size();
         const corner: Corner = this.options.corner ?? 'bottom-right';
+        const rot = (view.model.get('labelRotation') as number) || 0;
+
+        if (rot === 90 || rot === 270) {
+            switch (corner) {
+                case 'bottom-right': return new g.Point((width + height) / 2, (height + width) / 2);
+                case 'bottom-left':  return new g.Point((width - height) / 2, (height + width) / 2);
+                case 'top-right':    return new g.Point((width + height) / 2, (height - width) / 2);
+                case 'top-left':     return new g.Point((width - height) / 2, (height - width) / 2);
+            }
+        }
+
         switch (corner) {
             case 'bottom-right': return new g.Point(width,  height);
             case 'bottom-left':  return new g.Point(0,      height);
@@ -114,6 +69,7 @@ export class FrameCornerControl extends elementTools.Control {
     protected setPosition(view: dia.ElementView, coordinates: dia.Point): void {
         const model = view.model;
         const corner: Corner = this.options.corner ?? 'bottom-right';
+        const rot = (model.get('labelRotation') as number) || 0;
 
         if (!this.primaryStart) {
             const { width, height } = model.size();
@@ -132,42 +88,77 @@ export class FrameCornerControl extends elementTools.Control {
 
         let newW: number, newH: number, newX: number, newY: number;
 
-        switch (corner) {
-            case 'bottom-right': {
-                const dx = Math.round((coordinates.x - width)  / GRID_SIZE);
-                const dy = Math.round((coordinates.y - height) / GRID_SIZE);
-                newW = Math.max(MIN_SIZE, width  + dx * GRID_SIZE);
-                newH = Math.max(MIN_SIZE, height + dy * GRID_SIZE);
-                newX = elX;
-                newY = elY;
-                break;
+        if (rot === 90 || rot === 270) {
+            const handlePos = this.getPosition(view);
+            const vdx = coordinates.x - handlePos.x;
+            const vdy = coordinates.y - handlePos.y;
+            const sdx = Math.round(vdx / GRID_SIZE) * GRID_SIZE;
+            const sdy = Math.round(vdy / GRID_SIZE) * GRID_SIZE;
+
+            switch (corner) {
+                case 'bottom-right':
+                    newH = Math.max(MIN_SIZE, height + sdx);
+                    newW = Math.max(MIN_SIZE, width + sdy);
+                    newX = elX + (sdx - sdy) / 2;
+                    newY = elY + (sdy - sdx) / 2;
+                    break;
+                case 'bottom-left':
+                    newH = Math.max(MIN_SIZE, height - sdx);
+                    newW = Math.max(MIN_SIZE, width + sdy);
+                    newX = elX + (sdx - sdy) / 2;
+                    newY = elY + (sdx + sdy) / 2;
+                    break;
+                case 'top-right':
+                    newH = Math.max(MIN_SIZE, height + sdx);
+                    newW = Math.max(MIN_SIZE, width - sdy);
+                    newX = elX + (sdx + sdy) / 2;
+                    newY = elY + (sdy - sdx) / 2;
+                    break;
+                case 'top-left':
+                    newH = Math.max(MIN_SIZE, height - sdx);
+                    newW = Math.max(MIN_SIZE, width - sdy);
+                    newX = elX + (sdx + sdy) / 2;
+                    newY = elY + (sdx + sdy) / 2;
+                    break;
             }
-            case 'bottom-left': {
-                const dx = Math.round(coordinates.x / GRID_SIZE);
-                const dy = Math.round((coordinates.y - height) / GRID_SIZE);
-                newW = Math.max(MIN_SIZE, width  - dx * GRID_SIZE);
-                newH = Math.max(MIN_SIZE, height + dy * GRID_SIZE);
-                newX = elX + (width - newW);
-                newY = elY;
-                break;
-            }
-            case 'top-right': {
-                const dx = Math.round((coordinates.x - width) / GRID_SIZE);
-                const dy = Math.round(coordinates.y / GRID_SIZE);
-                newW = Math.max(MIN_SIZE, width  + dx * GRID_SIZE);
-                newH = Math.max(MIN_SIZE, height - dy * GRID_SIZE);
-                newX = elX;
-                newY = elY + (height - newH);
-                break;
-            }
-            case 'top-left': {
-                const dx = Math.round(coordinates.x / GRID_SIZE);
-                const dy = Math.round(coordinates.y / GRID_SIZE);
-                newW = Math.max(MIN_SIZE, width  - dx * GRID_SIZE);
-                newH = Math.max(MIN_SIZE, height - dy * GRID_SIZE);
-                newX = elX + (width  - newW);
-                newY = elY + (height - newH);
-                break;
+        } else {
+            switch (corner) {
+                case 'bottom-right': {
+                    const dx = Math.round((coordinates.x - width)  / GRID_SIZE);
+                    const dy = Math.round((coordinates.y - height) / GRID_SIZE);
+                    newW = Math.max(MIN_SIZE, width  + dx * GRID_SIZE);
+                    newH = Math.max(MIN_SIZE, height + dy * GRID_SIZE);
+                    newX = elX;
+                    newY = elY;
+                    break;
+                }
+                case 'bottom-left': {
+                    const dx = Math.round(coordinates.x / GRID_SIZE);
+                    const dy = Math.round((coordinates.y - height) / GRID_SIZE);
+                    newW = Math.max(MIN_SIZE, width  - dx * GRID_SIZE);
+                    newH = Math.max(MIN_SIZE, height + dy * GRID_SIZE);
+                    newX = elX + (width - newW);
+                    newY = elY;
+                    break;
+                }
+                case 'top-right': {
+                    const dx = Math.round((coordinates.x - width) / GRID_SIZE);
+                    const dy = Math.round(coordinates.y / GRID_SIZE);
+                    newW = Math.max(MIN_SIZE, width  + dx * GRID_SIZE);
+                    newH = Math.max(MIN_SIZE, height - dy * GRID_SIZE);
+                    newX = elX;
+                    newY = elY + (height - newH);
+                    break;
+                }
+                case 'top-left': {
+                    const dx = Math.round(coordinates.x / GRID_SIZE);
+                    const dy = Math.round(coordinates.y / GRID_SIZE);
+                    newW = Math.max(MIN_SIZE, width  - dx * GRID_SIZE);
+                    newH = Math.max(MIN_SIZE, height - dy * GRID_SIZE);
+                    newX = elX + (width  - newW);
+                    newY = elY + (height - newH);
+                    break;
+                }
             }
         }
 
@@ -175,6 +166,13 @@ export class FrameCornerControl extends elementTools.Control {
             position: { x: newX, y: newY },
             size: { width: newW, height: newH },
         });
+
+        if (rot) {
+            const tx = `rotate(${rot}, ${newW / 2}, ${newH / 2})`;
+            model.attr('label/transform', tx);
+            model.attr('body/transform', tx);
+            refreshSelect(model);
+        }
 
         const dw = newW - this.primaryStart.w;
         const dh = newH - this.primaryStart.h;

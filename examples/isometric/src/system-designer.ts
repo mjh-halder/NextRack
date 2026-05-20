@@ -1,12 +1,13 @@
 import { g, dia, V, highlighters, routers } from '@joint/core';
 import Obstacles from './obstacles';
-import IsometricShape, { View } from './shapes/isometric-shape';
+import IsometricShape, { View, ToolKeys } from './shapes/isometric-shape';
 import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, Frame, cellNamespace } from './shapes';
 import { sortElements, drawGrid, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle } from './utils';
 import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
-import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath } from './inspector';
-import { ShapeRegistry, ShapeDefinition } from './shapes/shape-registry';
+import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath, NodeMeta } from './inspector';
+import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
 import { getPreviewFactory } from './shapes/shape-factories';
+import { ComplexComponent } from './shapes/complex-component';
 import { ComponentPalette } from './palette';
 import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './persistence';
 import {
@@ -14,25 +15,33 @@ import {
     getActiveCanvasId, setActiveCanvasId, saveCanvasGraph, loadCanvasGraph, CanvasRecord,
 } from './canvas-store';
 import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
-import { initMinimap, updateMinimapView, scheduleMinimapUpdate } from './minimap';
+import { initMinimap, updateMinimapView, scheduleMinimapUpdate, setMinimapNavigateCallback } from './minimap';
 import { initResourceBar, showResourceBar, hideResourceBar, showZoneHud, hideZoneHud, detectStretchClusters } from './resource-bar';
 import { initAutoLayout, showLayoutBar, hideLayoutBar } from './auto-layout';
-import { applyHover, clearHover, applySelect, clearSelect, clearSelectFor, applyConnHighlight, clearConnHighlights as clearConnRings, syncAllRings } from './hover-highlight';
+import { applyHover, clearHover, applySelect, clearSelect, clearSelectFor, refreshSelect, applyConnHighlight, clearConnHighlights as clearConnRings, syncAllRings } from './hover-highlight';
 import { initWorkloadTable, showWorkloadTable, hideWorkloadTable } from './workload-table';
+import { initCalloutLabels, syncCalloutLabel, refreshAllCallouts, removeCallout, setCalloutVisibility } from './callout-labels';
 import { getCanvas } from './canvas-store';
 import { ViewToggle } from './view-toggle';
 import { AreaSelect } from './area-select';
 import { carbonIconToString, CarbonIcon } from './icons';
 import { FrameCornerControl } from './tools';
-import { LOADER_SVG, ensureLoaderStyles } from './loader';
-ensureLoaderStyles();
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
 import BringToFront16 from '@carbon/icons/es/bring-to-front/16.js';
 import SendToBack16 from '@carbon/icons/es/send-to-back/16.js';
+import CenterSquare16 from '@carbon/icons/es/center--square/16.js';
+import Unlink16 from '@carbon/icons/es/unlink/16.js';
+import PaintBrush16 from '@carbon/icons/es/paint-brush/16.js';
+import Paste16 from '@carbon/icons/es/paste/16.js';
+import SelectWindow16 from '@carbon/icons/es/select--window/16.js';
 import ConnectionSignalOff16 from '@carbon/icons/es/connection-signal--off/16.js';
 import ConnectionSignal16 from '@carbon/icons/es/connection-signal/16.js';
 import Rotate16 from '@carbon/icons/es/rotate/16.js';
+import Edit16 from '@carbon/icons/es/edit/16.js';
+import Unplug16 from '@carbon/icons/es/unplug/16.js';
+import View16 from '@carbon/icons/es/view/16.js';
+import ViewOff16 from '@carbon/icons/es/view--off/16.js';
 
 // Inline Carbon SVG icons (16 × 16) used in the menu components
 const CDS_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 4.7l-.7-.7L8 7.3 4.7 4l-.7.7L7.3 8 4 11.3l.7.7L8 8.7l3.3 3.3.7-.7L8.7 8z"/></svg>`;
@@ -322,8 +331,21 @@ let treeHighlightedCell: IsometricShape | null = null;
 let currentFrame: Frame | null = null;
 
 const CONN_HIGHLIGHT_ID = 'connection-highlight';
-const CONN_LINK_COLOR = '#ffffff';
-let connHighlightedLinks: dia.Link[] = [];
+let copiedLinkStyle: Record<string, unknown> | null = null;
+const CONN_LINK_COLOR_LIGHT = '#8d8d8d';
+const CONN_LINK_COLOR_DARK = '#ffffff';
+function getConnLinkColor(): string {
+    return document.documentElement.classList.contains('cds--g100') ? CONN_LINK_COLOR_DARK : CONN_LINK_COLOR_LIGHT;
+}
+
+// Re-color highlighted links when theme changes
+new MutationObserver(() => {
+    const color = getConnLinkColor();
+    for (const { link } of connHighlightedLinks) {
+        link.attr('line/stroke', color);
+    }
+}).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+let connHighlightedLinks: Array<{ link: dia.Link; origStroke: string; origWidth: number }> = [];
 let connHighlightedNodes: dia.Element[] = [];
 
 function highlightConnections(cell: IsometricShape): void {
@@ -331,9 +353,11 @@ function highlightConnections(cell: IsometricShape): void {
     const links = graph.getConnectedLinks(cell);
     for (const link of links) {
         if (link.attr('./display') === 'none') continue;
-        link.attr('line/stroke', CONN_LINK_COLOR);
+        const origStroke = (link.attr('line/stroke') as string) || '#333333';
+        const origWidth = (link.attr('line/strokeWidth') as number) || 1;
+        link.attr('line/stroke', getConnLinkColor());
         link.attr('line/strokeWidth', 2);
-        connHighlightedLinks.push(link);
+        connHighlightedLinks.push({ link, origStroke, origWidth });
 
         const srcId = (link.source() as { id?: string }).id;
         const tgtId = (link.target() as { id?: string }).id;
@@ -353,6 +377,10 @@ function highlightConnections(cell: IsometricShape): void {
 
 function clearConnectionHighlights(): void {
     const hadLinks = connHighlightedLinks.length > 0;
+    for (const { link, origStroke, origWidth } of connHighlightedLinks) {
+        link.attr('line/stroke', origStroke);
+        link.attr('line/strokeWidth', origWidth);
+    }
     connHighlightedLinks = [];
     if (hadLinks) styleClusterLinks();
     clearConnRings();
@@ -409,8 +437,8 @@ const paper = new dia.Paper({
     // and from being dropped on top of other elements
     restrictTranslate: (elementView) => {
         const element = elementView.model;
-        // Frames and their embedded children move freely.
-        if (element.get('isFrame')) {
+        // Frames, areas, labels and their embedded children move freely.
+        if (element.get('isFrame') || element.get('isArea') || element.get('isGridLabel') || element.get('isIcon')) {
             return (x: number, y: number) => ({ x: Math.max(0, x), y: Math.max(0, y) });
         }
         // Elements embedded in a frame bypass obstacle checks so they
@@ -419,6 +447,12 @@ const paper = new dia.Paper({
             return (x: number, y: number) => ({ x: Math.max(0, x), y: Math.max(0, y) });
         }
         const isometricEl = element as IsometricShape;
+        const meta = element.get(META_KEY) as Record<string, unknown> | undefined;
+        const sKey = (meta?.shapeType as string) || '';
+        const sDef = sKey ? ShapeRegistry[sKey] : undefined;
+        if (sDef?.dimYAdjustable) {
+            return (x: number, y: number) => ({ x: Math.max(0, x), y: Math.max(0, y) });
+        }
         const { width, height } = isometricEl.size();
         const newBBox = new g.Rect();
         return function(x, y) {
@@ -433,7 +467,7 @@ const paper = new dia.Paper({
     autoFreeze: true,
     defaultConnectionPoint: {
         name: 'anchor',
-        args: { offset: 4 },
+        args: { offset: 2 },
     },
     defaultRouter: (vertices, args, linkView) => {
         const manhattanArgs = {
@@ -496,16 +530,22 @@ gridVEl = drawGrid(paper, GRID_COUNT, GRID_SIZE);
 
 // Canvas dimensions: sidebar inset on the left + grid content + extra whitespace on
 // the right and bottom so panning feels open with room on all sides.
-const CANVAS_H_PAD = 200;
-const CANVAS_V_PAD = 200;
+const CANVAS_PAD = 200;
 paper.setDimensions(
-    SIDEBAR_INSET + 2 * GRID_SIZE * GRID_COUNT * SCALE * ISOMETRIC_SCALE + CANVAS_H_PAD,
-    GRID_SIZE * GRID_COUNT * SCALE + CANVAS_V_PAD
+    SIDEBAR_INSET + 2 * GRID_SIZE * GRID_COUNT * SCALE * ISOMETRIC_SCALE + CANVAS_PAD,
+    GRID_SIZE * GRID_COUNT * SCALE + CANVAS_PAD
 );
 
 ensureExampleCanvas();
 let activeCanvasId = getActiveCanvasId();
 loadCanvasGraph(activeCanvasId, graph);
+requestAnimationFrame(() => centerGridInViewport(currentGridCountX, currentGridCountY));
+
+graph.on('reset', () => {
+    requestAnimationFrame(() => {
+        graph.getElements().forEach(el => syncCalloutLabel(el));
+    });
+});
 
 
 function toggleHideConnections(cell: IsometricShape): void {
@@ -535,6 +575,9 @@ applyHideConnections();
 // Clean up selection when a cell is removed by any means (tool, keyboard, inspector)
 
 graph.on('remove', (cell: dia.Cell) => {
+    removeCallout(cell.id as string);
+    const view = paper.findViewByModel(cell);
+    if (view) clearSelectFor(view);
     if (currentCell && currentCell.id === cell.id) {
         clearConnectionHighlights();
         currentCell = null;
@@ -588,6 +631,120 @@ function debouncedSort() {
 
 graph.on('change:position change:size', debouncedSort);
 
+const SD_ROTATE_PAIR: Record<string, string> = { tube: 'pipe', pipe: 'tube', duct: 'channel', channel: 'duct' };
+
+function applyIconAttrsToShape(shape: IsometricShape, href: string, iconPx: number, w: number, h: number, iH: number, face: string): void {
+    let topIconAttrs: Record<string, unknown>;
+    if (face === 'front') {
+        const lx = (w - iconPx) / 2, ly = (iH - iconPx) / 2;
+        const cx = lx + iconPx / 2, cy = ly + iconPx / 2;
+        topIconAttrs = { href, x: lx, y: ly, width: iconPx, height: iconPx, transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})` };
+    } else if (face === 'side') {
+        const lx = (h - iconPx) / 2, ly = (iH - iconPx) / 2;
+        const cx = lx + iconPx / 2, cy = ly + iconPx / 2;
+        topIconAttrs = { href, x: lx, y: ly, width: iconPx, height: iconPx, transform: `matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy})` };
+    } else {
+        topIconAttrs = { href, x: -iH + (w - iconPx) / 2, y: -iH + (h - iconPx) / 2, width: iconPx, height: iconPx, transform: null };
+    }
+    const x2D = (w - iconPx) / 2, y2D = (h - iconPx) / 2;
+    shape.attr({ topIcon: topIconAttrs, topIcon2D: { href, x: x2D, y: y2D, width: iconPx, height: iconPx } });
+}
+
+// Scale label font and height proportionally when width changes via drag.
+let labelResizeFromDrag = false;
+graph.on('change:size', (cell: dia.Cell) => {
+    if (cell.get('isGridLabel')) {
+        if (labelResizeFromDrag) return;
+        const prev = cell.previous('size') as { width: number; height: number } | undefined;
+        if (!prev || Math.abs((cell as dia.Element).size().width - prev.width) < 0.5) return;
+        const ratio = (cell as dia.Element).size().width / prev.width;
+        const curFont = (cell.get('labelFontSize') as number) || 14;
+        const fontSize = Math.round(Math.max(8, curFont * ratio));
+        const newHeight = Math.max(GRID_SIZE / 2, prev.height * ratio);
+        labelResizeFromDrag = true;
+        cell.set('labelFontSize', fontSize);
+        cell.attr('label/font-size', fontSize);
+        (cell as dia.Element).resize((cell as dia.Element).size().width, newHeight);
+        refreshSelect(cell);
+        labelResizeFromDrag = false;
+    }
+    if (cell.get('isIcon') && cell.get('iconStanding')) {
+        const el = cell as dia.Element;
+        const { width: w, height: h } = el.size();
+        const cx = w / 2;
+        const cy = h / 2;
+        const ox = (el.get('iconOffsetX') as number) ?? 0.22;
+        const oy = (el.get('iconOffsetY') as number) ?? -0.22;
+        const tx = ox * h;
+        const ty = oy * h;
+        const face = (el.get('iconFace') as string) || 'front';
+        if (face === 'side') {
+            el.attr('iconImage/transform', `translate(${-tx},${-ty}) matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy})`);
+        } else {
+            el.attr('iconImage/transform', `translate(${tx},${ty}) matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`);
+        }
+    }
+});
+
+// Auto-size grid labels when added or when text/font changes from inspector.
+graph.on('add', (cell: dia.Cell) => {
+    if (cell.isLink() && cell.get('lineColor')) {
+        requestAnimationFrame(() => {
+            const view = paper.findViewByModel(cell);
+            if (view) view.el.classList.add('nr-link--custom');
+        });
+    }
+    if (cell.get('isGridLabel')) {
+        requestAnimationFrame(() => {
+            const { GridLabel: GL } = require('./shapes/grid-label/grid-label');
+            if (cell instanceof GL) (cell as any).autoSize(paper);
+        });
+    }
+    if (cell.get('isIcon')) {
+        const iconData = cell.get('iconData') as string | undefined;
+        if (iconData) {
+            cell.attr('iconFlat/href', iconData);
+        }
+    }
+});
+graph.on('change:lineColor', (cell: dia.Cell) => {
+    const view = paper.findViewByModel(cell);
+    if (view) view.el.classList.toggle('nr-link--custom', !!cell.get('lineColor'));
+});
+graph.on('change:attrs', (cell: dia.Cell) => {
+    if (!cell.get('isGridLabel') || labelResizeFromDrag) return;
+    requestAnimationFrame(() => {
+        labelResizeFromDrag = true;
+        const { GridLabel: GL } = require('./shapes/grid-label/grid-label');
+        if (cell instanceof GL) (cell as any).autoSize(paper);
+        labelResizeFromDrag = false;
+        refreshSelect(cell);
+    });
+});
+
+// Re-apply icon positioning after resize so icon stays centred on the new geometry.
+graph.on('change:size', (cell: dia.Cell) => {
+    const meta = cell.get(META_KEY) as Record<string, unknown> | undefined;
+    const shapeKey = (meta?.shapeType as string) || '';
+    const def = shapeKey ? ShapeRegistry[shapeKey] : undefined;
+    if (def?.iconHref) {
+        const shape = cell as IsometricShape;
+        const { width: w, height: h } = shape.size();
+        const iH = (shape.get('isometricHeight') as number) ?? 0;
+        const face = (shape.get('effectiveIconFace') as string) || def.iconFace || 'top';
+        const iconPx = (def.iconSize ?? 1.5) * GRID_SIZE;
+        applyIconAttrsToShape(shape, def.iconHref, iconPx, w, h, iH, face);
+    }
+    refreshSelect(cell);
+    syncCalloutLabel(cell as dia.Element);
+});
+
+graph.on('change:position', (cell: dia.Cell) => {
+    refreshSelect(cell);
+    syncCalloutLabel(cell as dia.Element);
+
+});
+
 // Zoom via mouse wheel (blank and cell areas)
 
 function getMinZoom(): number {
@@ -640,6 +797,8 @@ function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
     );
     syncZoomSlider();
     scheduleMinimapUpdate();
+    refreshAllCallouts();
+
 }
 
 // Zoom anchored to the centre of the usable viewport (header + sidebar excluded)
@@ -662,45 +821,11 @@ function applyMenuZoom(factor: number) {
     );
     syncZoomSlider();
     scheduleMinimapUpdate();
+    refreshAllCallouts();
+
 }
 
-// Clamp scroll so the grid never moves more than 200px outside the viewport
-const SCROLL_PAD = 100;
-function clampScroll(): void {
-    const mx = paper.matrix();
-    const gw = currentGridCountX * GRID_SIZE;
-    const gh = currentGridCountY * GRID_SIZE;
-    const corners = [
-        { x: mx.a * 0 + mx.c * 0 + mx.e, y: mx.b * 0 + mx.d * 0 + mx.f },
-        { x: mx.a * gw + mx.c * 0 + mx.e, y: mx.b * gw + mx.d * 0 + mx.f },
-        { x: mx.a * gw + mx.c * gh + mx.e, y: mx.b * gw + mx.d * gh + mx.f },
-        { x: mx.a * 0 + mx.c * gh + mx.e, y: mx.b * 0 + mx.d * gh + mx.f },
-    ];
-    let gMinX = Infinity, gMaxX = -Infinity, gMinY = Infinity, gMaxY = -Infinity;
-    for (const c of corners) {
-        if (c.x < gMinX) gMinX = c.x;
-        if (c.x > gMaxX) gMaxX = c.x;
-        if (c.y < gMinY) gMinY = c.y;
-        if (c.y > gMaxY) gMaxY = c.y;
-    }
-
-    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
-    const vpLeft = window.scrollX + SIDEBAR_INSET;
-    const vpTop = window.scrollY + headerH;
-    const vpRight = window.scrollX + window.innerWidth;
-    const vpBottom = window.scrollY + window.innerHeight;
-
-    let dx = 0, dy = 0;
-    if (gMaxX < vpLeft + SCROLL_PAD) dx = (vpLeft + SCROLL_PAD) - gMaxX;
-    if (gMinX > vpRight - SCROLL_PAD) dx = (vpRight - SCROLL_PAD) - gMinX;
-    if (gMaxY < vpTop + SCROLL_PAD) dy = (vpTop + SCROLL_PAD) - gMaxY;
-    if (gMinY > vpBottom - SCROLL_PAD) dy = (vpBottom - SCROLL_PAD) - gMinY;
-
-    if (dx !== 0 || dy !== 0) {
-        window.scroll(window.scrollX - dx, window.scrollY - dy);
-    }
-}
-window.addEventListener('scroll', clampScroll);
+// Scroll is free — minimap and zoom handle navigation without clamping.
 
 paper.on('blank:mousewheel', (evt: dia.Event, x: number, y: number, delta: number) => {
     applyWheelZoom(evt, x, y, delta);
@@ -712,133 +837,49 @@ paper.on('cell:mousewheel', (_cellView: dia.CellView, evt: dia.Event, x: number,
 
 // Switch between isometric and 2D view
 
-// ── Experimental: animated view transition ──────────────────────────────────
-// Interpolates the paper matrix between 2D and isometric over ~300ms for a
-// smooth "rotation" feel. Shape iso/2d groups are crossfaded via opacity.
+// View switch helper — used by the component designer's switchView import
 
-const VIEW_TRANSITION_MS = 900;
-let viewTransitionRaf = 0;
 
-function lerpMatrix(a: DOMMatrix, b: DOMMatrix, t: number): SVGMatrix {
-    const m = V.createSVGMatrix();
-    m.a = a.a + (b.a - a.a) * t;
-    m.b = a.b + (b.b - a.b) * t;
-    m.c = a.c + (b.c - a.c) * t;
-    m.d = a.d + (b.d - a.d) * t;
-    m.e = a.e + (b.e - a.e) * t;
-    m.f = a.f + (b.f - a.f) * t;
-    return m;
-}
-
-function easeInOut(t: number): number {
-    return t;
-}
-
-function animateViewSwitch(toView: View) {
-    if (viewTransitionRaf) cancelAnimationFrame(viewTransitionRaf);
-
-    // Capture what model-space point is currently at the viewport center
-    const sm = paper.matrix();
-    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
-    const vpCx = window.scrollX + SIDEBAR_INSET + (window.innerWidth - SIDEBAR_INSET) / 2;
-    const vpCy = window.scrollY + headerH + (window.innerHeight - headerH) / 2;
-    const det = sm.a * sm.d - sm.b * sm.c;
-    const modelX = ( sm.d * (vpCx - sm.e) - sm.c * (vpCy - sm.f)) / det;
-    const modelY = (-sm.b * (vpCx - sm.e) + sm.a * (vpCy - sm.f)) / det;
-
-    // Adjust target matrix so the same model point stays at viewport center
-    const startMatrix = sm;
-    const endMatrix = transformationMatrix(toView, 20, SIDEBAR_INSET, currentGridCountX);
-    const endPx = endMatrix.a * modelX + endMatrix.c * modelY + endMatrix.e;
-    const endPy = endMatrix.b * modelX + endMatrix.d * modelY + endMatrix.f;
-    endMatrix.e += vpCx - endPx;
-    endMatrix.f += vpCy - endPy;
-
-    paper.el.style.position = 'relative';
-
-    const overlayEl = document.createElement('div');
-    overlayEl.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:1;opacity:0;background:var(--cds-background,#fff);display:flex;align-items:center;justify-content:center;';
-
-    const loaderWrap = document.createElement('div');
-    loaderWrap.style.cssText = 'position:fixed;top:50%;left:calc(50% + 128px);transform:translate(-50%,-50%);opacity:0;color:var(--cds-text-secondary,#525252);';
-    loaderWrap.innerHTML = LOADER_SVG;
-    overlayEl.appendChild(loaderWrap);
-
-    paper.el.appendChild(overlayEl);
-
-    let swapped = false;
-    const start = performance.now();
-
-    function tick(now: number) {
-        const elapsed = now - start;
-        const raw = Math.min(elapsed / VIEW_TRANSITION_MS, 1);
-        const t = easeInOut(raw);
-
-        const m = lerpMatrix(startMatrix, endMatrix, t);
-
-        // Gentle zoom dip, scaled around the viewport-center model point
-        const dip = Math.sin(raw * Math.PI) * 0.08;
-        if (dip > 0.001) {
-            const s = 1 - dip;
-            m.a *= s; m.b *= s; m.c *= s; m.d *= s;
-            const px = m.a * modelX + m.c * modelY + m.e;
-            const py = m.b * modelX + m.d * modelY + m.f;
-            m.e += vpCx - px;
-            m.f += vpCy - py;
-        }
-
-        paper.matrix(m);
-
-        // Fog: quick in (0–40%), slow out (40–100%)
-        let fog: number;
-        if (raw < 0.4) {
-            fog = raw / 0.4;
-        } else {
-            const out = (raw - 0.4) / 0.6;
-            fog = 1 - out * out;
-        }
-        overlayEl.style.opacity = String(fog);
-        const loaderOpacity = Math.max(0, fog - 0.5) * 2;
-        loaderWrap.style.opacity = String(loaderOpacity);
-
-        // Swap while fully faded out
-        if (!swapped && raw >= 0.5) {
-            swapped = true;
-            graph.getElements().forEach((el: dia.Element) =>
-                (el as IsometricShape).toggleView(toView));
-        }
-
-        if (raw < 1) {
-            viewTransitionRaf = requestAnimationFrame(tick);
-        } else {
-            viewTransitionRaf = 0;
-            overlayEl.remove();
-            if (!swapped) {
-                graph.getElements().forEach((el: dia.Element) =>
-                    (el as IsometricShape).toggleView(toView));
-            }
-            if (toView === View.Isometric) sortElements(graph);
-            if (currentCell) currentCell.addTools(paper, toView);
-        }
-    }
-    viewTransitionRaf = requestAnimationFrame(tick);
-}
 
 new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     currentView = view === 'isometric' ? View.Isometric : View.TwoDimensional;
     currentZoom = 1;
     paper.removeTools();
-    animateViewSwitch(currentView);
+    // Instant view switch — no animation
+    graph.getElements().forEach((el: dia.Element) =>
+        (el as IsometricShape).toggleView(currentView));
+    paper.matrix(transformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX));
+    paper.el.classList.toggle('nr-2d-icons-only', currentView === View.TwoDimensional);
+    if (currentView === View.Isometric) sortElements(graph);
+    if (currentCell && !(currentCell instanceof Link)) {
+        (currentCell as IsometricShape).addTools(paper, currentView);
+    }
     updateMinimapView(currentView, currentGridCountX);
     syncZoomSlider();
+    setCalloutVisibility(currentView === View.Isometric);
+    // Re-add resize tools for the current selected shape after view switch
+    if (currentCell && !(currentCell instanceof Link) && !currentCell.get('isFrame')) {
+        const meta = currentCell.get(META_KEY) as Record<string, unknown> | undefined;
+        const shapeKey = (meta?.shapeType as string) || '';
+        const def = shapeKey ? ShapeRegistry[shapeKey] : undefined;
+        if (def?.dimYAdjustable) {
+            (currentCell as IsometricShape).addTools(paper, currentView, ['size']);
+        }
+    }
+    requestAnimationFrame(() => fitToContent());
 });
 
 switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
 
 // ---- Minimap ----
 
+initCalloutLabels(canvasEl, paper);
+
 const minimapEl = document.getElementById('minimap') as HTMLDivElement;
 initMinimap(minimapEl, graph, paper);
+setMinimapNavigateCallback(() => refreshAllCallouts());
+
+updateMinimapView(currentView, currentGridCountX);
 
 // ---- Element Table button ----
 import { showElementTable } from './element-table';
@@ -881,13 +922,91 @@ const zoomLabel = document.createElement('span');
 zoomLabel.className = 'nr-zoom-label';
 zoomLabel.textContent = '100%';
 
+const fitBtn = document.createElement('button');
+fitBtn.type = 'button';
+fitBtn.className = 'nr-zoom-btn';
+fitBtn.setAttribute('aria-label', 'Fit to screen');
+fitBtn.innerHTML = carbonIconToString(CenterSquare16 as CarbonIcon).replace('width="16"', 'width="14"').replace('height="16"', 'height="14"');
+fitBtn.addEventListener('click', () => {
+    const elements = graph.getElements();
+    if (elements.length === 0) return;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const el of elements) {
+        const { x, y } = el.position();
+        const { width, height } = el.size();
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x + width > maxX) maxX = x + width;
+        if (y + height > maxY) maxY = y + height;
+    }
+    const pad = GRID_SIZE * 2;
+    minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
+    const vpW = window.innerWidth - SIDEBAR_INSET;
+    const vpH = window.innerHeight - headerH;
+    if (vpW <= 0 || vpH <= 0) return;
+
+    const baseMx = transformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
+
+    // Project bbox corners through the isometric transform (without offset)
+    // to get the screen-space extent at zoom=1
+    const corners = [
+        { x: minX, y: minY }, { x: maxX, y: minY },
+        { x: minX, y: maxY }, { x: maxX, y: maxY },
+    ];
+    let sMinX = Infinity, sMinY = Infinity, sMaxX = -Infinity, sMaxY = -Infinity;
+    for (const c of corners) {
+        const sx = baseMx.a * c.x + baseMx.c * c.y;
+        const sy = baseMx.b * c.x + baseMx.d * c.y;
+        if (sx < sMinX) sMinX = sx;
+        if (sy < sMinY) sMinY = sy;
+        if (sx > sMaxX) sMaxX = sx;
+        if (sy > sMaxY) sMaxY = sy;
+    }
+    const screenW = sMaxX - sMinX;
+    const screenH = sMaxY - sMinY;
+    if (screenW <= 0 || screenH <= 0) return;
+
+    const fitZoom = Math.min(vpW / screenW, vpH / screenH);
+    const clampedZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, fitZoom));
+    currentZoom = clampedZoom;
+
+    // Build matrix: translate content center to viewport center, at fit scale.
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    const vpCx = SIDEBAR_INSET + vpW / 2;
+    const vpCy = headerH + vpH / 2;
+
+    // baseMx without translation (linear isometric transform only)
+    const baseMxNoT = V.createSVGMatrix().translate(-baseMx.e, -baseMx.f).multiply(baseMx);
+
+    const newMx = V.createSVGMatrix()
+        .translate(vpCx, vpCy)
+        .scale(clampedZoom)
+        .multiply(baseMxNoT)
+        .translate(-centerX, -centerY);
+
+    paper.matrix(newMx);
+    window.scrollTo(0, 0);
+    syncZoomSlider();
+    scheduleMinimapUpdate();
+    refreshAllCallouts();
+});
+
 zoomControlEl.className = 'nr-zoom-control';
 zoomControlEl.appendChild(zoomOutBtn);
 zoomControlEl.appendChild(zoomSlider);
 zoomControlEl.appendChild(zoomInBtn);
 zoomControlEl.appendChild(zoomLabel);
+zoomControlEl.appendChild(fitBtn);
 
 syncZoomSlider = () => {
+    const mx = paper.matrix();
+    const actualScale = Math.sqrt(mx.a * mx.a + mx.b * mx.b);
+    const baseMx = transformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
+    const baseScale = Math.sqrt(baseMx.a * baseMx.a + baseMx.b * baseMx.b);
+    if (baseScale > 0) currentZoom = actualScale / baseScale;
     zoomSlider.value = String(Math.log(currentZoom));
     zoomLabel.textContent = Math.round(currentZoom * 100) + '%';
 };
@@ -967,10 +1086,6 @@ function styleClusterLinks(): void {
                 view.el.style.setProperty('--nr-cluster-color', color);
             }
         } else {
-            link.attr('line/stroke', '#333333');
-            link.attr('line/strokeWidth', 1);
-            link.attr('line/strokeDasharray', null);
-            link.attr('line/targetMarker', { type: 'path', d: 'M 3 -4 L -3 0 L 3 4 z', fill: 'context-stroke', stroke: 'context-stroke' });
             if (view) {
                 view.el.classList.remove('nr-cluster-link');
                 view.el.style.removeProperty('--nr-cluster-color');
@@ -1023,7 +1138,6 @@ function centerGridInViewport(gridCountX: number, gridCountY: number) {
     const mx = paper.matrix();
     const W = gridCountX * GRID_SIZE;
     const H = gridCountY * GRID_SIZE;
-    // Transform the four grid corners through the current paper matrix
     const corners = [
         { x: 0, y: 0 }, { x: W, y: 0 }, { x: 0, y: H }, { x: W, y: H },
     ].map(p => ({
@@ -1036,9 +1150,14 @@ function centerGridInViewport(gridCountX: number, gridCountY: number) {
     const maxY = Math.max(...corners.map(c => c.sy));
     const gridCenterX = (minX + maxX) / 2;
     const gridCenterY = (minY + maxY) / 2;
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
     const vpCenterX = SIDEBAR_INSET + (window.innerWidth - SIDEBAR_INSET) / 2;
-    const vpCenterY = window.innerHeight / 2;
-    window.scroll(Math.max(0, gridCenterX - vpCenterX), Math.max(0, gridCenterY - vpCenterY));
+    const vpCenterY = headerH + (window.innerHeight - headerH) / 2;
+    const dx = vpCenterX - gridCenterX;
+    const dy = vpCenterY - gridCenterY;
+    paper.matrix(V.createSVGMatrix().translate(dx, dy).multiply(mx));
+    refreshAllCallouts();
+
 }
 
 function applyNewDesign(name: string, gridCount: number) {
@@ -1061,8 +1180,8 @@ function applyNewDesign(name: string, gridCount: number) {
     gridVEl = drawGrid(paper, gridCount, GRID_SIZE);
 
     paper.setDimensions(
-        SIDEBAR_INSET + 2 * GRID_SIZE * gridCount * SCALE * ISOMETRIC_SCALE + CANVAS_H_PAD,
-        GRID_SIZE * gridCount * SCALE + CANVAS_V_PAD
+        SIDEBAR_INSET + 2 * GRID_SIZE * gridCount * SCALE * ISOMETRIC_SCALE + CANVAS_PAD,
+        GRID_SIZE * gridCount * SCALE + CANVAS_PAD
     );
 
     switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
@@ -1505,8 +1624,8 @@ function applyGridResize(newX: number, newY: number) {
     gridVEl = drawGrid(paper, newX, GRID_SIZE, '#e8e8e8', newY);
 
     paper.setDimensions(
-        SIDEBAR_INSET + 2 * GRID_SIZE * newX * SCALE * ISOMETRIC_SCALE + CANVAS_H_PAD,
-        GRID_SIZE * newY * SCALE + CANVAS_V_PAD
+        SIDEBAR_INSET + 2 * GRID_SIZE * newX * SCALE * ISOMETRIC_SCALE + CANVAS_PAD,
+        GRID_SIZE * newY * SCALE + CANVAS_PAD
     );
 
     switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
@@ -1643,16 +1762,100 @@ function setTreeHighlight(cell: IsometricShape | null) {
     palette.setTreeSelection(cell ? String(cell.id) : null);
 }
 
+function screenCoordsOfModelPoint(mx: DOMMatrix, px: number, py: number): { sx: number; sy: number } {
+    return { sx: mx.a * px + mx.c * py + mx.e, sy: mx.b * px + mx.d * py + mx.f };
+}
+
+function focusElement(el: dia.Element): void {
+    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+    const mx = paper.matrix();
+    const bbox = el.getBBox();
+    const c = screenCoordsOfModelPoint(mx, bbox.x + bbox.width / 2, bbox.y + bbox.height / 2);
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
+    const vpCx = SIDEBAR_INSET + (window.innerWidth - SIDEBAR_INSET) / 2;
+    const vpCy = headerH + (window.innerHeight - headerH) / 2;
+    const dx = vpCx - c.sx;
+    const dy = vpCy - c.sy;
+    paper.matrix(V.createSVGMatrix()
+        .translate(dx, dy)
+        .multiply(mx));
+    syncZoomSlider();
+    scheduleMinimapUpdate();
+}
+
+export function fitToContent(): void {
+    const elements = graph.getElements();
+    if (elements.length === 0) return;
+    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+    const mx = paper.matrix();
+    let minSx = Infinity, minSy = Infinity, maxSx = -Infinity, maxSy = -Infinity;
+    for (const el of elements) {
+        const bbox = el.getBBox();
+        const corners = [
+            { x: bbox.x, y: bbox.y },
+            { x: bbox.x + bbox.width, y: bbox.y },
+            { x: bbox.x, y: bbox.y + bbox.height },
+            { x: bbox.x + bbox.width, y: bbox.y + bbox.height },
+        ];
+        for (const p of corners) {
+            const s = screenCoordsOfModelPoint(mx, p.x, p.y);
+            if (s.sx < minSx) minSx = s.sx;
+            if (s.sy < minSy) minSy = s.sy;
+            if (s.sx > maxSx) maxSx = s.sx;
+            if (s.sy > maxSy) maxSy = s.sy;
+        }
+    }
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 0;
+    const vpW = window.innerWidth - SIDEBAR_INSET;
+    const vpH = window.innerHeight - headerH;
+    const contentW = maxSx - minSx;
+    const contentH = maxSy - minSy;
+    if (contentW <= 0 || contentH <= 0) return;
+    const pad = 1.3;
+    const scale = Math.min(vpW / (contentW * pad), vpH / (contentH * pad), 1);
+    const contentCx = (minSx + maxSx) / 2;
+    const contentCy = (minSy + maxSy) / 2;
+    const vpCx = SIDEBAR_INSET + vpW / 2;
+    const vpCy = headerH + vpH / 2;
+    paper.matrix(V.createSVGMatrix()
+        .translate(vpCx, vpCy)
+        .scale(scale)
+        .translate(-contentCx, -contentCy)
+        .multiply(mx));
+    syncZoomSlider();
+    scheduleMinimapUpdate();
+}
+
 const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape) => {
     paper.removeTools();
-    shape.addTools(paper, currentView, []);
-    if (shape.get('isFrame')) {
+    clearSelect();
+
+    if (shape.get('isArea') || shape.get('isGridLabel') || shape.get('isIcon')) {
+        shape.addTools(paper, currentView);
+        currentCell = shape;
+        currentFrame = null;
+        if (shape.get('isGridLabel')) {
+            panel.showLabel(shape);
+        } else if (shape.get('isIcon')) {
+            panel.showIcon(shape);
+        } else panel.showArea(shape);
+        setTreeHighlight(shape);
+        const view = paper.findViewByModel(shape);
+        if (view) requestAnimationFrame(() => applySelect(view));
+    } else if (shape.get('isFrame')) {
+        shape.addTools(paper, currentView);
         currentCell = null;
-        panel.hide();
+        currentFrame = shape as Frame;
+        panel.showZone(shape);
+        const view = paper.findViewByModel(shape);
+        if (view) requestAnimationFrame(() => applySelect(view));
     } else {
+        shape.addTools(paper, currentView, []);
         currentCell = shape;
         panel.show(shape);
         setTreeHighlight(shape);
+        const view = paper.findViewByModel(shape);
+        if (view) applySelect(view);
     }
     if (currentView === View.Isometric) {
         sortElements(graph);
@@ -1660,14 +1863,149 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
 }, (cellId: string) => {
     // Tree item clicked — select the element on the canvas
     const cell = graph.getCell(cellId);
-    if (!cell || !(cell instanceof IsometricShape) || cell.get('isFrame')) return;
+    if (!cell || !(cell instanceof IsometricShape)) return;
     clearConnectionHighlights();
+    clearSelect();
     paper.removeTools();
-    cell.addTools(paper, currentView, []);
-    currentCell = cell;
-    panel.show(cell);
-    setTreeHighlight(cell);
-    highlightConnections(cell);
+
+    if (cell.get('isFrame')) {
+        const frame = cell as Frame;
+        frame.addTools(paper, currentView);
+        currentCell = null;
+        currentFrame = frame;
+        panel.showZone(frame);
+        const cluster = getStretchClusterForZone(frame.id as string);
+        showZoneHud(frame, cluster ? cluster.totals : undefined);
+        palette.setTreeSelection(String(frame.id));
+        const view = paper.findViewByModel(frame);
+        if (view) requestAnimationFrame(() => applySelect(view));
+        hideLayoutBar();
+        focusElement(frame);
+    } else {
+        cell.addTools(paper, currentView, []);
+        currentCell = cell;
+        panel.show(cell);
+        setTreeHighlight(cell);
+        highlightConnections(cell);
+        hideLayoutBar();
+        focusElement(cell);
+    }
+});
+
+// Provide viewport center in model space so new components appear in view.
+palette.setViewportCenterCallback(() => {
+    const mx = paper.matrix();
+    const inv = V.createSVGMatrix().multiply(mx).inverse();
+    const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 40;
+    const cx = window.scrollX + SIDEBAR_INSET + (window.innerWidth - SIDEBAR_INSET) / 2;
+    const cy = window.scrollY + headerH + (window.innerHeight - headerH) / 2;
+    return { x: inv.a * cx + inv.c * cy + inv.e, y: inv.b * cx + inv.d * cy + inv.f };
+});
+
+// Drag-and-drop from component palette into the canvas
+let dragHighlightedZone: Frame | null = null;
+
+function findZoneAtPoint(modelX: number, modelY: number): Frame | null {
+    const frames = graph.getElements().filter(el => el.get('isFrame')) as Frame[];
+    // Prefer the smallest (most specific) zone
+    let best: Frame | null = null;
+    let bestArea = Infinity;
+    for (const f of frames) {
+        const { x, y } = f.position();
+        const { width: fw, height: fh } = f.size();
+        if (modelX >= x && modelX <= x + fw && modelY >= y && modelY <= y + fh) {
+            const area = fw * fh;
+            if (area < bestArea) { best = f; bestArea = area; }
+        }
+    }
+    return best;
+}
+
+function clientToModel(clientX: number, clientY: number): { x: number; y: number } {
+    const mx = paper.matrix();
+    const inv = V.createSVGMatrix().multiply(mx).inverse();
+    const px = clientX + window.scrollX;
+    const py = clientY + window.scrollY;
+    return { x: inv.a * px + inv.c * py + inv.e, y: inv.b * px + inv.d * py + inv.f };
+}
+
+function highlightDropZone(zone: Frame | null): void {
+    if (dragHighlightedZone === zone) return;
+    if (dragHighlightedZone) {
+        const view = paper.findViewByModel(dragHighlightedZone);
+        if (view) view.el.classList.remove('nr-drop-target');
+    }
+    dragHighlightedZone = zone;
+    if (zone) {
+        const view = paper.findViewByModel(zone);
+        if (view) view.el.classList.add('nr-drop-target');
+    }
+}
+
+const canvasDropTarget = document.getElementById('canvas')!;
+
+canvasDropTarget.addEventListener('dragover', (e: DragEvent) => {
+    if (!e.dataTransfer?.types.includes('application/x-nextrack-shape')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    const model = clientToModel(e.clientX, e.clientY);
+    highlightDropZone(findZoneAtPoint(model.x, model.y));
+});
+
+canvasDropTarget.addEventListener('dragleave', () => {
+    highlightDropZone(null);
+});
+
+document.addEventListener('dragend', () => { highlightDropZone(null); });
+
+canvasDropTarget.addEventListener('drop', (e: DragEvent) => {
+    const shapeId = e.dataTransfer?.getData('application/x-nextrack-shape');
+    if (!shapeId) return;
+    e.preventDefault();
+    highlightDropZone(null);
+
+    const def = ShapeRegistry[shapeId];
+    if (!def) return;
+
+    const { x: modelX, y: modelY } = clientToModel(e.clientX, e.clientY);
+    const dropZone = findZoneAtPoint(modelX, modelY);
+    const meta: NodeMeta = { name: '', shapeType: shapeId, serverId: '', notes: '' };
+
+    let placed: IsometricShape;
+    if (def.complexShape && def.layers?.length) {
+        const { ComplexComponent } = require('./shapes/complex-component');
+        const baseLayer = def.layers[0];
+        const haSize = def.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
+        const cc = new ComplexComponent();
+        cc.resize(haSize.width, haSize.height);
+        cc.set('isometricHeight', baseLayer.depth);
+        cc.set('defaultIsometricHeight', baseLayer.depth);
+        cc.set('defaultSize', haSize);
+        cc.set('layers', def.layers.map((l: any) => ({ ...l, style: { ...l.style } })));
+        cc.position(modelX - haSize.width / 2, modelY - haSize.height / 2);
+        cc.set(META_KEY, meta);
+        if (def.displayName) cc.attr('label/text', def.displayName);
+        applyRegistryDefaults(cc, def, paper);
+        cc.toggleView(currentView);
+        graph.addCell(cc);
+        placed = cc;
+    } else {
+        const factory = getPreviewFactory(shapeId, def.baseShape ?? 'cuboid');
+        const shape = factory();
+        applyRegistryDefaults(shape, def, paper);
+        const { width, height } = shape.size();
+        shape.position(modelX - width / 2, modelY - height / 2);
+        shape.set(META_KEY, meta);
+        if (def.baseShape) shape.set('currentBaseShape', def.baseShape);
+        shape.toggleView(currentView);
+        graph.addCell(shape);
+        placed = shape;
+    }
+
+    if (dropZone) dropZone.embed(placed);
+
+    if (currentView === View.Isometric) sortElements(graph);
+    palette.refresh();
 });
 
 // Let the palette know which zone is selected so new components get embedded.
@@ -1736,7 +2074,7 @@ function switchCanvas(id: string): void {
         viewToggleContainerEl.style.display = '';
         minimapEl.style.display = '';
         showResourceBar();
-        showLayoutBar();
+        hideLayoutBar();
         loadCanvasGraph(id, graph);
         applyHideConnections();
         switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
@@ -1925,6 +2263,8 @@ const areaSelect = new AreaSelect({
         } else {
             palette.setTreeSelection(null);
         }
+        if (cells.length >= 2) showLayoutBar();
+        else hideLayoutBar();
         hideZoneHud();
         if (cells.length === 0) {
             panel.hide();
@@ -1933,6 +2273,13 @@ const areaSelect = new AreaSelect({
         const zones = cells.filter(c => c.get('isFrame'));
         for (const zone of zones) {
             (zone as Frame).addTools(paper, currentView);
+        }
+        if (zones.length > 0) {
+            requestAnimationFrame(() => {
+                paper.el.querySelectorAll<SVGElement>('.joint-tools [joint-selector="handle"]').forEach(h => {
+                    h.style.opacity = '1';
+                });
+            });
         }
         if (zones.length >= 2 && zones.length === cells.length) {
             panel.showMultiZone(zones as dia.Element[]);
@@ -2021,18 +2368,84 @@ function updateZoneAssignment(element: IsometricShape): void {
     if (newZone) newZone.embed(element);
 }
 
+// ── Link port dots (green circles at connected ports) ────────────────────────
+
+const LINK_DOT_COLOR = '#C6F08F';
+const LINK_DOT_R = 3;
+let linkPortDots: SVGElement[] = [];
+
+function showLinkPortDots(linkView: dia.LinkView): void {
+    const ns = 'http://www.w3.org/2000/svg';
+    const link = linkView.model;
+    const sourcePoint = linkView.getEndAnchor('source');
+    const targetPoint = linkView.getEndAnchor('target');
+    const layer = paper.getLayerNode(dia.Paper.Layers.FRONT);
+
+    for (const pt of [sourcePoint, targetPoint]) {
+        if (!pt) continue;
+        const dot = document.createElementNS(ns, 'circle');
+        dot.setAttribute('cx', String(pt.x));
+        dot.setAttribute('cy', String(pt.y));
+        dot.setAttribute('r', String(LINK_DOT_R));
+        dot.setAttribute('fill', LINK_DOT_COLOR);
+        dot.setAttribute('stroke', '#6f6f6f');
+        dot.setAttribute('stroke-width', '0.5');
+        dot.setAttribute('pointer-events', 'none');
+        layer.appendChild(dot);
+        linkPortDots.push(dot);
+    }
+}
+
+function clearLinkPortDots(): void {
+    for (const dot of linkPortDots) {
+        dot.parentNode?.removeChild(dot);
+    }
+    linkPortDots = [];
+}
+
 // Show/Hide tools on cell pointer events
 
+paper.on('link:pointerdown', (linkView: dia.LinkView, evt: dia.Event) => {
+    const isShift = !!(evt.shiftKey || (evt as any).originalEvent?.shiftKey);
+    if (isShift) {
+        evt.stopPropagation();
+        const link = linkView.model as Link;
+        // If a single link was selected via normal click, promote to multi-select
+        if (currentCell instanceof Link && !areaSelect.isSelected(currentCell)) {
+            areaSelect.toggle(currentCell);
+        }
+        areaSelect.toggle(link);
+        currentCell = null;
+        currentFrame = null;
+        clearConnectionHighlights();
+        paper.removeTools();
+        panel.hide();
+        // Refresh port dots for all selected links
+        clearLinkPortDots();
+        for (const cell of areaSelect.selection) {
+            if (cell.isLink()) {
+                const lv = paper.findViewByModel(cell) as dia.LinkView | null;
+                if (lv) showLinkPortDots(lv);
+            }
+        }
+    }
+});
+
 paper.on('link:pointerup', (linkView: dia.LinkView) => {
+    const link = linkView.model as Link;
+    // Skip if shift-select already handled in pointerdown
+    if (areaSelect.isSelected(link)) return;
+
     areaSelect.clear();
     clearConnectionHighlights();
-    const link = linkView.model as Link;
+    clearLinkPortDots();
     paper.removeTools();
     link.addTools(paper);
     currentCell = link;
     currentFrame = null;
     panel.showLink(link);
     setTreeHighlight(null);
+    showLinkPortDots(linkView);
 });
 
 let dropTargetZone: Frame | null = null;
@@ -2066,20 +2479,23 @@ let isDragging = false;
 
 paper.on('element:pointerdown', () => { isDragging = false; });
 paper.on('element:pointermove', () => {
-    if (!isDragging) { isDragging = true; clearHover(); }
+    if (!isDragging) { isDragging = true; clearHover(); clearLinkPortDots(); }
     syncAllRings();
 });
 
 paper.on('element:mouseenter', (elementView: dia.ElementView) => {
     applyHover(elementView);
+    paper.el.querySelectorAll('.joint-tools').forEach(el => el.classList.add('nr-tools--hover'));
 });
 
 paper.on('element:mouseleave', () => {
     if (!isDragging) clearHover();
+    paper.el.querySelectorAll('.nr-tools--hover').forEach(el => el.classList.remove('nr-tools--hover'));
 });
 
 paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => {
     clearZoneDropHighlight();
+    clearLinkPortDots();
     isDragging = false;
 
     const resolved = resolveComponentBase(elementView.model);
@@ -2109,15 +2525,66 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
         const cluster = getStretchClusterForZone(model.id as string);
         showZoneHud(model, cluster ? cluster.totals : undefined);
         setTreeHighlight(null);
+        clearSelect();
+
+        const zoneView = paper.findViewByModel(model);
+        if (zoneView) requestAnimationFrame(() => applySelect(zoneView));
+        hideLayoutBar();
+        return;
+    }
+    if (model.get('isArea')) {
+        (model as IsometricShape).addTools(paper, currentView);
+        currentCell = model as IsometricShape;
+        currentFrame = null;
+        panel.showArea(model);
+        setTreeHighlight(null);
+        clearSelect();
+        const areaView = paper.findViewByModel(model);
+        if (areaView) requestAnimationFrame(() => applySelect(areaView));
+        hideLayoutBar();
+        hideZoneHud();
+        return;
+    }
+    if (model.get('isGridLabel')) {
+        (model as IsometricShape).addTools(paper, currentView);
+        currentCell = model as IsometricShape;
+        currentFrame = null;
+        panel.showLabel(model);
+        setTreeHighlight(null);
+        clearSelect();
+
+
+        const labelView = paper.findViewByModel(model);
+        if (labelView) requestAnimationFrame(() => applySelect(labelView));
+        hideLayoutBar();
+        hideZoneHud();
+        return;
+    }
+    if (model.get('isIcon')) {
+        (model as IsometricShape).addTools(paper, currentView);
+        currentCell = model as IsometricShape;
+        currentFrame = null;
+        panel.showIcon(model);
+        setTreeHighlight(null);
+        clearSelect();
+        const iconView = paper.findViewByModel(model);
+        if (iconView) requestAnimationFrame(() => applySelect(iconView));
+        hideLayoutBar();
+        hideZoneHud();
         return;
     }
     // Click on a complex component's internal layer → act on the base instead.
     const shape = resolveComponentBase(model) as IsometricShape;
     updateZoneAssignment(shape);
-    shape.addTools(paper, currentView, []);
+    const shapeMeta = shape.get(META_KEY) as Record<string, unknown> | undefined;
+    const shapeKey = (shapeMeta?.shapeType as string) || '';
+    const shapeDef = shapeKey ? ShapeRegistry[shapeKey] : undefined;
+    const sizeTools: ToolKeys[] = shapeDef?.dimYAdjustable ? ['size'] : [];
+    shape.addTools(paper, currentView, sizeTools);
     currentCell = shape;
     currentFrame = null;
     panel.show(shape);
+    hideLayoutBar();
     hideZoneHud();
     setTreeHighlight(shape);
     highlightConnections(shape);
@@ -2128,10 +2595,13 @@ paper.on('blank:pointerdown', (_evt: dia.Event) => {
     areaSelect.clear();
     clearHover();
     paper.removeTools();
+    clearLinkPortDots();
     currentCell = null;
     currentFrame = null;
     panel.hide();
+    hideLayoutBar();
     hideZoneHud();
+
     setTreeHighlight(null);
     clearConnectionHighlights();
 });
@@ -2160,7 +2630,16 @@ const CTX_ICON_FRONT       = carbonIconToString(BringToFront16        as CarbonI
 const CTX_ICON_BACK        = carbonIconToString(SendToBack16          as CarbonIcon);
 const CTX_ICON_DISCONNECT  = carbonIconToString(ConnectionSignalOff16 as CarbonIcon);
 const CTX_ICON_CONNECT     = carbonIconToString(ConnectionSignal16    as CarbonIcon);
+const CTX_ICON_UNPLUG      = carbonIconToString(Unplug16              as CarbonIcon);
+const CTX_ICON_VIEW        = carbonIconToString(View16                as CarbonIcon);
+const CTX_ICON_VIEW_OFF    = carbonIconToString(ViewOff16             as CarbonIcon);
 const CTX_ICON_ROTATE      = carbonIconToString(Rotate16              as CarbonIcon);
+const CTX_ICON_EDIT        = carbonIconToString(Edit16                as CarbonIcon);
+const CTX_ICON_UNLINK      = carbonIconToString(Unlink16              as CarbonIcon);
+const CTX_ICON_COPY_STYLE  = carbonIconToString(PaintBrush16          as CarbonIcon);
+const CTX_ICON_PASTE_STYLE = carbonIconToString(Paste16               as CarbonIcon);
+const CTX_ICON_SELECT      = carbonIconToString(SelectWindow16        as CarbonIcon);
+const CTX_ICON_SELECT_LINK = carbonIconToString(ConnectionSignal16    as CarbonIcon);
 
 interface CtxAction {
     label: string;
@@ -2219,6 +2698,68 @@ function showContextMenu(clientX: number, clientY: number, actions: CtxAction[])
     ctxMenuEl = menu;
 }
 
+function rotateShapeInGrid(cell: IsometricShape): void {
+    const meta = (cell.get(META_KEY) as Record<string, unknown>) ?? {};
+    const shapeKey = (meta.shapeType as string) || '';
+    const def = ShapeRegistry[shapeKey];
+    if (!def) return;
+    // Use the actual current base shape on the canvas, not the registry default
+    const currentBase = (cell.get('currentBaseShape') as string) || def.baseShape || 'cuboid';
+    const pairedBase = SD_ROTATE_PAIR[currentBase];
+    if (!pairedBase) return;
+
+    const { width, height } = cell.size();
+    const pos = cell.position();
+    const parentZone = cell.getParentCell();
+
+    graph.startBatch('rotate-shape');
+
+    const factory = getPreviewFactory(shapeKey, pairedBase);
+    const newShape = factory();
+    // Swap width↔height for the rotated extrusion axis
+    newShape.resize(height, width);
+    newShape.set('isometricHeight', cell.get('isometricHeight'));
+    newShape.set('defaultIsometricHeight', cell.get('defaultIsometricHeight'));
+    newShape.set('defaultSize', { width: height, height: width });
+    newShape.position(pos.x, pos.y);
+    newShape.set(META_KEY, meta);
+    newShape.set('currentBaseShape', pairedBase);
+    newShape.toggleView(currentView);
+    // Swap icon face based on current effective face
+    const currentFace = (cell.get('effectiveIconFace') as string) || def.iconFace || 'top';
+    let rotatedFace: string = currentFace;
+    if (currentFace === 'front') rotatedFace = 'side';
+    else if (currentFace === 'side') rotatedFace = 'front';
+    applyRegistryDefaults(newShape, {
+        ...def,
+        baseShape: pairedBase as any,
+        defaultSize: { width: height, height: width },
+        iconFace: rotatedFace as 'top' | 'front' | 'side',
+    }, paper);
+
+    const links = graph.getConnectedLinks(cell);
+    for (const link of links) {
+        const src = link.source() as { id?: string; port?: string };
+        const tgt = link.target() as { id?: string; port?: string };
+        if (src.id === (cell.id as string)) link.source({ ...src, id: newShape.id as string } as any);
+        if (tgt.id === (cell.id as string)) link.target({ ...tgt, id: newShape.id as string } as any);
+    }
+
+    cell.remove();
+    graph.addCell(newShape);
+    if (parentZone) (parentZone as Frame).embed(newShape);
+
+    paper.removeTools();
+    const newDef = ShapeRegistry[shapeKey];
+    const sizeTools: ToolKeys[] = newDef?.dimYAdjustable ? ['size'] : [];
+    newShape.addTools(paper, currentView, sizeTools);
+    currentCell = newShape;
+    panel.show(newShape);
+    setTreeHighlight(newShape);
+
+    graph.stopBatch('rotate-shape');
+}
+
 function switchShapeVariation(cell: IsometricShape): void {
     const meta = (cell.get(META_KEY) as Record<string, unknown>) ?? {};
     const shapeKey = (meta.shapeType as string) || '';
@@ -2234,9 +2775,24 @@ function switchShapeVariation(cell: IsometricShape): void {
 
     graph.startBatch('switch-variation');
 
-    const factory = getPreviewFactory(shapeKey, targetDef.baseShape ?? 'cuboid');
-    const newShape = factory();
-    applyRegistryDefaults(newShape, targetDef, paper);
+    let newShape: IsometricShape;
+    if (targetDef.complexShape && targetDef.layers?.length) {
+        const baseLayer = targetDef.layers[0];
+        const haSize2 = targetDef.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
+        const cc = new ComplexComponent();
+        cc.resize(haSize2.width, haSize2.height);
+        cc.set('isometricHeight', baseLayer.depth);
+        cc.set('defaultIsometricHeight', baseLayer.depth);
+        cc.set('defaultSize', haSize2);
+        cc.set('layers', targetDef.layers.map(l => ({ ...l, style: { ...l.style } })));
+        if (targetDef.displayName) cc.attr('label/text', targetDef.displayName);
+        if (targetDef.rotation) cc.set('shapeRotation', targetDef.rotation);
+        newShape = cc;
+    } else {
+        const factory = getPreviewFactory(shapeKey, targetDef.baseShape ?? 'cuboid');
+        newShape = factory();
+        applyRegistryDefaults(newShape, targetDef, paper);
+    }
     newShape.position(pos.x, pos.y);
     newShape.set(META_KEY, meta);
     newShape.set('shapeVariation', target);
@@ -2276,6 +2832,32 @@ function buildActionsForCurrentSelection(): CtxAction[] {
             { label: 'Duplicate',     icon: CTX_ICON_DUPLICATE, run: () => duplicateZone(frame) },
             { label: 'Delete',        icon: CTX_ICON_DELETE,    run: () => { frame.remove(); } },
         );
+    } else if (currentCell && currentCell.get('isArea')) {
+        const cell = currentCell as dia.Element;
+        actions.push(
+            { label: 'Rotate', icon: CTX_ICON_ROTATE, run: () => {
+                const { applyRotation } = require('./tools/rotate-tool');
+                const cur = (cell.get('labelRotation') as number) || 0;
+                applyRotation(cell, cur === 270 ? 0 : 270);
+            }},
+            { label: 'Move to Front', icon: CTX_ICON_FRONT,     run: () => cell.toFront() },
+            { label: 'Move to Back',  icon: CTX_ICON_BACK,      run: () => cell.toBack()  },
+            { label: 'Duplicate', icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
+            { label: 'Delete',    icon: CTX_ICON_DELETE,    run: deleteSelected },
+        );
+    } else if (currentCell && currentCell.get('isGridLabel')) {
+        const labelEl = currentCell as dia.Element;
+        actions.push(
+            { label: 'Rotate', icon: CTX_ICON_ROTATE, run: () => {
+                const cur = (labelEl.get('labelRotation') as number) || 0;
+                const next = cur === 270 ? 0 : 270;
+                const { applyRotation } = require('./tools/rotate-tool');
+                applyRotation(labelEl, next);
+                panel.showLabel(labelEl);
+            }},
+            { label: 'Duplicate', icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
+            { label: 'Delete',    icon: CTX_ICON_DELETE,    run: deleteSelected },
+        );
     } else if (currentCell && !(currentCell instanceof Link)) {
         const cell = currentCell;
         const isHidden = !!cell.get('hideConnections');
@@ -2289,19 +2871,86 @@ function buildActionsForCurrentSelection(): CtxAction[] {
                 { label: `Switch to ${targetLabel}`, icon: CTX_ICON_ROTATE, run: () => switchShapeVariation(cell) },
             );
         }
+        if (shapeDef && SD_ROTATE_PAIR[shapeDef.baseShape ?? '']) {
+            actions.push(
+                { label: 'Rotate', icon: CTX_ICON_ROTATE, run: () => rotateShapeInGrid(cell) },
+            );
+        }
+        if (shapeKey && !BUILT_IN_SHAPE_IDS.has(shapeKey)) {
+            actions.push(
+                { label: 'Edit Component', icon: CTX_ICON_EDIT, run: () => {
+                    document.dispatchEvent(new CustomEvent('nextrack:navigate-to-shape', { detail: { shapeId: shapeKey } }));
+                }},
+            );
+        }
         actions.push(
             { label: 'Duplicate',            icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
             { label: 'Duplicate with Links', icon: CTX_ICON_DUPLICATE, run: duplicateWithLinks },
             { label: isHidden ? 'Show Connections' : 'Hide Connections',
-              icon: isHidden ? CTX_ICON_CONNECT : CTX_ICON_DISCONNECT,
+              icon: isHidden ? CTX_ICON_VIEW : CTX_ICON_VIEW_OFF,
               run: () => toggleHideConnections(cell) },
-            { label: 'Delete Connections',   icon: CTX_ICON_DISCONNECT, run: () => {
+            { label: 'Delete Connections',   icon: CTX_ICON_UNPLUG, run: () => {
                 const links = graph.getConnectedLinks(cell);
                 for (const link of links) link.remove();
             }},
             { label: 'Delete',               icon: CTX_ICON_DELETE,     run: deleteSelected    },
         );
     } else if (currentCell instanceof Link) {
+        const link = currentCell;
+        const verts = link.vertices();
+        if (verts && verts.length > 0) {
+            actions.push(
+                { label: 'Delete Waypoints', icon: CTX_ICON_UNLINK, run: () => { link.vertices([]); } },
+            );
+        }
+        actions.push(
+            { label: 'Copy Style', icon: CTX_ICON_COPY_STYLE, run: () => {
+                copiedLinkStyle = {
+                    lineColor: link.get('lineColor'),
+                    lineThickness: link.get('lineThickness'),
+                    lineStyle: link.get('lineStyle'),
+                    lineOpacity: link.get('lineOpacity'),
+                    arrowType: link.get('arrowType'),
+                    sourceArrowType: link.get('sourceArrowType'),
+                    customRouter: link.get('customRouter'),
+                    customConnector: link.get('customConnector'),
+                    lineAttrs: link.attr('line') as Record<string, unknown>,
+                };
+            }},
+        );
+        if (copiedLinkStyle) {
+            actions.push(
+                { label: 'Paste Style', icon: CTX_ICON_PASTE_STYLE, run: () => {
+                    if (!copiedLinkStyle) return;
+                    const s = copiedLinkStyle;
+                    // Collect all links to paste to: current + any selected
+                    const targets: dia.Link[] = [link];
+                    for (const cell of areaSelect.selection) {
+                        if (cell.isLink() && cell !== link) targets.push(cell as dia.Link);
+                    }
+                    for (const target of targets) {
+                        for (const key of ['lineColor', 'lineThickness', 'lineStyle', 'lineOpacity', 'arrowType', 'sourceArrowType', 'customRouter', 'customConnector'] as const) {
+                            if (s[key] !== undefined) target.set(key as string, s[key]);
+                        }
+                        if (s.lineAttrs) target.attr({ line: s.lineAttrs as Record<string, unknown> });
+                        if (s.customRouter && s.customRouter !== 'default') {
+                            target.set('router', { name: s.customRouter });
+                        } else {
+                            target.unset('router');
+                        }
+                        if (s.customConnector && s.customConnector !== 'default') {
+                            const args: Record<string, unknown> = {};
+                            if (s.customConnector === 'rounded') args.radius = 8;
+                            if (s.customConnector === 'jumpover') { args.size = 6; args.jump = 'arc'; }
+                            target.set('connector', { name: s.customConnector, args });
+                        } else {
+                            target.unset('connector');
+                        }
+                    }
+                    panel.showLink(link);
+                }},
+            );
+        }
         actions.push(
             { label: 'Delete', icon: CTX_ICON_DELETE, run: deleteSelected },
         );
@@ -2324,7 +2973,23 @@ paper.on('element:contextmenu', (elementView: dia.ElementView, evt: dia.Event) =
         const ctxCluster = getStretchClusterForZone(model.id as string);
         showZoneHud(model, ctxCluster ? ctxCluster.totals : undefined);
         setTreeHighlight(null);
+        clearSelect();
+        const ctxZoneView = paper.findViewByModel(model);
+        if (ctxZoneView) requestAnimationFrame(() => applySelect(ctxZoneView));
+    } else if (model.get('isArea')) {
+        (model as IsometricShape).addTools(paper, currentView);
+        currentCell = model as IsometricShape;
+        currentFrame = null;
+        panel.showArea(model);
+    } else if (model.get('isGridLabel')) {
+        (model as IsometricShape).addTools(paper, currentView);
+        currentCell = model as IsometricShape;
+        currentFrame = null;
+        panel.showLabel(model);
+
+
     } else {
+
         const shape = resolveComponentBase(model) as IsometricShape;
         updateZoneAssignment(shape);
         shape.addTools(paper, currentView, []);
@@ -2350,7 +3015,35 @@ paper.on('link:contextmenu', (linkView: dia.LinkView, evt: dia.Event) => {
 
 paper.on('blank:contextmenu', (evt: dia.Event) => {
     evt.preventDefault();
-    hideContextMenu();
+    const actions: CtxAction[] = [];
+    const elements = graph.getElements();
+    const links = graph.getLinks();
+    if (elements.length > 0) {
+        actions.push({ label: 'Select All Components', icon: CTX_ICON_SELECT, run: () => {
+            areaSelect.clear();
+            for (const el of elements) {
+                if (!el.get('isFrame') && el.get('componentRole') !== 'child') {
+                    areaSelect.toggle(el);
+                }
+            }
+        }});
+    }
+    if (links.length > 0) {
+        actions.push({ label: 'Select All Links', icon: CTX_ICON_SELECT_LINK, run: () => {
+            areaSelect.clear();
+            for (const lnk of links) {
+                areaSelect.toggle(lnk);
+            }
+            clearLinkPortDots();
+            for (const lnk of links) {
+                const lv = paper.findViewByModel(lnk) as dia.LinkView | null;
+                if (lv) showLinkPortDots(lv);
+            }
+        }});
+    }
+    if (actions.length > 0) {
+        showContextMenu(evt.clientX, evt.clientY, actions);
+    }
 });
 
 // Dismiss on outside click, scroll, resize, Esc.
@@ -2376,9 +3069,10 @@ paper.el.style.cursor = 'grab';
 
 paper.on('blank:pointerdown', (evt) => {
     if (evt.shiftKey) return;
+    const mx = paper.matrix();
     evt.data = {
-        scrollX: window.scrollX, clientX: evt.clientX,
-        scrollY: window.scrollY, clientY: evt.clientY,
+        tx: mx.e, ty: mx.f,
+        clientX: evt.clientX, clientY: evt.clientY,
         panning: true,
     };
     paper.el.style.cursor = 'grabbing';
@@ -2386,7 +3080,13 @@ paper.on('blank:pointerdown', (evt) => {
 
 paper.on('blank:pointermove', (evt) => {
     if (!evt.data?.panning) return;
-    window.scroll(evt.data.scrollX + (evt.data.clientX - evt.clientX), evt.data.scrollY + (evt.data.clientY - evt.clientY));
+    const dx = evt.clientX - evt.data.clientX;
+    const dy = evt.clientY - evt.data.clientY;
+    const mx = paper.matrix();
+    paper.matrix(V.createSVGMatrix().translate(dx + evt.data.tx - mx.e, dy + evt.data.ty - mx.f).multiply(mx));
+    scheduleMinimapUpdate();
+    refreshAllCallouts();
+
 });
 
 paper.on('blank:pointerup', (evt) => {
@@ -2471,3 +3171,26 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             break;
     }
 });
+
+document.addEventListener('nextrack:focus-cluster', ((e: CustomEvent<{ clusterId: string }>) => {
+    const clusterId = e.detail.clusterId;
+    requestAnimationFrame(() => {
+        const cell = graph.getCell(clusterId);
+        if (!cell || !cell.get('isFrame')) return;
+
+        const frame = cell as Frame;
+        clearConnectionHighlights();
+        clearSelect();
+        paper.removeTools();
+        frame.addTools(paper, currentView);
+        currentCell = null;
+        currentFrame = frame;
+        panel.showZone(frame);
+        palette.setTreeSelection(String(frame.id));
+
+        const view = paper.findViewByModel(frame);
+        if (view) applySelect(view);
+
+        focusElement(frame);
+    });
+}) as EventListener);

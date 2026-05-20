@@ -25,18 +25,55 @@ export interface ShapeLayer {
     style: ShapeStyle;
     cornerRadius?: number;
     chamferSize?: number;
+    chamferStart?: number;
+    chamferBottomSize?: number;
+    chamferBottomStart?: number;
+    taper?: number;
+    twist?: number;
+    scaleTopX?: number;
+    scaleTopY?: number;
+    shedRoofDrop?: number;
+    shedRoofDirection?: string;
     /** Raw uploaded SVG string, stored for re-processing and serialization. */
     svgFootprint?: string;
     /** Normalized [0..1] vertices derived from svgFootprint. Scaled to layer size at render time. */
     svgNormVerts?: [number, number][];
     /** Original filename of the uploaded SVG, shown in the inspector. */
     svgFootprintName?: string;
+    /** When true, SVG footprint renders as a standing billboard instead of top-down extrusion. */
+    svgBillboard?: boolean;
+    /** Per-layer icon entries for multi-layer shapes. */
+    icons?: IconEntry[];
+}
+
+export interface IconEntry {
+    id: string;
+    face: 'top' | 'front' | 'side';
+    size: number;
+    offsetX: number;
+    offsetY: number;
+    skewX: number;
+    skewY: number;
+    bgEnabled: boolean;
+    bgColor: string;
+    bgShape: 'circle' | 'square' | 'octagon';
+    bgSize: number;
+    bgRadius: number;
+    bgChamfer: number;
+    monochrome: boolean;
+    adaptive: boolean;
+    isMain?: boolean;
+    href?: string;
+    iconOpacity?: number;
+    bgOpacity?: number;
 }
 
 export interface ShapeDefinition {
     defaultSize: { width: number; height: number };
     defaultIsometricHeight: number;
     baseShape?: BaseShape;
+    /** Whether Dimension Y is adjustable in the grid for tube/duct shapes */
+    dimYAdjustable?: boolean;
     /** Human-readable display name shown as the shape label */
     displayName?: string;
     /** Which face the icon is placed on in isometric view */
@@ -45,11 +82,15 @@ export interface ShapeDefinition {
     icon?: string;
     /** Icon size in grid units (default 1 = GRID_SIZE px) */
     iconSize?: number;
+    /** Whether the icon background is enabled */
+    iconBgEnabled?: boolean;
     /** Background color of the icon badge */
     iconBgColor?: string;
     /** Background shape of the icon badge */
     iconBgShape?: 'circle' | 'square' | 'octagon';
     iconBgRadius?: number;
+    /** Background size in grid units (default = same as iconSize) */
+    iconBgSize?: number;
     /** Octagon corner cut depth as fraction of size (0–0.45, default 0.18) */
     iconBgChamfer?: number;
     /**
@@ -63,6 +104,8 @@ export interface ShapeDefinition {
      * the icon. Defaults to 0 (main layer) for backwards compatibility.
      */
     iconLayerIndex?: number;
+    /** Multi-icon entries (new format, replaces individual icon* fields) */
+    icons?: IconEntry[];
     /** Infrastructure component type this shape represents */
     componentType?: string;
     /** Optional color overrides applied when a new instance is created */
@@ -79,6 +122,7 @@ export interface ShapeDefinition {
     rotation?: number;
     hasVariations?: boolean;
     turned90?: ShapeDefinition;
+    hitAreaSize?: { width: number; height: number };
     taper?: number;
     twist?: number;
     scaleTopX?: number;
@@ -219,6 +263,51 @@ export function loadRegistryFromStorage(): void {
     } catch (e) {
         console.error('[nextrack] Failed to load shape registry:', e);
     }
+}
+
+/** Migrate old single-icon properties to the new icons array format. */
+export function migrateIconDef(def: ShapeDefinition): IconEntry[] {
+    if (def.icons) return def.icons;
+    if (!def.icon) return [];
+    return [{
+        id: def.icon,
+        face: def.iconFace || 'top',
+        size: def.iconSize || 1.5,
+        offsetX: 0,
+        offsetY: 0,
+        skewX: 0,
+        skewY: 0,
+        bgEnabled: def.iconBgEnabled || false,
+        bgColor: def.iconBgColor || '#525252',
+        bgShape: def.iconBgShape || 'circle',
+        bgSize: def.iconBgSize || 1.5,
+        bgRadius: def.iconBgRadius || 6,
+        bgChamfer: def.iconBgChamfer || 0.18,
+        monochrome: false,
+        adaptive: false,
+        href: def.iconHref,
+    }];
+}
+
+export function defaultIconEntry(isMain = false): IconEntry {
+    return {
+        id: '',
+        face: 'top',
+        size: 1.5,
+        offsetX: 0,
+        offsetY: 0,
+        skewX: 0,
+        skewY: 0,
+        bgEnabled: false,
+        bgColor: '#525252',
+        bgShape: 'circle',
+        bgSize: 1.5,
+        bgRadius: 6,
+        bgChamfer: 0.18,
+        monochrome: false,
+        adaptive: false,
+        isMain,
+    };
 }
 
 // Populated with built-in defaults, then immediately hydrated from localStorage.

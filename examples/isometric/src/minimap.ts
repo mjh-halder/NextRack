@@ -5,6 +5,8 @@ import { transformationMatrix } from './utils';
 
 const MINIMAP_W = 180;
 const MINIMAP_H = 120;
+const GRID_SIZE = 20;
+const SIDEBAR_INSET = 276;
 
 let minimapPaper: dia.Paper;
 let viewportRect: SVGRectElement;
@@ -14,6 +16,21 @@ let currentView: View = View.Isometric;
 let currentGridCount = 20;
 let rafId = 0;
 
+// Base matrix (zoom=1) — stable reference for the minimap
+let baseMxCached: SVGMatrix;
+// Minimap matrix — maps model space to minimap pixels
+let mmMxCached: SVGMatrix | null = null;
+
+function pt(x: number, y: number, mx: DOMMatrix | SVGMatrix): { x: number; y: number } {
+    return { x: mx.a * x + mx.c * y + mx.e, y: mx.b * x + mx.d * y + mx.f };
+}
+
+let onNavigateCb: (() => void) | null = null;
+
+export function setMinimapNavigateCallback(cb: () => void): void {
+    onNavigateCb = cb;
+}
+
 export function initMinimap(
     container: HTMLDivElement,
     graph: dia.Graph,
@@ -21,7 +38,6 @@ export function initMinimap(
 ): void {
     containerEl = container;
     mainPaper = paper;
-
     container.classList.add('nr-minimap');
 
     const paperWrap = document.createElement('div');
@@ -56,161 +72,135 @@ export function initMinimap(
     let dragging = false;
     const navigate = (e: MouseEvent) => {
         const rect = overlaySvg.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
-        scrollToMinimapPoint(px, py);
+        panToMinimapPoint(e.clientX - rect.left, e.clientY - rect.top);
     };
-
-    overlaySvg.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        dragging = true;
-        navigate(e);
-    });
+    overlaySvg.addEventListener('mousedown', (e) => { e.preventDefault(); dragging = true; navigate(e); });
     window.addEventListener('mousemove', (e) => { if (dragging) navigate(e); });
     window.addEventListener('mouseup', () => { dragging = false; });
 
-    window.addEventListener('scroll', scheduleUpdate);
-    window.addEventListener('resize', scheduleUpdate);
-    graph.on('change add remove', scheduleUpdate);
+    window.addEventListener('scroll', scheduleViewportUpdate);
+    window.addEventListener('resize', scheduleViewportUpdate);
+    graph.on('change add remove', scheduleViewportUpdate);
 
-    scheduleUpdate();
+    rebuildMinimapMatrix();
+    scheduleViewportUpdate();
 }
 
 export function updateMinimapView(view: View, gridCount: number): void {
     currentView = view;
     currentGridCount = gridCount;
-    scheduleUpdate();
+    rebuildMinimapMatrix();
+    scheduleViewportUpdate();
 }
 
-export function scheduleMinimapUpdate(): void { scheduleUpdate(); }
+export function scheduleMinimapUpdate(): void {
+    rebuildMinimapMatrix();
+    scheduleViewportUpdate();
+}
 
-function scheduleUpdate(): void {
+function scheduleViewportUpdate(): void {
     if (rafId) return;
-    rafId = requestAnimationFrame(() => {
-        rafId = 0;
-        updateMinimap();
-    });
+    rafId = requestAnimationFrame(() => { rafId = 0; updateViewportRect(); });
 }
 
-function updateMinimap(): void {
-    if (!minimapPaper || !mainPaper) return;
+function rebuildMinimapMatrix(): void {
+    if (!minimapPaper) return;
 
-    // Base transformation WITHOUT sidebar inset — defines the grid-only world extent
-    const baseMx = transformationMatrix(currentView, 20, 0, currentGridCount);
+    baseMxCached = transformationMatrix(currentView, GRID_SIZE, SIDEBAR_INSET, currentGridCount);
+    const gw = currentGridCount * GRID_SIZE;
+    const gh = currentGridCount * GRID_SIZE;
 
-    // Compute the bounding box of the grid area in screen space (at zoom=1)
-    // The grid spans model coords (0,0) to (gridW, gridH)
-    const gridW = currentGridCount * 20; // GRID_SIZE = 20
-    const gridH = currentGridCount * 20;
-
-    const corners = [
-        applyMatrix(0, 0, baseMx),
-        applyMatrix(gridW, 0, baseMx),
-        applyMatrix(gridW, gridH, baseMx),
-        applyMatrix(0, gridH, baseMx),
-    ];
-
+    const corners = [pt(0, 0, baseMxCached), pt(gw, 0, baseMxCached), pt(gw, gh, baseMxCached), pt(0, gh, baseMxCached)];
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const c of corners) {
-        minX = Math.min(minX, c.x);
-        minY = Math.min(minY, c.y);
-        maxX = Math.max(maxX, c.x);
-        maxY = Math.max(maxY, c.y);
+        minX = Math.min(minX, c.x); minY = Math.min(minY, c.y);
+        maxX = Math.max(maxX, c.x); maxY = Math.max(maxY, c.y);
     }
 
-    const worldW = maxX - minX;
-    const worldH = maxY - minY;
-    const pad = 10;
+    const worldW = maxX - minX || 1;
+    const worldH = maxY - minY || 1;
+    const pad = 6;
+    const scale = Math.min((MINIMAP_W - pad * 2) / worldW, (MINIMAP_H - pad * 2) / worldH);
 
-    const scaleX = (MINIMAP_W - pad * 2) / worldW;
-    const scaleY = (MINIMAP_H - pad * 2) / worldH;
-    const scale = Math.min(scaleX, scaleY);
-
-    // Minimap matrix: shift world origin into minimap, then scale
-    const mmMx = V.createSVGMatrix()
+    mmMxCached = V.createSVGMatrix()
         .translate(
             pad + ((MINIMAP_W - pad * 2) - worldW * scale) / 2 - minX * scale,
             pad + ((MINIMAP_H - pad * 2) - worldH * scale) / 2 - minY * scale,
         )
         .scaleNonUniform(scale, scale)
-        .multiply(baseMx);
+        .multiply(baseMxCached);
 
-    minimapPaper.matrix(mmMx);
+    minimapPaper.matrix(mmMxCached);
+}
 
-    // Viewport rectangle: map screen corners through inverse main matrix → world,
-    // then through minimap matrix → minimap pixels
+function updateViewportRect(): void {
+    if (!mmMxCached || !mainPaper) return;
+
     const mainMx = mainPaper.matrix();
     const mainInv = V.createSVGMatrix().multiply(mainMx).inverse();
 
     const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 40;
-    const sidebarW = 276;
 
-    const vpScreenTL = { x: window.scrollX + sidebarW, y: window.scrollY + headerH };
-    const vpScreenBR = { x: window.scrollX + window.innerWidth, y: window.scrollY + window.innerHeight };
+    // The visible area in client (screen) coordinates
+    const vpL = window.scrollX + SIDEBAR_INSET;
+    const vpT = window.scrollY + headerH;
+    const vpR = window.scrollX + window.innerWidth;
+    const vpB = window.scrollY + window.innerHeight;
 
-    // Screen → model (world) coords
-    const worldTL = applyMatrix(vpScreenTL.x, vpScreenTL.y, mainInv);
-    const worldBR = applyMatrix(vpScreenBR.x, vpScreenBR.y, mainInv);
+    // Screen page coords → model space → minimap pixels
+    const mTL = pt(vpL, vpT, mainInv);
+    const mTR = pt(vpR, vpT, mainInv);
+    const mBL = pt(vpL, vpB, mainInv);
+    const mBR = pt(vpR, vpB, mainInv);
 
-    // Model → minimap pixels via baseMx then minimap scale/translate
-    const mmFullMx = minimapPaper.matrix();
-    const mmInvBase = V.createSVGMatrix().multiply(baseMx).inverse();
+    const pTL = pt(mTL.x, mTL.y, mmMxCached);
+    const pTR = pt(mTR.x, mTR.y, mmMxCached);
+    const pBL = pt(mBL.x, mBL.y, mmMxCached);
+    const pBR = pt(mBR.x, mBR.y, mmMxCached);
 
-    // world → base-transformed → minimap
-    // But we need: screen-model coords → minimap pixels
-    // screen-model (from mainInv) → paper-model: these are the same model space
-    // paper-model → minimap: apply mmFullMx
-    const mmTL = applyMatrix(worldTL.x, worldTL.y, mmFullMx);
-    const mmBR = applyMatrix(worldBR.x, worldBR.y, mmFullMx);
+    const xs = [pTL.x, pTR.x, pBL.x, pBR.x];
+    const ys = [pTL.y, pTR.y, pBL.y, pBR.y];
 
-    // For isometric view the viewport in model space is a parallelogram,
-    // but approximating with a rect is good enough for the minimap
-    const rx = Math.min(mmTL.x, mmBR.x);
-    const ry = Math.min(mmTL.y, mmBR.y);
-    const rr = Math.max(mmTL.x, mmBR.x);
-    const rb = Math.max(mmTL.y, mmBR.y);
-
-    viewportRect.setAttribute('x', String(rx));
-    viewportRect.setAttribute('y', String(ry));
-    viewportRect.setAttribute('width', String(Math.max(1, rr - rx)));
-    viewportRect.setAttribute('height', String(Math.max(1, rb - ry)));
+    viewportRect.setAttribute('x', String(Math.min(...xs)));
+    viewportRect.setAttribute('y', String(Math.min(...ys)));
+    viewportRect.setAttribute('width', String(Math.max(1, Math.max(...xs) - Math.min(...xs))));
+    viewportRect.setAttribute('height', String(Math.max(1, Math.max(...ys) - Math.min(...ys))));
 }
 
-function applyMatrix(x: number, y: number, mx: SVGMatrix | DOMMatrix): { x: number; y: number } {
-    return {
-        x: mx.a * x + mx.c * y + mx.e,
-        y: mx.b * x + mx.d * y + mx.f,
-    };
-}
+function panToMinimapPoint(px: number, py: number): void {
+    if (!mmMxCached) return;
 
-function scrollToMinimapPoint(px: number, py: number): void {
-    // Minimap pixel → model coords via inverse minimap matrix
-    const mmMx = minimapPaper.matrix();
-    const mmInv = V.createSVGMatrix().multiply(mmMx).inverse();
-    const modelPt = applyMatrix(px, py, mmInv);
+    // Minimap pixel → model coords
+    const mmInv = V.createSVGMatrix().multiply(mmMxCached).inverse();
+    const targetModel = pt(px, py, mmInv);
 
-    // Model → screen coords via main paper matrix
-    const mainMx = mainPaper.matrix();
-    const screenPt = applyMatrix(modelPt.x, modelPt.y, mainMx);
-
+    // We want this model point to be at the center of the visible viewport.
+    // Instead of scrolling (which is limited by page bounds), translate the paper matrix.
     const headerH = (document.getElementById('top-header') as HTMLElement | null)?.offsetHeight ?? 40;
-    const sidebarW = 276;
-    const vpW = window.innerWidth - sidebarW;
-    const vpH = window.innerHeight - headerH;
+    const vpCenterX = window.scrollX + SIDEBAR_INSET + (window.innerWidth - SIDEBAR_INSET) / 2;
+    const vpCenterY = window.scrollY + headerH + (window.innerHeight - headerH) / 2;
 
-    // Scroll so that screenPt is at the center of the usable viewport
-    window.scroll({
-        left: Math.max(0, screenPt.x - sidebarW - vpW / 2),
-        top: Math.max(0, screenPt.y - headerH - vpH / 2),
-        behavior: 'instant',
-    });
+    const mainMx = mainPaper.matrix();
+
+    // Where does the target model point currently appear on screen?
+    const currentScreen = pt(targetModel.x, targetModel.y, mainMx);
+
+    // Shift the paper matrix so the target appears at viewport center
+    const dx = vpCenterX - currentScreen.x;
+    const dy = vpCenterY - currentScreen.y;
+
+    mainPaper.matrix(
+        V.createSVGMatrix()
+            .translate(dx, dy)
+            .multiply(mainMx)
+    );
+
+    scheduleViewportUpdate();
+    onNavigateCb?.();
 }
 
 export function showMinimap(): void {
-    if (containerEl) {
-        containerEl.style.display = '';
-        scheduleUpdate();
-    }
+    if (containerEl) containerEl.style.display = '';
 }
 
 export function hideMinimap(): void {

@@ -145,6 +145,14 @@ export class SvgPolygonShape extends PolygonShape {
     }
 
     @Function()
+    svgBasePathIso(): string {
+        const all = this.allBasePaths();
+        const cb = this.chamferBottomSize;
+        if (cb > 0) return all.map(verts => this.chamferedFootprintPath(verts, cb)).join(' ');
+        return all.map(verts => this.footprintPath(verts, 0)).join(' ');
+    }
+
+    @Function()
     svgTopPath(): string {
         const all = this.allBasePaths();
         const c = this.chamferSize;
@@ -161,24 +169,35 @@ export class SvgPolygonShape extends PolygonShape {
     svgSideFacesPath(): string {
         const all = this.allBasePaths();
         const c = this.chamferSize;
+        const cb = this.chamferBottomSize;
+        const hasChamfer = c > 0 || cb > 0;
         const parts: string[] = [];
 
         for (let idx = 0; idx < all.length; idx++) {
             const verts = all[idx];
             const tVerts = idx === 0 ? this.topVertices() : this.baseToTop(verts);
 
-            if (c > 0 && idx === 0) {
+            if (hasChamfer && idx === 0) {
                 const n = verts.length;
+                const renderedCorners = new Set<number>();
                 for (let i = 0; i < n; i++) {
                     const j = (i + 1) % n;
                     const [x0, y0] = verts[i];
                     const [x1, y1] = verts[j];
-                    const normX = y1 - y0;
-                    const normY = -(x1 - x0);
-                    if (normX + normY <= 0) continue;
+                    if ((y1 - y0) + (-(x1 - x0)) <= 0) continue;
                     parts.push(this.chamferedSideFacePath(i, j));
-                    const facet = this.chamferedCornerFacetPath(j);
-                    if (facet) parts.push(facet);
+                    for (const vi of [i, j]) {
+                        if (renderedCorners.has(vi)) continue;
+                        renderedCorners.add(vi);
+                        if (c > 0) {
+                            const tf = this.chamferedCornerFacetPath(vi, 'top');
+                            if (tf) parts.push(tf);
+                        }
+                        if (cb > 0) {
+                            const bf = this.chamferedCornerFacetPath(vi, 'bottom');
+                            if (bf) parts.push(bf);
+                        }
+                    }
                 }
             } else {
                 const s = this.sideFacesForPath(verts, tVerts);

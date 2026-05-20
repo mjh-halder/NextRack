@@ -30,7 +30,7 @@ import { Pyramid } from './pyramid/pyramid';
 import { Octagon } from './octagon/octagon';
 import { KubernetesWorkerNode } from './kubernetes-worker-node/kubernetes-worker-node';
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape';
-import { ShapeLayer } from './shape-registry';
+import { ShapeLayer, IconEntry } from './shape-registry';
 import { CONNECT_TOOL_PRESET } from '../tools';
 import { GRID_SIZE } from '../theme';
 
@@ -87,6 +87,15 @@ function makeProxy(layer: ShapeLayer): IsometricShape {
     proxy.set('isometricHeight', layer.depth);
     if (layer.cornerRadius !== undefined) proxy.set('cornerRadius', layer.cornerRadius);
     if (layer.chamferSize !== undefined) proxy.set('chamferSize', layer.chamferSize);
+    if (layer.chamferStart) proxy.set('chamferStart', layer.chamferStart);
+    if (layer.chamferBottomSize) proxy.set('chamferBottomSize', layer.chamferBottomSize);
+    if (layer.chamferBottomStart) proxy.set('chamferBottomStart', layer.chamferBottomStart);
+    if (layer.taper) proxy.set('taper', layer.taper);
+    if (layer.twist) proxy.set('twist', layer.twist);
+    if (layer.scaleTopX !== undefined && layer.scaleTopX !== 1) proxy.set('scaleTopX', layer.scaleTopX);
+    if (layer.scaleTopY !== undefined && layer.scaleTopY !== 1) proxy.set('scaleTopY', layer.scaleTopY);
+    if (layer.shedRoofDrop) proxy.set('shedRoofDrop', layer.shedRoofDrop);
+    if (layer.shedRoofDirection) proxy.set('shedRoofDirection', layer.shedRoofDirection);
     return proxy;
 }
 
@@ -185,18 +194,17 @@ function twoDimFaceForLayer(layer: ShapeLayer): FaceDesc | null {
 //
 // Each layer's local origin (top-left of its own bbox) sits at an offset from
 // the ComplexComponent's origin. Matches the math in `createComplexLayers`.
-function layerOriginIso(layer: ShapeLayer, baseLayer: ShapeLayer): { x: number; y: number } {
-    // Component reference center = center of the base layer.
-    const cx = baseLayer.width  / 2;
-    const cy = baseLayer.height / 2;
+function layerOriginIso(layer: ShapeLayer, modelW: number, modelH: number): { x: number; y: number } {
+    const cx = modelW / 2;
+    const cy = modelH / 2;
     return {
         x: cx - layer.width  / 2 + layer.offsetX - layer.baseElevation,
         y: cy - layer.height / 2 + layer.offsetY - layer.baseElevation,
     };
 }
-function layerOrigin2D(layer: ShapeLayer, baseLayer: ShapeLayer): { x: number; y: number } {
-    const cx = baseLayer.width  / 2;
-    const cy = baseLayer.height / 2;
+function layerOrigin2D(layer: ShapeLayer, modelW: number, modelH: number): { x: number; y: number } {
+    const cx = modelW / 2;
+    const cy = modelH / 2;
     return {
         x: cx - layer.width  / 2 + layer.offsetX,
         y: cy - layer.height / 2 + layer.offsetY,
@@ -290,7 +298,7 @@ export class ComplexComponentView extends dia.ElementView {
         super.render();
         this.listenTo(
             this.model,
-            'change:layers change:size change:isometricHeight change:iconHref change:iconSize change:iconFace change:iconLayerIndex',
+            'change:layers change:size change:isometricHeight',
             this.rebuildLayers,
         );
         this.rebuildLayers();
@@ -306,18 +314,7 @@ export class ComplexComponentView extends dia.ElementView {
         if (isoG)  isoG.replaceChildren();
         if (layers.length === 0) return;
 
-        const baseLayer = layers[0];
-        const iconHref  = (this.model.get('iconHref') as string | undefined)  ?? '';
-        const iconSize  = Number(this.model.get('iconSize')) || 0;
-        const iconFace  = (this.model.get('iconFace') as 'top' | 'front' | 'side' | undefined) ?? 'top';
-        const iconLayerIdxRaw = Number(this.model.get('iconLayerIndex'));
-        // Clamp against the current layer count so a stale or out-of-range
-        // index (e.g. after a layer was removed) falls back to the main layer.
-        const iconLayerIdx = Number.isFinite(iconLayerIdxRaw)
-            && iconLayerIdxRaw >= 0
-            && iconLayerIdxRaw < layers.length
-                ? iconLayerIdxRaw
-                : 0;
+        const { width: modelW, height: modelH } = this.model.size();
 
         // ISO group: Layer 0 (main) painted FIRST (behind), additional layers stacked
         // on top in array order. Icon is appended LAST inside the chosen layer's
@@ -325,13 +322,11 @@ export class ComplexComponentView extends dia.ElementView {
         if (isoG) {
             for (let i = 0; i < layers.length; i++) {
                 const layer = layers[i];
-                const { x, y } = layerOriginIso(layer, baseLayer);
+                const { x, y } = layerOriginIso(layer, modelW, modelH);
                 const g = document.createElementNS(SVG_NS, 'g');
                 g.setAttribute('transform', `translate(${x} ${y})`);
                 for (const face of isoFacesForLayer(layer)) appendFace(g, face);
-                if (i === iconLayerIdx && iconHref && iconSize > 0) {
-                    appendIcon(g, iconHref, iconSize, iconFace, layer, /*isIso=*/true);
-                }
+                appendLayerIcons(g, layer, true);
                 isoG.appendChild(g);
             }
         }
@@ -342,13 +337,11 @@ export class ComplexComponentView extends dia.ElementView {
                 const layer = layers[i];
                 const face = twoDimFaceForLayer(layer);
                 if (!face) continue;
-                const { x, y } = layerOrigin2D(layer, baseLayer);
+                const { x, y } = layerOrigin2D(layer, modelW, modelH);
                 const g = document.createElementNS(SVG_NS, 'g');
                 g.setAttribute('transform', `translate(${x} ${y})`);
                 appendFace(g, face);
-                if (i === iconLayerIdx && iconHref && iconSize > 0) {
-                    appendIcon(g, iconHref, iconSize, 'top', layer, /*isIso=*/false);
-                }
+                appendLayerIcons(g, layer, false);
                 iso2d.appendChild(g);
             }
         }
@@ -372,9 +365,11 @@ function appendIcon(
     iconFace: 'top' | 'front' | 'side',
     layer: ShapeLayer,
     isIso: boolean,
+    themeInvert = false,
 ): void {
     const el = document.createElementNS(SVG_NS, 'image');
     el.setAttribute('href', href);
+    if (themeInvert) el.classList.add('nr-icon-theme-invert');
     el.setAttribute('width', String(iconSize));
     el.setAttribute('height', String(iconSize));
     el.setAttribute('preserveAspectRatio', 'xMidYMid meet');
@@ -401,6 +396,22 @@ function appendIcon(
         el.setAttribute('y', String((layer.height - iconSize) / 2 - lift));
     }
     group.appendChild(el);
+}
+
+function appendLayerIcons(g: SVGGElement, layer: ShapeLayer, isIso: boolean): void {
+    const icons = layer.icons;
+    if (!icons || icons.length === 0) return;
+    for (const ie of icons) {
+        if (!ie.href) continue;
+        const canvasPx = Math.max(ie.size, ie.bgSize) * GRID_SIZE;
+        const needsThemeInvert = !ie.bgEnabled && !(ie as any).iconColor;
+        if (isIso) {
+            appendIcon(g, ie.href, canvasPx, ie.face, layer, true, needsThemeInvert);
+        } else {
+            const show2D = icons.length === 1 || ie.isMain;
+            if (show2D) appendIcon(g, ie.href, canvasPx, 'top', layer, false, needsThemeInvert);
+        }
+    }
 }
 
 function appendFace(g: SVGGElement, face: FaceDesc): void {

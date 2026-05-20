@@ -1,0 +1,18 @@
+<g>
+    <rect @selector="body"
+        width="calc(w)"
+        height="calc(h)"
+        fill="transparent"
+        stroke="none"
+    />
+    <image @selector="iconImage" @group-selector="iso"
+        width="calc(w)"
+        height="calc(h)"
+        preserveAspectRatio="xMidYMid meet"
+    />
+    <image @selector="iconFlat" @group-selector="2d"
+        width="calc(w)"
+        height="calc(h)"
+        preserveAspectRatio="xMidYMid meet"
+    />
+</g>

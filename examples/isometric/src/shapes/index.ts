@@ -18,6 +18,10 @@ import { Tube } from './tube/tube'
 import { Pipe } from './pipe/pipe'
 import { Duct } from './duct/duct'
 import { Channel } from './channel/channel'
+import { Area } from './area/area'
+import { DoubleArrow } from './double-arrow/double-arrow'
+import { GridLabel } from './grid-label/grid-label'
+import { Icon } from './icon/icon'
 import { ComplexComponent, ComplexComponentView } from './complex-component'
 
 export const cellNamespace = {
@@ -31,6 +35,10 @@ export const cellNamespace = {
     User,
     Firewall,
     Frame,
+    Area,
+    DoubleArrow,
+    GridLabel,
+    Icon,
     KubernetesWorkerNode,
     Pyramid,
     Octagon,
@@ -58,6 +66,10 @@ export {
     User,
     Firewall,
     Frame,
+    Area,
+    DoubleArrow,
+    GridLabel,
+    Icon,
     KubernetesWorkerNode,
     Pyramid,
     Octagon,

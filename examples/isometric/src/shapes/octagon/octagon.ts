@@ -61,9 +61,15 @@ export class Octagon extends PolygonShape {
         ];
     }
 
-    /** 2D / hit-area footprint path (rounded when cornerRadius > 0). */
     @Function()
     baseOctagonPath(): string {
+        return this.footprintPath(this.baseVertices(), this.cornerRadius);
+    }
+
+    @Function()
+    baseOctagonPathIso(): string {
+        const cb = this.chamferBottomSize;
+        if (cb > 0) return this.chamferedFootprintPath(this.baseVertices(), cb);
         return this.footprintPath(this.baseVertices(), this.cornerRadius);
     }
 
@@ -74,16 +80,28 @@ export class Octagon extends PolygonShape {
         return this.footprintPath(tv, this.cornerRadius);
     }
 
-    @Function() rightFacePath(): string    { return this.chamferSize > 0 ? this.chamferedSideFacePath(2, 3) : this.straightFacePath(2, 3); }
-    @Function() frontRightFacePath(): string { return this.chamferSize > 0 ? this.chamferedSideFacePath(3, 4) : this.straightFacePath(3, 4); }
-    @Function() frontBottomFacePath(): string { return this.chamferSize > 0 ? this.chamferedSideFacePath(4, 5) : this.straightFacePath(4, 5); }
-    @Function() frontLeftFacePath(): string  { return this.chamferSize > 0 ? this.chamferedSideFacePath(5, 6) : this.straightFacePath(5, 6); }
+    private _hasChamfer(): boolean { return this.chamferSize > 0 || this.chamferBottomSize > 0; }
 
-    @Function() cornerV2Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(2) : this.cornerFacePath(2); }
-    @Function() cornerV3Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(3) : this.cornerFacePath(3); }
-    @Function() cornerV4Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(4) : this.cornerFacePath(4); }
-    @Function() cornerV5Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(5) : this.cornerFacePath(5); }
-    @Function() cornerV6Path(): string { return this.chamferSize > 0 ? this.chamferedCornerFacetPath(6) : this.cornerFacePath(6); }
+    @Function() rightFacePath(): string      { return this._hasChamfer() ? this.chamferedSideFacePath(2, 3) : this.straightFacePath(2, 3); }
+    @Function() frontRightFacePath(): string  { return this._hasChamfer() ? this.chamferedSideFacePath(3, 4) : this.straightFacePath(3, 4); }
+    @Function() frontBottomFacePath(): string { return this._hasChamfer() ? this.chamferedSideFacePath(4, 5) : this.straightFacePath(4, 5); }
+    @Function() frontLeftFacePath(): string   { return this._hasChamfer() ? this.chamferedSideFacePath(5, 6) : this.straightFacePath(5, 6); }
+
+    private _cornerPath(i: number): string {
+        if (!this._hasChamfer()) return this.cornerFacePath(i);
+        const c = this.chamferSize;
+        const cb = this.chamferBottomSize;
+        let d = '';
+        if (c > 0) { const f = this.chamferedCornerFacetPath(i, 'top'); if (f) d += f; }
+        if (cb > 0) { const f = this.chamferedCornerFacetPath(i, 'bottom'); if (f) d += (d ? ' ' : '') + f; }
+        return d || this.cornerFacePath(i);
+    }
+
+    @Function() cornerV2Path(): string { return this._cornerPath(2); }
+    @Function() cornerV3Path(): string { return this._cornerPath(3); }
+    @Function() cornerV4Path(): string { return this._cornerPath(4); }
+    @Function() cornerV5Path(): string { return this._cornerPath(5); }
+    @Function() cornerV6Path(): string { return this._cornerPath(6); }
 
     @Function() topXPosition(): number { return this.topX; }
     @Function() topYPosition(): number { return this.topY; }

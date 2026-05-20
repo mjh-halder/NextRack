@@ -20,15 +20,7 @@ export class Tube extends TubeShape {
     @Function()
     base2DPath(): string {
         const { width: w, height: h } = this.size();
-        const r = h / 2;
-        return [
-            `M ${r} 0`,
-            `L ${w - r} 0`,
-            `A ${r} ${r} 0 0 1 ${w - r} ${h}`,
-            `L ${r} ${h}`,
-            `A ${r} ${r} 0 0 1 ${r} 0`,
-            'Z',
-        ].join(' ');
+        return `M 0 0 L ${w} 0 L ${w} ${h} L 0 ${h} Z`;
     }
 
     @Function()

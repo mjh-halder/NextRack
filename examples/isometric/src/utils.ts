@@ -67,7 +67,7 @@ export const sortElements = (graph) => {
     // sort and re-anchor their z to the base's below so within-component paint
     // order is decided by DOM (= creation) order instead.
     const nodes: Node[] = elements
-        .filter(el => !el.get('isFrame') && el.get('componentRole') !== 'child')
+        .filter(el => !el.get('isFrame') && !el.get('isArea') && !el.get('isGridLabel') && el.get('componentRole') !== 'child')
         .map(el => ({
             el: el,
             behind: [],
@@ -165,19 +165,38 @@ export function applyShapeStyle(shape: dia.Element, style: ShapeStyle): void {
     // does NOT split '/' — literal key 'top/fill' would match no element.
     if (style.topColor) {
         shape.attr('top/fill', style.topColor);
+        // Tube/pipe: body mantle
+        shape.attr('body/fill', style.topColor);
+        // Duct/channel: outline mantle
+        shape.attr('outline/fill', style.topColor);
     }
     if (style.frontColor) {
         shape.attr('front/fill',    style.frontColor);
-        shape.attr('base/fill',     style.frontColor);
         shape.attr('cornerV3/fill', style.frontColor);
+        // Tube/pipe: front ellipse
+        shape.attr('frontEllipse/fill', style.frontColor);
+        // Duct/channel: front face
+        shape.attr('frontFace/fill', style.frontColor);
+        // Only color 'base' for cuboid-type shapes (tube/duct use it as transparent hit area)
+        const isTubeDuct = shape.attr('body/d') || shape.attr('outline/d');
+        if (!isTubeDuct) {
+            shape.attr('base/fill', style.frontColor);
+            shape.attr('baseIso/fill', style.frontColor);
+        }
     }
     if (style.sideColor) {
         shape.attr('side/fill',    style.sideColor);
         shape.attr('cornerV1/fill', style.sideColor);
         shape.attr('cornerV2/fill', style.sideColor);
+        // Tube/pipe: back arc
+        shape.attr('backArc/fill', style.sideColor);
     }
     if (style.strokeColor) {
-        for (const sel of ['top', 'front', 'side', 'base', 'cornerV1', 'cornerV2', 'cornerV3']) {
+        const isTubeDuct = shape.attr('body/d') || shape.attr('outline/d');
+        const sels = isTubeDuct
+            ? ['body', 'frontEllipse', 'backArc', 'outline', 'frontFace']
+            : ['top', 'front', 'side', 'base', 'baseIso', 'cornerV1', 'cornerV2', 'cornerV3'];
+        for (const sel of sels) {
             shape.attr(`${sel}/stroke`, style.strokeColor);
         }
     }
@@ -291,6 +310,7 @@ export function applyRegistryDefaults(
             };
         }
 
+        shape.set('effectiveIconFace', defaults.iconFace ?? 'top');
         shape.attr({
             topIcon:   topIconAttrs,
             topIcon2D: { href: defaults.iconHref, x: x2D, y: y2D, width: iconPx, height: iconPx },

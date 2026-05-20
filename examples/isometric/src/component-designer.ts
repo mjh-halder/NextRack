@@ -6,11 +6,13 @@ import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFact
 import { drawGrid, switchView, transformationMatrix, applyShapeStyle } from './utils';
 import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
 import { parseSvgFootprint } from './svg-footprint';
+import { Area } from './shapes/area/area';
+import { FrameCornerControl } from './tools';
 import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE } from './theme';
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
 const CD_GRID_COUNT = 10;
-import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, updateShapeDefinition, deleteShape, addShape, saveRegistryToStorage, ShapeLayer } from './shapes/shape-registry';
+import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, updateShapeDefinition, deleteShape, addShape, saveRegistryToStorage, ShapeLayer, IconEntry, migrateIconDef, defaultIconEntry } from './shapes/shape-registry';
 import { BaseShape } from './shapes/shape-definition';
 import { PRIMARY_COLORS } from './colors';
 import { carbonIconToString, CarbonIcon } from './icons';
@@ -19,7 +21,64 @@ import Copy16 from '@carbon/icons/es/copy/16.js';
 import ChevronUp16 from '@carbon/icons/es/chevron--up/16.js';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
-import { getIconById, addUploadedIcon, removeUploadedIcon, stripAwsBackground, IconCatalogEntry, ensureFullCatalog } from './icon-catalog';
+import SettingsEdit16 from '@carbon/icons/es/settings--edit/16.js';
+import Save16 from '@carbon/icons/es/save/16.js';
+import View16 from '@carbon/icons/es/view/16.js';
+import ViewOff16 from '@carbon/icons/es/view--off/16.js';
+import Eyedropper16 from '@carbon/icons/es/eyedropper/16.js';
+import Asleep16 from '@carbon/icons/es/asleep/16.js';
+import Light16 from '@carbon/icons/es/light/16.js';
+import Add16 from '@carbon/icons/es/add/16.js';
+import AddLarge16 from '@carbon/icons/es/add--large/16.js';
+import Subtract16 from '@carbon/icons/es/subtract/16.js';
+import Tuning16 from '@carbon/icons/es/tuning/16.js';
+import Draggable16 from '@carbon/icons/es/draggable/16.js';
+import CloseLarge16 from '@carbon/icons/es/close--large/16.js';
+import ArrowDown16 from '@carbon/icons/es/arrow--down/16.js';
+import ArrowRight16 from '@carbon/icons/es/arrow--right/16.js';
+import ArrowUp16 from '@carbon/icons/es/arrow--up/16.js';
+import ArrowLeft16 from '@carbon/icons/es/arrow--left/16.js';
+import SettingsView16 from '@carbon/icons/es/settings--view/16.js';
+import Minimize16CD from '@carbon/icons/es/minimize/16.js';
+import AlignBoxTopLeft16 from '@carbon/icons/es/align-box--top-left/16.js';
+import AlignBoxTopCenter16 from '@carbon/icons/es/align-box--top-center/16.js';
+import AlignBoxTopRight16 from '@carbon/icons/es/align-box--top-right/16.js';
+import AlignBoxMiddleLeft16 from '@carbon/icons/es/align-box--middle-left/16.js';
+import AlignBoxMiddleRight16 from '@carbon/icons/es/align-box--middle-right/16.js';
+import AlignBoxBottomLeft16 from '@carbon/icons/es/align-box--bottom-left/16.js';
+import AlignBoxBottomCenter16 from '@carbon/icons/es/align-box--bottom-center/16.js';
+import AlignBoxBottomRight16 from '@carbon/icons/es/align-box--bottom-right/16.js';
+import { getIconById, addUploadedIcon, removeUploadedIcon, IconCatalogEntry, ensureFullCatalog } from './icon-catalog';
+
+function addTooltip(wrapper: HTMLElement, text: string, position: 'append' | 'prepend' = 'append'): void {
+    const tipWrap = document.createElement('span');
+    tipWrap.className = 'nr-cd-tooltip-wrap';
+
+    const infoBtn = document.createElement('button');
+    infoBtn.type = 'button';
+    infoBtn.className = 'nr-cd-tooltip-trigger';
+    infoBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M8.5 11 8.5 6.5 6.5 6.5 6.5 7.5 7.5 7.5 7.5 11 6 11 6 12 10 12 10 11z"/><path d="M8,3.5c-0.4,0-0.8,0.3-0.8,0.8S7.6,5,8,5c0.4,0,0.8-0.3,0.8-0.8S8.4,3.5,8,3.5z"/><path d="M8,15c-3.9,0-7-3.1-7-7s3.1-7,7-7s7,3.1,7,7S11.9,15,8,15z M8,2C4.7,2,2,4.7,2,8s2.7,6,6,6s6-2.7,6-6S11.3,2,8,2z"/></svg>';
+
+    const tip = document.createElement('div');
+    tip.className = 'nr-cd-tooltip';
+    tip.textContent = text;
+
+    infoBtn.addEventListener('mouseenter', () => {
+        const rect = infoBtn.getBoundingClientRect();
+        tip.style.display = 'block';
+        tip.style.left = (rect.left + rect.width / 2 - 100) + 'px';
+        tip.style.top = (rect.top - tip.offsetHeight - 8) + 'px';
+    });
+    infoBtn.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+
+    tipWrap.appendChild(infoBtn);
+    tipWrap.appendChild(tip);
+    if (position === 'prepend') {
+        wrapper.insertBefore(tipWrap, wrapper.firstChild);
+    } else {
+        wrapper.appendChild(tipWrap);
+    }
+}
 
 function isVendorIcon(entry: IconCatalogEntry | undefined | null): boolean {
     return entry?.source === 'aws' || entry?.source === 'gcp' || entry?.source === 'azure';
@@ -44,10 +103,77 @@ const canvasWrapEl = document.getElementById('cd2-canvas-wrap')           as HTM
 // The set of icons offered in the picker is further filtered by the admin
 // configuration below — see buildIconContent().
 
+// ── Base shape defaults store ─────────────────────────────────────────────
+// Per-base-shape defaults, persisted to localStorage. Used when creating a
+// new component or clicking "Reset to default".
+interface BaseShapeDefaults {
+    width?: number;
+    height?: number;
+    isometricHeight?: number;
+    cornerRadius?: number;
+    chamferSize?: number;
+    chamferStart?: number;
+    chamferBottomSize?: number;
+    chamferBottomStart?: number;
+    taper?: number;
+    twist?: number;
+    scaleTopX?: number;
+    scaleTopY?: number;
+    shedRoofDrop?: number;
+    shedRoofDirection?: string;
+}
+
+const SHAPE_DEFAULTS_KEY = 'nextrack-base-shape-defaults-v1';
+
+function loadBaseShapeDefaults(): Record<string, BaseShapeDefaults> {
+    try {
+        const raw = localStorage.getItem(SHAPE_DEFAULTS_KEY);
+        return raw ? JSON.parse(raw) : {};
+    } catch { return {}; }
+}
+
+function saveBaseShapeDefault(baseShape: string, defaults: BaseShapeDefaults): void {
+    const all = loadBaseShapeDefaults();
+    all[baseShape] = defaults;
+    try { localStorage.setItem(SHAPE_DEFAULTS_KEY, JSON.stringify(all)); } catch { /* ignore */ }
+}
+
+function getBaseShapeDefault(baseShape: string): BaseShapeDefaults {
+    return loadBaseShapeDefaults()[baseShape] || {};
+}
+
+function applyBaseShapeDefaults(baseShape: string): void {
+    const defs = getBaseShapeDefault(baseShape);
+    if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        widthInput.value  = String(layer?.width  ?? 40);
+        heightInput.value = String(layer?.height ?? 40);
+        depthInput.value  = String(layer?.depth  ?? 20);
+    } else {
+        widthInput.value  = String((defs.width ?? 2) * GRID_SIZE);
+        heightInput.value = String((defs.height ?? 2) * GRID_SIZE);
+        depthInput.value  = String((defs.isometricHeight ?? 0.5) * GRID_SIZE);
+    }
+    selectedCornerRadius = defs.cornerRadius ?? 0;
+    selectedChamferSize  = defs.chamferSize ?? 0;
+    selectedChamferStart = defs.chamferStart ?? 0;
+    selectedChamferBottomSize  = defs.chamferBottomSize ?? 0;
+    selectedChamferBottomStart = defs.chamferBottomStart ?? 0;
+    selectedTaper        = defs.taper ?? 0;
+    selectedTwist        = defs.twist ?? 0;
+    selectedScaleTopX    = defs.scaleTopX ?? 1;
+    selectedScaleTopY    = defs.scaleTopY ?? 1;
+    selectedShedRoofDrop = defs.shedRoofDrop ?? 0;
+    selectedShedRoofDirection = defs.shedRoofDirection ?? 'front';
+    if (baseShape === 'tube' || baseShape === 'duct') {
+        selectedIconFace = 'side';
+    }
+}
+
 const SIDEBAR_INSET = 0;
 let currentShape: IsometricShape | null = null;
 let currentShape2D: IsometricShape | null = null;
-let currentShapeId: string = Object.keys(ShapeRegistry).find(id => !BUILT_IN_SHAPE_IDS.has(id)) || '';
+let currentShapeId = '';
 let currentZoom  = 1;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let gridVEl: any = null;
@@ -56,15 +182,21 @@ let gridVEl: any = null;
 let selectedBaseShape: BaseShape = (BASE_SHAPE_BY_ID[currentShapeId] || 'cuboid') as BaseShape;
 let selectedIcon: string | null = null;
 let selectedIconFace: 'top' | 'front' | 'side' = 'top';
-let selectedIconSize = 1; // grid units; 1 GU = GRID_SIZE px
+let selectedIconSize = 1.5; // grid units; 1.5 GU = 30px
+let selectedIconOffsetX = 0;
+let selectedIconOffsetY = 0;
+let selectedIconSkewX = 0;
+let selectedIconSkewY = 0;
 let selectedStyle = { topColor: '', sideColor: '', frontColor: '', strokeColor: '' };
 
 // Corner radius state (not persisted to registry; only applies to polygon shapes)
 let selectedCornerRadius = 0; // pixels
 
 // Chamfer state (not persisted to registry; only applies to cuboid shapes)
-let selectedChamferSize = 0; // pixels
-let selectedChamferStart = 0; // fraction 0–1
+let selectedChamferSize = 0;
+let selectedChamferStart = 0;
+let selectedChamferBottomSize = 0;
+let selectedChamferBottomStart = 0;
 
 // Rotation state (0 or 90; applies to all shapes except cuboid)
 let selectedRotation = 0;
@@ -75,17 +207,31 @@ let selectedTaper = 0;
 let selectedTwist = 0;
 let selectedScaleTopX = 1;
 let selectedScaleTopY = 1;
+let selectedShedRoofDrop = 0;
+let selectedShedRoofDirection = 'front';
 
 // SVG footprint state (complex shape mode only)
 let svgParseError = '';
 
 // Icon background state (not persisted to registry)
-let selectedIconBgEnabled = true;
+let dimensionYAdjustable = false;
+let resizeFromInput = false;
+let dimBehaviourRowEl: HTMLElement | null = null;
+let hudRotateItemEl: HTMLElement | null = null;
+
+let selectedIconBgSize = 1; // grid units; independent from icon size
+let selectedIconBgEnabled = false;
 let selectedIconMonochrome = false;
 let selectedIconBgColor = PRIMARY_COLORS[0].base; // Grey 70 by default
 let selectedIconBgShape: 'circle' | 'square' | 'octagon' = 'circle';
 let selectedIconBgRadius = 6;
 let selectedIconBgChamfer = 0.18;
+
+// New multi-icon system
+let iconEntries: import('./shapes/shape-registry').IconEntry[] = [];
+let editingIconIndex = -1;
+let iconsSectionBodyEl: HTMLElement | null = null;
+let renderIconsListFn: (() => void) | null = null;
 
 // Direct references to the swatch buttons so syncExtrasFromShape can update
 // them without relying on a DOM query that could match unrelated elements.
@@ -102,6 +248,9 @@ let layers: ShapeLayer[] = [];
 let selectedLayerIndex = 0;
 let layerShapes: IsometricShape[]   = [];  // ISO canvas shapes, one per layer
 let layerShapes2D: IsometricShape[] = [];  // 2D canvas shapes, one per layer
+let hitAreaShape: IsometricShape | null = null;
+let hitAreaShape2D: IsometricShape | null = null;
+let hitAreaVisible = false;
 
 // Extra slider DOM refs — assigned in build*Content functions
 let offsetXInput:        HTMLInputElement;
@@ -146,6 +295,9 @@ let iconSearchTerm = '';
 
 // Direct reference to the single color picker for sync without DOM queries.
 let colorPickerRef: HTMLInputElement | null = null;
+let syncIconBgColorDisplay: () => void = () => {};
+let syncFormFactorDropdown: () => void = () => {};
+let iconBgSettingsWrapEl: HTMLElement | null = null;
 
 /**
  * Pre-processes an SVG string so it renders fully white when used as a data URI.
@@ -218,8 +370,6 @@ paper2D.setDimensions(
     GRID_SIZE * CD_GRID_COUNT * SCALE + CD_MARGIN * 2
 );
 
-// Zoom disabled in the component designer preview.
-
 // ── Fixed view matrices ───────────────────────────────────────────────────────
 // ISO paper is always isometric; 2D paper is always in 2D mode.
 // The ViewToggle is hidden; dual-view replaces it.
@@ -231,9 +381,36 @@ paper2D.matrix(transformationMatrix(View.TwoDimensional, CD_MARGIN, 0, CD_GRID_C
 
 let shapeNameInput: HTMLInputElement;
 let componentTypeSelect: HTMLSelectElement;
+let headerSaveBtn: HTMLButtonElement | null = null;
+let inspectorDirty = false;
+let adminMode = false;
+let setDefaultBtn: HTMLButtonElement | null = null;
+
+function markDirty() {
+    if (!inspectorDirty) {
+        inspectorDirty = true;
+        if (headerSaveBtn) {
+            headerSaveBtn.disabled = false;
+            headerSaveBtn.classList.remove('nr-save-btn--disabled');
+            headerSaveBtn.classList.add('nr-save-btn--active');
+        }
+    }
+}
+
+function clearDirty() {
+    inspectorDirty = false;
+    if (headerSaveBtn) {
+        headerSaveBtn.disabled = true;
+        headerSaveBtn.classList.add('nr-save-btn--disabled');
+        headerSaveBtn.classList.remove('nr-save-btn--active');
+    }
+}
 let widthInput:   HTMLInputElement;
 let heightInput:  HTMLInputElement;
 let depthInput:   HTMLInputElement;
+let widthDisplayEl:  HTMLInputElement | null = null;
+let heightDisplayEl: HTMLInputElement | null = null;
+let depthDisplayEl:  HTMLInputElement | null = null;
 let widthValueEl:  HTMLElement;
 let heightValueEl: HTMLElement;
 let depthValueEl:  HTMLElement;
@@ -243,6 +420,8 @@ let modifiersSvgInfoEl: HTMLElement | null = null;
 let modifiersAccordionLi: HTMLLIElement | null = null;
 let chamferSizeInput:   HTMLInputElement;
 let chamferSizeValueEl: HTMLElement;
+let chamferBottomSizeInput: HTMLInputElement;
+let chamferBottomSizeValueEl: HTMLElement;
 let iconFaceRowEl:      HTMLElement;
 let taperInput: HTMLInputElement;
 let taperValueEl: HTMLElement;
@@ -252,6 +431,13 @@ let stxInput: HTMLInputElement;
 let stxValueEl: HTMLElement;
 let styInput: HTMLInputElement;
 let styValueEl: HTMLElement;
+let chamferStartInput: HTMLInputElement;
+let chamferStartVal: HTMLElement;
+let chamferBottomStartInput: HTMLInputElement;
+let chamferBottomStartVal: HTMLElement;
+let shedDropInput: HTMLInputElement;
+let shedDropValueEl: HTMLElement;
+let shedDirSwitcherEl: HTMLElement | null = null;
 
 const CDS_ICON_TRASH      = carbonIconToString(TrashCan16 as CarbonIcon);
 const CDS_ICON_COPY       = carbonIconToString(Copy16 as CarbonIcon);
@@ -259,7 +445,7 @@ const CDS_ICON_CHEVRON_UP   = carbonIconToString(ChevronUp16 as CarbonIcon);
 const CDS_ICON_CHEVRON_DOWN = carbonIconToString(ChevronDown16 as CarbonIcon);
 const CDS_ICON_OVERFLOW     = carbonIconToString(OverflowMenuVertical16 as CarbonIcon);
 
-const CDS_ACCORDION_ARROW = `<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" class="cds--accordion__arrow"><path d="M11 8L6 13 5.3 12.3 9.6 8 5.3 3.7 6 3z"></path></svg>`;
+const CDS_ACCORDION_ARROW = carbonIconToString(ChevronDown16 as CarbonIcon).replace('<svg', '<svg class="cds--accordion__arrow"');
 
 function buildAccordionItem(
     title: string,
@@ -282,6 +468,9 @@ function buildAccordionItem(
     btn.addEventListener('click', () => {
         const expanded = li.classList.toggle('cds--accordion__item--active');
         btn.setAttribute('aria-expanded', String(expanded));
+        if (expanded) {
+            requestAnimationFrame(() => btn.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+        }
     });
 
     li.appendChild(btn);
@@ -316,65 +505,285 @@ function buildSliderField(
     assignInput: (el: HTMLInputElement) => void,
     assignValue: (el: HTMLElement) => void,
     onChange: () => void,
-    container: HTMLElement
+    container: HTMLElement,
+    unit?: string
 ) {
-    const sliderRow = document.createElement('div');
-    sliderRow.className = 'nr-sd-slider-row';
+    const isDimension = id.startsWith('sd-width') || id.startsWith('sd-height') || id.startsWith('sd-depth')
+        || id.startsWith('sd-offset') || id.startsWith('sd-base-elevation')
+        || id === 'sd-icon-size' || id === 'sd-icon-bg-size';
+    const showUnit = unit || (isDimension ? 'px' : '');
+    const toDisplay = (v: number) => Number.isInteger(v) ? v : parseFloat(v.toFixed(2));
+    const fromDisplay = (d: number) => d;
 
-    const labelRow = document.createElement('div');
-    labelRow.className = 'nr-sd-slider-label-row';
+    const row = document.createElement('div');
+    row.className = 'nr-sd-number-row';
 
     const lbl = document.createElement('label');
-    lbl.className = 'cds--label';
+    lbl.className = 'nr-sd-number-label';
     lbl.setAttribute('for', id);
     lbl.textContent = label;
+    row.appendChild(lbl);
 
+    const stepper = document.createElement('div');
+    stepper.className = 'nr-ad__number-stepper';
+
+    const input = document.createElement('input');
+    input.type = 'number';
+    input.id = id;
+    input.className = 'nr-ad__number-input';
+    input.min = String(min);
+    input.max = String(max);
+    input.step = String(step);
+    assignInput(input);
+
+    // Display element shows px value + unit
+    const displayEl = document.createElement('input');
+    displayEl.type = 'text';
+    displayEl.className = 'nr-sd-number-display';
+    displayEl.value = `${toDisplay(parseFloat(input.value))}${showUnit}`;
+
+    // Hidden value element for compatibility
     const valueEl = document.createElement('span');
-    valueEl.className = 'nr-sd-slider-value';
+    valueEl.style.display = 'none';
     valueEl.id = `${id}-value`;
     assignValue(valueEl);
+    row.appendChild(valueEl);
 
-    labelRow.appendChild(lbl);
-    labelRow.appendChild(valueEl);
+    const defaultVal = parseFloat(input.value);
+    const syncDisplay = () => { displayEl.value = `${toDisplay(parseFloat(input.value))}${showUnit}`; };
 
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.id = id;
-    slider.className = 'nr-sd-slider';
-    slider.min = String(min);
-    slider.max = String(max);
-    slider.step = String(step);
-    assignInput(slider);
-    setSliderFill(slider); // set initial fill after value is assigned
-    slider.addEventListener('input', () => {
-        setSliderFill(slider);
-        // In complex shape mode the dimension sliders work in pixels, not grid units.
-        if (isComplexShape) {
-            valueEl.textContent = `${Math.round(parseFloat(slider.value))} px`;
-        } else {
-            valueEl.textContent = `${parseFloat(slider.value).toFixed(1)} GU`;
-        }
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'nr-stepper-reset';
+    resetBtn.textContent = '\u00d7';
+    resetBtn.title = `Reset to ${toDisplay(defaultVal)}${showUnit}`;
+    resetBtn.style.display = 'none';
+
+    const syncReset = () => {
+        const cur = parseFloat(input.value);
+        resetBtn.style.display = (Math.abs(cur - defaultVal) < 0.001) ? 'none' : '';
+    };
+
+    resetBtn.addEventListener('click', () => {
+        input.value = String(defaultVal);
+        syncDisplay();
+        syncReset();
         onChange();
     });
 
-    sliderRow.appendChild(labelRow);
-    sliderRow.appendChild(slider);
-    container.appendChild(sliderRow);
+    const decBtn = document.createElement('button');
+    decBtn.type = 'button';
+    decBtn.className = 'nr-ad__number-btn';
+    decBtn.textContent = '\u2212';
+
+    const incBtn = document.createElement('button');
+    incBtn.type = 'button';
+    incBtn.className = 'nr-ad__number-btn';
+    incBtn.textContent = '+';
+
+    const liveMin  = () => parseFloat(input.min)  || min;
+    const liveMax  = () => parseFloat(input.max)  || max;
+    const liveStep = () => parseFloat(input.step) || step;
+
+    const update = () => {
+        const v = parseFloat(input.value);
+        const clamped = Math.max(liveMin(), Math.min(liveMax(), isNaN(v) ? liveMin() : v));
+        input.value = String(clamped);
+        syncDisplay();
+        syncReset();
+        onChange();
+        markDirty();
+    };
+
+    decBtn.addEventListener('click', () => { input.value = String(Math.max(liveMin(), parseFloat(input.value) - liveStep())); update(); });
+    incBtn.addEventListener('click', () => { input.value = String(Math.min(liveMax(), parseFloat(input.value) + liveStep())); update(); });
+
+    displayEl.addEventListener('change', () => {
+        const raw = parseFloat(displayEl.value);
+        if (!isNaN(raw)) {
+            const internal = fromDisplay(raw);
+            input.value = String(Math.max(min, Math.min(max, internal)));
+            update();
+        } else {
+            syncDisplay();
+        }
+    });
+
+    // Drag-to-scrub: mousedown + drag left/right changes value
+    let scrubStartX = 0;
+    let scrubStartVal = 0;
+    let scrubbing = false;
+
+    displayEl.addEventListener('mousedown', (e: MouseEvent) => {
+        if (document.activeElement === displayEl) return; // already editing text
+        e.preventDefault();
+        scrubbing = true;
+        scrubStartX = e.clientX;
+        scrubStartVal = parseFloat(input.value);
+        document.body.style.cursor = 'ew-resize';
+        displayEl.style.cursor = 'ew-resize';
+
+        const onMove = (ev: MouseEvent) => {
+            const dx = ev.clientX - scrubStartX;
+            const s = liveStep();
+            const delta = Math.round(dx / 3) * s;
+            const newVal = Math.max(liveMin(), Math.min(liveMax(), scrubStartVal + delta));
+            input.value = String(newVal);
+            syncDisplay();
+            syncReset();
+            onChange();
+        };
+
+        const onUp = () => {
+            scrubbing = false;
+            document.body.style.cursor = '';
+            displayEl.style.cursor = '';
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+
+    stepper.appendChild(displayEl);
+    stepper.appendChild(resetBtn);
+    stepper.appendChild(decBtn);
+    stepper.appendChild(incBtn);
+    row.appendChild(stepper);
+    container.appendChild(row);
+}
+
+function currentDimensionsPx(): { wPx: number; hPx: number; dPx: number } {
+    const swapped = ROTATED_FORMS.has(selectedBaseShape);
+    if (currentShape) {
+        const { width, height } = currentShape.size();
+        return { wPx: swapped ? height : width, hPx: swapped ? width : height, dPx: (currentShape.get('isometricHeight') ?? 0) };
+    }
+    const reg = ShapeRegistry[currentShapeId];
+    const rawW = reg?.defaultSize?.width ?? GRID_SIZE * 2;
+    const rawH = reg?.defaultSize?.height ?? GRID_SIZE * 2;
+    return {
+        wPx: swapped ? rawH : rawW,
+        hPx: swapped ? rawW : rawH,
+        dPx: reg?.defaultIsometricHeight ?? GRID_SIZE * 0.5,
+    };
 }
 
 function buildDimensionsContent(container: HTMLElement) {
-    buildSliderField('Width',  'sd-width',  0.5, 8, 0.5,
-        (el) => { widthInput  = el; el.value = '2'; },
-        (el) => { widthValueEl  = el; el.textContent = '2.0 GU'; },
+    const { wPx, hPx, dPx } = currentDimensionsPx();
+    const isTube = TUBE_FAMILY.has(selectedBaseShape);
+
+    buildSliderField(isTube ? 'Length' : 'Dimension X',  'sd-width',  1, 160, 1,
+        (el) => { widthInput  = el; el.value = String(wPx); },
+        (el) => { widthValueEl  = el; },
         onFieldChange, container);
-    buildSliderField('Height', 'sd-height', 0.5, 8, 0.5,
-        (el) => { heightInput = el; el.value = '2'; },
-        (el) => { heightValueEl = el; el.textContent = '2.0 GU'; },
-        onFieldChange, container);
-    buildSliderField('Depth',  'sd-depth',  0,   8, 0.5,
-        (el) => { depthInput  = el; el.value = '2'; },
-        (el) => { depthValueEl  = el; el.textContent = '2.0 GU'; },
-        onFieldChange, container);
+
+    if (isTube) {
+        buildSliderField('Diameter', 'sd-height', 1, 160, 1,
+            (el) => { heightInput = el; el.value = String(dPx); },
+            (el) => { heightValueEl = el; },
+            onFieldChange, container);
+        depthInput = document.createElement('input');
+        depthInput.type = 'hidden';
+        depthInput.value = String(dPx);
+        container.appendChild(depthInput);
+        depthValueEl = null;
+        depthDisplayEl = null;
+    } else {
+        buildSliderField('Dimension Y', 'sd-height', 1, 160, 1,
+            (el) => { heightInput = el; el.value = String(hPx); },
+            (el) => { heightValueEl = el; },
+            onFieldChange, container);
+        buildSliderField('Dimension Z',  'sd-depth',  0, 160, 1,
+            (el) => { depthInput  = el; el.value = String(dPx); },
+            (el) => { depthValueEl  = el; },
+            onFieldChange, container);
+    }
+
+    // Capture visible display inputs for external sync
+    const rows = container.querySelectorAll<HTMLElement>('.nr-sd-number-row');
+    widthDisplayEl  = rows[0]?.querySelector('.nr-sd-number-display') ?? null;
+    heightDisplayEl = rows[1]?.querySelector('.nr-sd-number-display') ?? null;
+    if (!isTube) depthDisplayEl = rows[2]?.querySelector('.nr-sd-number-display') ?? null;
+
+    // Dimension Behaviour switcher (only for duct/pipe)
+    const showBehaviour = selectedBaseShape === 'duct' || selectedBaseShape === 'pipe'
+        || selectedBaseShape === 'tube' || selectedBaseShape === 'channel';
+    const behaviourRow = document.createElement('div');
+    behaviourRow.className = 'nr-sd-face-row';
+    behaviourRow.style.display = showBehaviour ? '' : 'none';
+    dimBehaviourRowEl = behaviourRow;
+
+    const behaviourLbl = document.createElement('label');
+    behaviourLbl.className = 'nr-sd-row-label';
+    behaviourLbl.textContent = 'Behaviour';
+
+    const behaviourSwitcher = document.createElement('div');
+    behaviourSwitcher.className = 'nr-seg-control nr-seg-control--fixed';
+
+    for (const opt of ['Static', 'Adjustable'] as const) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const isActive = opt === 'Adjustable' ? dimensionYAdjustable : !dimensionYAdjustable;
+        btn.className = 'nr-seg-btn' + (isActive ? ' nr-seg-btn--selected' : '');
+        btn.textContent = opt;
+        btn.addEventListener('click', () => {
+            dimensionYAdjustable = opt === 'Adjustable';
+            behaviourSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
+                b.classList.toggle('nr-seg-btn--selected', b === btn)
+            );
+            updateResizeTools();
+            markDirty();
+        });
+        behaviourSwitcher.appendChild(btn);
+    }
+
+    behaviourRow.appendChild(behaviourLbl);
+    behaviourRow.appendChild(behaviourSwitcher);
+    container.appendChild(behaviourRow);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'nr-sd-reset-btn';
+    resetBtn.title = 'Reset to default';
+    resetBtn.innerHTML = 'Reset to default';
+    resetBtn.addEventListener('click', () => {
+        const defs = getBaseShapeDefault(selectedBaseShape);
+        widthInput.value = String(defs.width ?? 2);
+        heightInput.value = String(defs.height ?? 2);
+        depthInput.value = String(defs.isometricHeight ?? 2);
+        onFieldChange();
+    });
+    container.appendChild(resetBtn);
+
+    setDefaultBtn = document.createElement('button');
+    setDefaultBtn.type = 'button';
+    setDefaultBtn.className = 'nr-sd-reset-btn nr-sd-set-default-btn';
+    const shapeLabel = BASE_SHAPE_LABELS[selectedBaseShape] || selectedBaseShape;
+    setDefaultBtn.textContent = `Set as default for ${shapeLabel}`;
+    setDefaultBtn.title = `Save current dimensions as default for ${shapeLabel}`;
+    setDefaultBtn.style.display = adminMode ? '' : 'none';
+    setDefaultBtn.addEventListener('click', () => {
+        saveBaseShapeDefault(selectedBaseShape, {
+            width: parseFloat(widthInput.value) || 2,
+            height: parseFloat(heightInput.value) || 2,
+            isometricHeight: parseFloat(depthInput.value) || 2,
+            cornerRadius: selectedCornerRadius || undefined,
+            chamferSize: selectedChamferSize || undefined,
+            chamferStart: selectedChamferStart || undefined,
+            chamferBottomSize: selectedChamferBottomSize || undefined,
+            chamferBottomStart: selectedChamferBottomStart || undefined,
+            taper: selectedTaper || undefined,
+            twist: selectedTwist || undefined,
+            scaleTopX: selectedScaleTopX !== 1 ? selectedScaleTopX : undefined,
+            scaleTopY: selectedScaleTopY !== 1 ? selectedScaleTopY : undefined,
+            shedRoofDrop: selectedShedRoofDrop || undefined,
+            shedRoofDirection: selectedShedRoofDirection !== 'front' ? selectedShedRoofDirection : undefined,
+        });
+        showToast(`Default saved for "${selectedBaseShape}"`);
+    });
+    container.appendChild(setDefaultBtn);
 }
 
 function buildModifiersContent(container: HTMLElement) {
@@ -387,74 +796,216 @@ function buildModifiersContent(container: HTMLElement) {
     modifiersSvgInfoEl = svgInfo;
     container.appendChild(svgInfo);
 
+    const cornerRadiusRow = document.createElement('div');
+    cornerRadiusRow.dataset.modifier = 'cornerRadius';
     buildSliderField('Corner Radius', 'sd-corner-radius', 0, 30, 1,
         (el) => { cornerRadiusInput = el; el.value = String(selectedCornerRadius); },
-        (el) => { cornerRadiusValueEl = el; el.textContent = `${selectedCornerRadius} px`; },
+        (el) => { cornerRadiusValueEl = el; },
         () => {
             selectedCornerRadius = parseInt(cornerRadiusInput.value, 10);
-            cornerRadiusValueEl.textContent = `${selectedCornerRadius} px`;
             applyCornerRadiusToCurrentShape();
         },
-        container);
+        cornerRadiusRow, 'px');
+    container.appendChild(cornerRadiusRow);
 
-    buildSliderField('Chamfer', 'sd-chamfer', 0, 30, 1,
+    const chamferRow = document.createElement('div');
+    chamferRow.dataset.modifier = 'chamfer';
+    buildSliderField('Top Chamfer', 'sd-chamfer', 0, 30, 1,
         (el) => { chamferSizeInput = el; el.value = String(selectedChamferSize); },
-        (el) => { chamferSizeValueEl = el; el.textContent = `${selectedChamferSize} px`; },
+        (el) => { chamferSizeValueEl = el; },
         () => {
             selectedChamferSize = parseInt(chamferSizeInput.value, 10);
-            chamferSizeValueEl.textContent = `${selectedChamferSize} px`;
             applyChamferSizeToCurrentShape();
         },
-        container);
+        chamferRow, 'px');
+    container.appendChild(chamferRow);
 
-    let chamferStartInput: HTMLInputElement, chamferStartVal: HTMLElement;
-    buildSliderField('Chamfer Height', 'sd-chamfer-start', 0, 1, 0.05,
+    const chamferHeightRow = document.createElement('div');
+    chamferHeightRow.dataset.modifier = 'chamferHeight';
+    // chamferStartInput, chamferStartVal — module-level
+    buildSliderField('Top Chamfer %', 'sd-chamfer-start', 0, 1, 0.05,
         (el) => { chamferStartInput = el; el.value = String(selectedChamferStart); },
-        (el) => { chamferStartVal = el; el.textContent = `${Math.round(selectedChamferStart * 100)}%`; },
+        (el) => { chamferStartVal = el; },
         () => {
             selectedChamferStart = parseFloat(chamferStartInput.value);
-            chamferStartVal.textContent = `${Math.round(selectedChamferStart * 100)}%`;
             applyChamferStartToCurrentShape();
         },
-        container);
+        chamferHeightRow, '%');
+    container.appendChild(chamferHeightRow);
 
-    buildSliderField('Taper', 'sd-taper', 0, 0.95, 0.05,
+    const chamferBottomRow = document.createElement('div');
+    chamferBottomRow.dataset.modifier = 'chamferBottom';
+    buildSliderField('Bottom Chamfer', 'sd-chamfer-bottom', 0, 30, 1,
+        (el) => { chamferBottomSizeInput = el; el.value = String(selectedChamferBottomSize); },
+        (el) => { chamferBottomSizeValueEl = el; },
+        () => {
+            selectedChamferBottomSize = parseInt(chamferBottomSizeInput.value, 10);
+            applyChamferBottomSizeToCurrentShape();
+        },
+        chamferBottomRow, 'px');
+    container.appendChild(chamferBottomRow);
+
+    const chamferBottomHeightRow = document.createElement('div');
+    chamferBottomHeightRow.dataset.modifier = 'chamferBottomHeight';
+    // chamferBottomStartInput, chamferBottomStartVal — module-level
+    buildSliderField('Bottom Chamfer %', 'sd-chamfer-bottom-start', 0, 1, 0.05,
+        (el) => { chamferBottomStartInput = el; el.value = String(selectedChamferBottomStart); },
+        (el) => { chamferBottomStartVal = el; },
+        () => {
+            selectedChamferBottomStart = parseFloat(chamferBottomStartInput.value);
+            applyChamferBottomStartToCurrentShape();
+        },
+        chamferBottomHeightRow, '%');
+    container.appendChild(chamferBottomHeightRow);
+
+    const taperRow = document.createElement('div');
+    taperRow.dataset.modifier = 'taper';
+    buildSliderField('Taper', 'sd-taper', -0.95, 0.95, 0.05,
         (el) => { taperInput = el; el.value = String(selectedTaper); },
-        (el) => { taperValueEl = el; el.textContent = selectedTaper.toFixed(2); },
-        () => { selectedTaper = parseFloat(taperInput.value); taperValueEl.textContent = selectedTaper.toFixed(2); apply3DModifiers(); },
-        container);
+        (el) => { taperValueEl = el; },
+        () => { selectedTaper = parseFloat(taperInput.value); apply3DModifiers(); },
+        taperRow);
+    container.appendChild(taperRow);
 
+    const twistRow = document.createElement('div');
+    twistRow.dataset.modifier = 'twist';
     buildSliderField('Twist', 'sd-twist', -180, 180, 5,
         (el) => { twistInput = el; el.value = String(selectedTwist); },
-        (el) => { twistValueEl = el; el.textContent = `${selectedTwist}°`; },
-        () => { selectedTwist = parseFloat(twistInput.value); twistValueEl.textContent = `${selectedTwist}°`; apply3DModifiers(); },
-        container);
+        (el) => { twistValueEl = el; },
+        () => { selectedTwist = parseFloat(twistInput.value); apply3DModifiers(); },
+        twistRow, '°');
+    container.appendChild(twistRow);
 
+    const stxRow = document.createElement('div');
+    stxRow.dataset.modifier = 'scaleTopX';
     buildSliderField('Scale Top X', 'sd-scale-top-x', 0.1, 2, 0.05,
         (el) => { stxInput = el; el.value = String(selectedScaleTopX); },
-        (el) => { stxValueEl = el; el.textContent = selectedScaleTopX.toFixed(2); },
-        () => { selectedScaleTopX = parseFloat(stxInput.value); stxValueEl.textContent = selectedScaleTopX.toFixed(2); apply3DModifiers(); },
-        container);
+        (el) => { stxValueEl = el; },
+        () => { selectedScaleTopX = parseFloat(stxInput.value); apply3DModifiers(); },
+        stxRow);
+    container.appendChild(stxRow);
 
+    const styRow = document.createElement('div');
+    styRow.dataset.modifier = 'scaleTopY';
     buildSliderField('Scale Top Y', 'sd-scale-top-y', 0.1, 2, 0.05,
         (el) => { styInput = el; el.value = String(selectedScaleTopY); },
-        (el) => { styValueEl = el; el.textContent = selectedScaleTopY.toFixed(2); },
-        () => { selectedScaleTopY = parseFloat(styInput.value); styValueEl.textContent = selectedScaleTopY.toFixed(2); apply3DModifiers(); },
-        container);
+        (el) => { styValueEl = el; },
+        () => { selectedScaleTopY = parseFloat(styInput.value); apply3DModifiers(); },
+        styRow);
+    container.appendChild(styRow);
+
+    // Shed Roof
+    // shedDropInput, shedDropValueEl — module-level
+    const shedDropRow = document.createElement('div');
+    shedDropRow.dataset.modifier = 'shedRoof';
+    buildSliderField('Shed Roof', 'sd-shed-drop', 0, 30, 1,
+        (el) => { shedDropInput = el; el.value = String(selectedShedRoofDrop); },
+        (el) => { shedDropValueEl = el; },
+        () => { selectedShedRoofDrop = parseInt(shedDropInput.value, 10); applyShedRoofToCurrentShape(); },
+        shedDropRow, 'px');
+    container.appendChild(shedDropRow);
+
+    const shedDirRow = document.createElement('div');
+    shedDirRow.dataset.modifier = 'shedRoofDir';
+    shedDirRow.className = 'nr-sd-face-row';
+    shedDirRow.style.padding = '4px 0';
+    const shedDirLabel = document.createElement('span');
+    shedDirLabel.className = 'nr-sd-row-label';
+    shedDirLabel.textContent = 'Roof Direction';
+    shedDirRow.appendChild(shedDirLabel);
+    const shedDirSwitcher = document.createElement('div');
+    shedDirSwitcherEl = shedDirSwitcher;
+    shedDirSwitcher.className = 'nr-seg-control nr-seg-control--fixed';
+    shedDirSwitcher.style.flex = '0 0 160px';
+    const shedDirDefs: Array<{ label: string; val: string; icon: CarbonIcon }> = [
+        { label: 'Front', val: 'front', icon: ArrowDown16 as CarbonIcon },
+        { label: 'Right', val: 'right', icon: ArrowRight16 as CarbonIcon },
+        { label: 'Back',  val: 'back',  icon: ArrowUp16 as CarbonIcon },
+        { label: 'Left',  val: 'left',  icon: ArrowLeft16 as CarbonIcon },
+    ];
+    for (const dir of shedDirDefs) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        const val = dir.val;
+        btn.className = 'nr-seg-btn' + (val === selectedShedRoofDirection ? ' nr-seg-btn--selected' : '');
+        btn.title = dir.label;
+        btn.innerHTML = carbonIconToString(dir.icon);
+        btn.addEventListener('click', () => {
+            selectedShedRoofDirection = val;
+            shedDirSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
+                b.classList.toggle('nr-seg-btn--selected', b === btn));
+            applyShedRoofToCurrentShape();
+            markDirty();
+        });
+        shedDirSwitcher.appendChild(btn);
+    }
+    shedDirRow.appendChild(shedDirSwitcher);
+    container.appendChild(shedDirRow);
+
+    const modResetBtn = document.createElement('button');
+    modResetBtn.type = 'button';
+    modResetBtn.className = 'nr-sd-reset-btn';
+    modResetBtn.title = 'Reset to default';
+    modResetBtn.innerHTML = 'Reset to default';
+    modResetBtn.addEventListener('click', () => {
+        const defs = getBaseShapeDefault(selectedBaseShape);
+        cornerRadiusInput.value = String(defs.cornerRadius ?? 0); selectedCornerRadius = defs.cornerRadius ?? 0; applyCornerRadiusToCurrentShape();
+        chamferSizeInput.value = String(defs.chamferSize ?? 0); selectedChamferSize = defs.chamferSize ?? 0; applyChamferSizeToCurrentShape();
+        chamferStartInput.value = String(defs.chamferStart ?? 0); selectedChamferStart = defs.chamferStart ?? 0; applyChamferStartToCurrentShape();
+        chamferBottomSizeInput.value = String(defs.chamferBottomSize ?? 0); selectedChamferBottomSize = defs.chamferBottomSize ?? 0; applyChamferBottomSizeToCurrentShape();
+        chamferBottomStartInput.value = String(defs.chamferBottomStart ?? 0); selectedChamferBottomStart = defs.chamferBottomStart ?? 0; applyChamferBottomStartToCurrentShape();
+        taperInput.value = String(defs.taper ?? 0); selectedTaper = defs.taper ?? 0;
+        twistInput.value = String(defs.twist ?? 0); selectedTwist = defs.twist ?? 0;
+        stxInput.value = String(defs.scaleTopX ?? 1); selectedScaleTopX = defs.scaleTopX ?? 1;
+        styInput.value = String(defs.scaleTopY ?? 1); selectedScaleTopY = defs.scaleTopY ?? 1;
+        shedDropInput.value = String(defs.shedRoofDrop ?? 0); selectedShedRoofDrop = defs.shedRoofDrop ?? 0; applyShedRoofToCurrentShape();
+        selectedShedRoofDirection = defs.shedRoofDirection ?? 'front';
+        shedDirSwitcher.querySelectorAll('.nr-seg-btn').forEach((b, i) => b.classList.toggle('nr-seg-btn--selected', ['front','right','back','left'][i] === selectedShedRoofDirection));
+        apply3DModifiers();
+        buildInspectorPanel();
+    });
+    container.appendChild(modResetBtn);
+
+    // Shape opacity — removed from component designer, available in system designer inspector
+    /*
+    let shapeOpacityInput: HTMLInputElement;
+    const opacityRow = document.createElement('div');
+    opacityRow.dataset.modifier = 'shapeOpacity';
+    buildSliderField('Opacity', 'sd-shape-opacity', 0, 100, 5,
+        (el) => { shapeOpacityInput = el; el.value = '100'; },
+        () => {},
+        () => {
+            const v = parseInt(shapeOpacityInput.value, 10) / 100;
+            const faces = ['front', 'side', 'top', 'base', 'baseIso', 'cornerV1', 'cornerV2', 'cornerV3'];
+            const apply = (s: any) => { if (!s) return; for (const f of faces) s.attr(`${f}/fillOpacity`, v); };
+            apply(currentShape);
+            apply(currentShape2D);
+            if (isComplexShape) {
+                apply(layerShapes[selectedLayerIndex]);
+                apply(layerShapes2D[selectedLayerIndex]);
+            }
+        },
+        opacityRow, '%');
+    container.appendChild(opacityRow);
+    */
 }
 
 function buildPositionContent(container: HTMLElement) {
-    buildSliderField('Offset X', 'sd-offset-x', -8, 8, 0.5,
-        (el) => { offsetXInput = el; el.value = '0'; },
-        (el) => { offsetXValueEl = el; el.textContent = '0.0 GU'; },
+    const layer = isComplexShape ? layers[selectedLayerIndex] : null;
+    const ox = layer?.offsetX ?? 0;
+    const oy = layer?.offsetY ?? 0;
+    const elev = layer?.baseElevation ?? 0;
+    buildSliderField('Offset X', 'sd-offset-x', -160, 160, 1,
+        (el) => { offsetXInput = el; el.value = String(ox); },
+        (el) => { offsetXValueEl = el; el.textContent = `${Math.round(ox)} px`; },
         onOffsetChange, container);
-    buildSliderField('Offset Y', 'sd-offset-y', -8, 8, 0.5,
-        (el) => { offsetYInput = el; el.value = '0'; },
-        (el) => { offsetYValueEl = el; el.textContent = '0.0 GU'; },
+    buildSliderField('Offset Y', 'sd-offset-y', -160, 160, 1,
+        (el) => { offsetYInput = el; el.value = String(oy); },
+        (el) => { offsetYValueEl = el; el.textContent = `${Math.round(oy)} px`; },
         onOffsetChange, container);
-    buildSliderField('Elevation', 'sd-base-elevation', 0, 16, 0.5,
-        (el) => { baseElevationInput = el; el.value = '0'; },
-        (el) => { baseElevationValueEl = el; el.textContent = '0.0 GU'; },
+    buildSliderField('Elevation', 'sd-base-elevation', 0, 320, 1,
+        (el) => { baseElevationInput = el; el.value = String(elev); },
+        (el) => { baseElevationValueEl = el; el.textContent = `${Math.round(elev)} px`; },
         onOffsetChange, container);
 }
 
@@ -491,120 +1042,173 @@ function buildRotationContent(container: HTMLElement) {
 
 // Compact 2D preview thumbnails for the form-factor picker.
 // Match the "selectable tile" interaction used by the icon background colour picker
-// (same nr-sd-swatch-* classes). All preview outlines use currentColor so they
-// adapt to light/dark mode.
+const CLIP_SHAPE_ICONS: Record<string, string> = {
+    square: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><rect x="3" y="3" width="10" height="10"/></svg>',
+    circle: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14"><circle cx="8" cy="8" r="6"/></svg>',
+    octagon: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" width="14" height="14" stroke-linejoin="miter"><polygon points="6,2 10,2 14,6 14,10 10,14 6,14 2,10 2,6"/></svg>',
+};
+
 const FORM_FACTOR_PREVIEWS_SVG: Record<string, string> = {
     cuboid:    `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>`,
-    cylinder:  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="2.5"/><path d="M5 6v12a7 2.5 0 0 0 14 0V6"/></svg>`,
+    cylinder:  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>`,
     pyramid:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="12,4 20,20 4,20"/></svg>`,
     octagon:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,4 16,4 20,8 20,16 16,20 8,20 4,16 4,8"/></svg>`,
     tube:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><ellipse cx="18" cy="12" rx="3" ry="6"/><line x1="6" y1="6" x2="18" y2="6"/><line x1="6" y1="18" x2="18" y2="18"/><ellipse cx="6" cy="12" rx="3" ry="6"/></svg>`,
-    pipe:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="18" rx="6" ry="3"/><line x1="6" y1="6" x2="6" y2="18"/><line x1="18" y1="6" x2="18" y2="18"/><ellipse cx="12" cy="6" rx="6" ry="3"/></svg>`,
-    duct:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,5 16,5 19,8 19,16 16,19 8,19 5,16 5,8"/><line x1="8" y1="5" x2="20" y2="5"/><line x1="5" y1="8" x2="17" y2="8"/><polygon points="20,5 23,8 23,16 20,19 20,5" opacity="0.5"/></svg>`,
-    channel:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="5,8 5,16 8,19 16,19 19,16 19,8 16,5 8,5"/><line x1="5" y1="8" x2="5" y2="20"/><line x1="8" y1="5" x2="8" y2="17"/><polygon points="5,20 8,23 16,23 19,20 5,20" opacity="0.5"/></svg>`,
+    duct:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="9,4 15,4 19,8 19,16 15,20 9,20 5,16 5,8"/><line x1="9" y1="4" x2="12" y2="4" stroke-dasharray="2 2" opacity="0.4"/></svg>`,
+    pipe:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="6" rx="6" ry="3"/><line x1="6" y1="6" x2="6" y2="18"/><line x1="18" y1="6" x2="18" y2="18"/><ellipse cx="12" cy="18" rx="6" ry="3"/></svg>`,
+    channel:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="4,9 8,5 16,5 20,9 20,15 16,19 8,19 4,15"/></svg>`,
     custom:    `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="4,8 12,4 20,10 16,20 6,18"/></svg>`,
 };
 
 function buildFormFactorContent(container: HTMLElement) {
-    // proportional-cuboid is not listed here: it is a resize behavior (aspect-ratio lock),
-    // not a distinct geometry. Octagon uses it internally.
     const options: { value: BaseShape; label: string }[] = [
-        { value: 'cuboid',      label: 'Cube' },
-        { value: 'cylinder',    label: 'Cylinder' },
-        { value: 'tube',        label: 'Tube' },
-        { value: 'pipe',        label: 'Pipe' },
-        { value: 'duct',        label: 'Duct' },
-        { value: 'channel',     label: 'Channel' },
-        { value: 'pyramid',     label: 'Pyramid' },
+        { value: 'cuboid',      label: 'Square' },
+        { value: 'cylinder',    label: 'Circle' },
         { value: 'octagon',     label: 'Octagon' },
+        { value: 'pyramid',     label: 'Pyramid' },
+        { value: 'tube',        label: 'Tube' },
+        { value: 'duct',        label: 'Duct' },
         { value: 'custom',      label: 'Custom' },
     ];
 
-    const tileRow = document.createElement('div');
-    tileRow.className = 'nr-sd-swatch-row nr-sd-formfactor-row';
+    const row = document.createElement('div');
+    row.className = 'nr-sd-face-row';
 
-    const tiles: Array<{ btn: HTMLButtonElement; value: BaseShape }> = [];
+    const ffLabel = document.createElement('span');
+    ffLabel.className = 'nr-sd-row-label';
+    ffLabel.textContent = 'Base shape';
+    row.appendChild(ffLabel);
+
+    const dropWrap = document.createElement('div');
+    dropWrap.className = 'nr-sd-dropdown';
+
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'nr-sd-dropdown__trigger';
+
+    const PRIMARY_SHAPE: Record<string, string> = { pipe: 'tube', channel: 'duct' };
+    const setTriggerContent = (value: BaseShape) => {
+        const displayValue = PRIMARY_SHAPE[value] || value;
+        const opt = options.find(o => o.value === displayValue)!;
+        trigger.innerHTML = `<span class="nr-sd-dropdown__icon">${FORM_FACTOR_PREVIEWS_SVG[displayValue] ?? ''}</span><span class="nr-sd-dropdown__text">${opt.label}</span><svg class="nr-sd-dropdown__chevron" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 11L3 6l.7-.7L8 9.6l4.3-4.3.7.7z"/></svg>`;
+    };
+    setTriggerContent(selectedBaseShape);
+
+    syncFormFactorDropdown = () => {
+        setTriggerContent(selectedBaseShape);
+        menu.querySelectorAll('.nr-sd-dropdown__item--selected').forEach(el => el.classList.remove('nr-sd-dropdown__item--selected'));
+        const active = menu.querySelector(`[data-value="${selectedBaseShape}"]`) ||
+            menu.querySelector(`[data-value="${PRIMARY_SHAPE[selectedBaseShape] || selectedBaseShape}"]`);
+        if (active) active.classList.add('nr-sd-dropdown__item--selected');
+    };
+
+    dropWrap.appendChild(trigger);
+
+    const menu = document.createElement('ul');
+    menu.className = 'nr-sd-dropdown__menu';
+    menu.setAttribute('role', 'listbox');
 
     let veContainerRef: HTMLDivElement | null = null;
     let onCustomSelected: (() => void) | null = null;
 
-    const setSelected = (value: BaseShape) => {
-        for (const { btn, value: v } of tiles) {
-            btn.classList.toggle('nr-sd-swatch-btn--selected', v === value);
-            btn.setAttribute('aria-pressed', String(v === value));
-        }
-        if (veContainerRef) {
-            veContainerRef.style.display = value === 'custom' ? '' : 'none';
-        }
+    const closeMenu = () => {
+        menu.classList.remove('nr-sd-dropdown__menu--open');
+        trigger.classList.remove('nr-sd-dropdown__trigger--open');
     };
 
     for (const opt of options) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'nr-sd-swatch-btn nr-sd-formfactor-tile';
-        btn.setAttribute('title', opt.label);
-        btn.setAttribute('aria-label', opt.label);
-        btn.setAttribute('aria-pressed', String(opt.value === selectedBaseShape));
-        if (opt.value === selectedBaseShape) btn.classList.add('nr-sd-swatch-btn--selected');
-        btn.innerHTML = FORM_FACTOR_PREVIEWS_SVG[opt.value] ?? '';
-        const input = document.createElement('input');
-        input.type = 'radio';
-        input.name = 'sd-form-factor';
-        input.value = opt.value;
-        input.hidden = true;
-        input.checked = opt.value === selectedBaseShape;
-        btn.appendChild(input);
+        const li = document.createElement('li');
+        li.className = 'nr-sd-dropdown__item';
+        li.setAttribute('role', 'option');
+        li.setAttribute('data-value', opt.value);
+        if (opt.value === selectedBaseShape) li.classList.add('nr-sd-dropdown__item--selected');
+        li.innerHTML = `<span class="nr-sd-dropdown__icon">${FORM_FACTOR_PREVIEWS_SVG[opt.value] ?? ''}</span><span class="nr-sd-dropdown__text">${opt.label}</span>`;
 
-        btn.addEventListener('click', () => {
+        li.addEventListener('click', () => {
             selectedBaseShape = opt.value;
-            setSelected(opt.value);
-            tileRow.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
-                r.checked = r.value === opt.value;
-            });
+            setTriggerContent(opt.value);
+            menu.querySelectorAll('.nr-sd-dropdown__item--selected').forEach(el => el.classList.remove('nr-sd-dropdown__item--selected'));
+            li.classList.add('nr-sd-dropdown__item--selected');
+            closeMenu();
+            if (veContainerRef) {
+                veContainerRef.style.display = opt.value === 'custom' ? '' : 'none';
+            }
+            applyBaseShapeDefaults(opt.value);
             applyFormFactorToCanvas();
             if (opt.value === 'custom' && onCustomSelected) onCustomSelected();
+            const needsVariants = opt.value === 'tube' || opt.value === 'duct';
+            if (needsVariants) hasVariations = true;
+            buildInspectorPanel();
         });
 
-        tiles.push({ btn, value: opt.value });
-        tileRow.appendChild(btn);
+        menu.appendChild(li);
     }
 
-    container.appendChild(tileRow);
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = menu.classList.toggle('nr-sd-dropdown__menu--open');
+        trigger.classList.toggle('nr-sd-dropdown__trigger--open', isOpen);
+    });
+
+    document.addEventListener('click', (e) => {
+        if (!dropWrap.contains(e.target as Node)) closeMenu();
+    });
+
+    dropWrap.appendChild(menu);
+    row.appendChild(dropWrap);
+    container.appendChild(row);
 
     // ── Custom vertex editor ─────────────────────────────────────────────
     const veContainer = document.createElement('div');
     veContainer.className = 'nr-vertex-editor';
     veContainer.style.display = selectedBaseShape === 'custom' ? '' : 'none';
 
-    const VE_SIZE = 160;
     const VE_PAD = 12;
     const VE_HANDLE = 6;
-    const VE_GRID = 8;
-    const VE_SNAP = 1 / VE_GRID;
+    let VE_GRID_X = 16;
+    let VE_GRID_Y = 16;
+    let VE_SNAP_X = 1 / VE_GRID_X;
+    let VE_SNAP_Y = 1 / VE_GRID_Y;
+
+    const { wPx, hPx } = currentDimensionsPx();
+    const maxPx = Math.max(wPx, hPx, 1);
+    VE_GRID_X = Math.round((wPx / maxPx) * 16) || 16;
+    VE_GRID_Y = Math.round((hPx / maxPx) * 16) || 16;
+    VE_SNAP_X = 1 / VE_GRID_X;
+    VE_SNAP_Y = 1 / VE_GRID_Y;
+
+    const VE_SIZE_X = VE_PAD * 2 + VE_GRID_X * 10;
+    const VE_SIZE_Y = VE_PAD * 2 + VE_GRID_Y * 10;
 
     const veSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    veSvg.setAttribute('width', String(VE_SIZE));
-    veSvg.setAttribute('height', String(VE_SIZE));
-    veSvg.setAttribute('viewBox', `0 0 ${VE_SIZE} ${VE_SIZE}`);
+    veSvg.setAttribute('width', String(VE_SIZE_X));
+    veSvg.setAttribute('height', String(VE_SIZE_Y));
+    veSvg.setAttribute('viewBox', `0 0 ${VE_SIZE_X} ${VE_SIZE_Y}`);
     veSvg.classList.add('nr-vertex-editor__svg');
 
     const veGridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    const area = VE_SIZE - VE_PAD * 2;
-    for (let i = 0; i <= VE_GRID; i++) {
-        const pos = VE_PAD + (i / VE_GRID) * area;
+    const areaX = VE_SIZE_X - VE_PAD * 2;
+    const areaY = VE_SIZE_Y - VE_PAD * 2;
+    for (let i = 0; i <= VE_GRID_Y; i++) {
+        const pos = VE_PAD + (i / VE_GRID_Y) * areaY;
         const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         hLine.setAttribute('x1', String(VE_PAD));
         hLine.setAttribute('y1', String(pos));
-        hLine.setAttribute('x2', String(VE_PAD + area));
+        hLine.setAttribute('x2', String(VE_PAD + areaX));
         hLine.setAttribute('y2', String(pos));
         hLine.classList.add('nr-vertex-editor__grid-line');
+        if (i % (VE_GRID_Y / Math.round(wPx / GRID_SIZE)) === 0) hLine.classList.add('nr-vertex-editor__grid-line--major');
         veGridGroup.appendChild(hLine);
+    }
+    for (let i = 0; i <= VE_GRID_X; i++) {
+        const pos = VE_PAD + (i / VE_GRID_X) * areaX;
         const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         vLine.setAttribute('x1', String(pos));
         vLine.setAttribute('y1', String(VE_PAD));
         vLine.setAttribute('x2', String(pos));
-        vLine.setAttribute('y2', String(VE_PAD + area));
+        vLine.setAttribute('y2', String(VE_PAD + areaY));
         vLine.classList.add('nr-vertex-editor__grid-line');
+        if (i % (VE_GRID_X / Math.round(hPx / GRID_SIZE)) === 0) vLine.classList.add('nr-vertex-editor__grid-line--major');
         veGridGroup.appendChild(vLine);
     }
     veSvg.appendChild(veGridGroup);
@@ -653,6 +1257,19 @@ function buildFormFactorContent(container: HTMLElement) {
     let customPaths: [number, number][][] = [[[0, 0], [1, 0], [1, 1], [0, 1]]];
     let activePathIdx = 0;
 
+    if (selectedBaseShape === 'custom' && currentShape) {
+        const raw = currentShape.get('normalizedVerts');
+        if (raw && raw.length > 0) {
+            if (typeof raw[0][0] === 'number') {
+                customPaths = [(raw as [number, number][]).map(v => [...v] as [number, number])];
+            } else {
+                customPaths = (raw as [number, number][][]).map(
+                    (path: [number, number][]) => path.map(v => [...v] as [number, number])
+                );
+            }
+        }
+    }
+
     function rebuildPathTabs() {
         vePathTabsEl.innerHTML = '';
         customPaths.forEach((_, idx) => {
@@ -685,17 +1302,15 @@ function buildFormFactorContent(container: HTMLElement) {
     }
 
     function veToScreen(nx: number, ny: number): [number, number] {
-        const a = VE_SIZE - VE_PAD * 2;
-        return [VE_PAD + nx * a, VE_PAD + ny * a];
+        return [VE_PAD + nx * areaX, VE_PAD + ny * areaY];
     }
 
     function veFromScreen(sx: number, sy: number): [number, number] {
-        const a = VE_SIZE - VE_PAD * 2;
-        const nx = Math.max(0, Math.min(1, (sx - VE_PAD) / a));
-        const ny = Math.max(0, Math.min(1, (sy - VE_PAD) / a));
+        const nx = Math.max(0, Math.min(1, (sx - VE_PAD) / areaX));
+        const ny = Math.max(0, Math.min(1, (sy - VE_PAD) / areaY));
         return [
-            Math.round(nx / VE_SNAP) * VE_SNAP,
-            Math.round(ny / VE_SNAP) * VE_SNAP,
+            Math.round(nx / VE_SNAP_X) * VE_SNAP_X,
+            Math.round(ny / VE_SNAP_Y) * VE_SNAP_Y,
         ];
     }
 
@@ -744,6 +1359,14 @@ function buildFormFactorContent(container: HTMLElement) {
         const allPaths = customPaths.map(path => path.map(v => [...v] as [number, number]));
         currentShape.set('normalizedVerts', allPaths);
         if (currentShape2D) currentShape2D.set('normalizedVerts', allPaths);
+        if (isComplexShape) {
+            const layer = layers[selectedLayerIndex];
+            if (layer) {
+                layer.svgNormVerts = allPaths[0];
+                layer.baseShape = 'custom';
+            }
+        }
+        markDirty();
     }
 
     // Drag handles (active path only)
@@ -835,36 +1458,58 @@ function syncFormFactorTiles() {
 
 const NO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><line x1="6" y1="16" x2="26" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
 
-// Generates a composite SVG: colored background shape with icon SVG centered inside.
-function buildCompositeIconSvg(iconSvg: string, bgColor: string | null, bgShape: 'circle' | 'square' | 'octagon', applyWhiteFilter = true, bgRadius = 6, bgChamfer = 0.18, padding: 'normal' | 'compact' | 'tight' = 'normal', clipToShape = false): string {
-    const S = 64;
-    const pad = padding === 'compact' ? 6 : padding === 'tight' ? 3 : 13;
-    const iconInner = S - 2 * pad;
+// Generates a composite SVG with icon and background at absolute pixel sizes
+// within a fixed viewBox. Both are centered independently.
+function buildCompositeIconSvg(iconSvg: string | null, bgColor: string | null, bgShape: 'circle' | 'square' | 'octagon', applyWhiteFilter = true, bgRadius = 6, bgChamfer = 0.18, padding: 'normal' | 'compact' | 'tight' | 'none' = 'normal', clipToShape = false, canvasPx = 64, iconPx = 64, bgPx = 64, iconColor: string | null = null, iconOpacity = 100, bgOpacity = 100): string {
+    const S = canvasPx;
 
+    // Background — absolute size, centered
+    const bgOff = (S - bgPx) / 2;
     let shapeEl = '';
     if (bgShape === 'circle') {
-        shapeEl = `<circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}"`;
+        shapeEl = `<circle cx="${bgOff + bgPx / 2}" cy="${bgOff + bgPx / 2}" r="${bgPx / 2}"`;
     } else if (bgShape === 'octagon') {
-        const c = Math.round(S * bgChamfer);
-        shapeEl = `<polygon points="${c},0 ${S - c},0 ${S},${c} ${S},${S - c} ${S - c},${S} ${c},${S} 0,${S - c} 0,${c}"`;
+        const c = bgPx * bgChamfer;
+        shapeEl = `<polygon points="${bgOff + c},${bgOff} ${bgOff + bgPx - c},${bgOff} ${bgOff + bgPx},${bgOff + c} ${bgOff + bgPx},${bgOff + bgPx - c} ${bgOff + bgPx - c},${bgOff + bgPx} ${bgOff + c},${bgOff + bgPx} ${bgOff},${bgOff + bgPx - c} ${bgOff},${bgOff + c}"`;
     } else {
-        shapeEl = `<rect x="0" y="0" width="${S}" height="${S}" rx="${bgRadius}"`;
+        shapeEl = `<rect x="${bgOff}" y="${bgOff}" width="${bgPx}" height="${bgPx}" rx="${bgRadius}"`;
+    }
+    const bgOpStr = bgOpacity < 100 ? ` opacity="${(bgOpacity / 100).toFixed(2)}"` : '';
+    const bgEl = bgColor !== null ? `${shapeEl} fill="${bgColor}"${bgOpStr}/>` : '';
+
+    // Icon — absolute size, centered independently (skip if no icon SVG)
+    let iconEl = '';
+    if (iconSvg) {
+        const iconOff = (S - iconPx) / 2;
+        const padFrac = padding === 'none' ? 0 : padding === 'compact' ? 6 / 64 : padding === 'tight' ? 3 / 64 : 13 / 64;
+        const pad = iconPx * padFrac;
+        const iconInner = iconPx - 2 * pad;
+        const iconX = iconOff + pad;
+        const iconY = iconOff + pad;
+
+        let defsParts = '';
+        let filterAttr = '';
+        if (iconColor) {
+            const r = parseInt(iconColor.slice(1, 3), 16) / 255;
+            const g = parseInt(iconColor.slice(3, 5), 16) / 255;
+            const b = parseInt(iconColor.slice(5, 7), 16) / 255;
+            defsParts += `<filter id="nr-tint" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 ${r.toFixed(3)} 0 0 0 0 ${g.toFixed(3)} 0 0 0 0 ${b.toFixed(3)} 0 0 0 1 0"/></filter>`;
+            filterAttr = ' filter="url(#nr-tint)"';
+        } else if (applyWhiteFilter) {
+            defsParts += `<filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter>`;
+            filterAttr = ' filter="url(#nr-white)"';
+        }
+        if (clipToShape) {
+            defsParts += `<clipPath id="nr-icon-clip">${shapeEl}/></clipPath>`;
+        }
+        const defs = defsParts ? `<defs>${defsParts}</defs>` : '';
+        const clipAttr = clipToShape ? ' clip-path="url(#nr-icon-clip)"' : '';
+        const iconOpStr = iconOpacity < 100 ? ` opacity="${(iconOpacity / 100).toFixed(2)}"` : '';
+        const iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg)}`;
+        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${defs}${bgEl}<image href="${iconHref}" x="${iconX}" y="${iconY}" width="${iconInner}" height="${iconInner}"${filterAttr}${clipAttr}${iconOpStr}/></svg>`;
     }
 
-    const bgEl = bgColor !== null ? `${shapeEl} fill="${bgColor}"/>` : '';
-
-    let defsParts = '';
-    if (applyWhiteFilter) {
-        defsParts += `<filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter>`;
-    }
-    if (clipToShape) {
-        defsParts += `<clipPath id="nr-icon-clip">${shapeEl}/></clipPath>`;
-    }
-    const defs = defsParts ? `<defs>${defsParts}</defs>` : '';
-    const filterAttr = applyWhiteFilter ? ' filter="url(#nr-white)"' : '';
-    const clipAttr = clipToShape ? ' clip-path="url(#nr-icon-clip)"' : '';
-    const iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg)}`;
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${defs}${bgEl}<image href="${iconHref}" x="${pad}" y="${pad}" width="${iconInner}" height="${iconInner}"${filterAttr}${clipAttr}/></svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${bgEl}</svg>`;
 }
 
 /**
@@ -880,33 +1525,46 @@ function raiseToFront(viewEl: Element, selector: string): void {
     }
 }
 
-function applyIconToCurrentShape() {
-    // In complex shape mode the icon is rendered on a user-chosen layer
-    // (defaults to the main layer). Clamp the index in case layers were
-    // removed since it was last set, and wipe the icon from every other
-    // layer so moving the target never leaves a stale copy behind.
-    const clampedIdx = isComplexShape
-        ? Math.min(Math.max(0, iconLayerIndex), Math.max(0, layerShapes.length - 1))
-        : 0;
-    if (isComplexShape) {
-        const noIconAttrs = {
-            topIcon:   { href: '', width: 0, height: 0 },
-            topIcon2D: { href: '', width: 0, height: 0 },
-        };
-        for (let i = 0; i < layerShapes.length; i++) {
-            if (i === clampedIdx) continue;
-            layerShapes[i]?.attr(noIconAttrs);
-            layerShapes2D[i]?.attr(noIconAttrs);
+/** Sync legacy state variables back into the active IconEntry. */
+function syncLegacyStateToIconEntry(): void {
+    if (applyingAllLayerIcons) return;
+    if (editingIconIndex < 0 || editingIconIndex >= iconEntries.length) return;
+    const e = iconEntries[editingIconIndex];
+    const prevId = e.id;
+    if (selectedIcon !== null) e.id = selectedIcon;
+    // Auto-update name from catalog when icon changes and no custom name was set
+    if (e.id && e.id !== prevId) {
+        const catalogEntry = getIconById(e.id);
+        if (catalogEntry && (!(e as any).name || (e as any).name === `Icon ${editingIconIndex + 1}` || (e as any).name === (prevId ? getIconById(prevId)?.label : ''))) {
+            (e as any).name = catalogEntry.label;
         }
     }
-    const iconShape   = isComplexShape ? (layerShapes[clampedIdx]   ?? null) : currentShape;
-    const iconShape2D = isComplexShape ? (layerShapes2D[clampedIdx] ?? null) : currentShape2D;
+    e.face = selectedIconFace;
+    e.size = selectedIconSize;
+    e.offsetX = selectedIconOffsetX;
+    e.offsetY = selectedIconOffsetY;
+    e.skewX = selectedIconSkewX;
+    e.skewY = selectedIconSkewY;
+    e.bgEnabled = selectedIconBgEnabled;
+    e.bgColor = selectedIconBgColor;
+    e.bgShape = selectedIconBgShape;
+    e.bgSize = selectedIconBgSize;
+    e.bgRadius = selectedIconBgRadius;
+    e.bgChamfer = selectedIconBgChamfer;
+    e.monochrome = selectedIconMonochrome;
+}
+
+function applyIconToCurrentShape() {
+    syncLegacyStateToIconEntry();
+    if (!applyingAllLayerIcons) markDirty();
+    const iconShape   = currentShape;
+    const iconShape2D = currentShape2D;
     if (!iconShape) return;
 
-    const icon = selectedIcon ? getIconById(selectedIcon) : undefined;
-    if (!icon) {
-        // Zero size hides the image without touching display — group selectors
-        // (iso / 2d) must remain the sole controllers of element visibility.
+    // If no entries and no legacy icon, clear
+    const hasLegacyIcon = !!selectedIcon;
+    const hasEntries = iconEntries.some(e => !!e.id);
+    if (!hasLegacyIcon && !hasEntries && !selectedIconBgEnabled) {
         const noIconAttrs = {
             topIcon:   { href: '', width: 0, height: 0 },
             topIcon2D: { href: '', width: 0, height: 0 },
@@ -915,37 +1573,188 @@ function applyIconToCurrentShape() {
         iconShape2D?.attr(noIconAttrs);
         return;
     }
+
+    // Multi-icon rendering: each icon gets its own face transform baked into the SVG
+    if (iconEntries.length > 0 && iconEntries.some(e => !!e.id || e.bgEnabled)) {
+        const { width: shapeW, height: shapeH } = iconShape.size();
+        const iH = iconShape.isometricHeight;
+
+        // Build per-icon composites with face transforms baked in
+        const isoParts: string[] = [];
+        const twoDParts: string[] = [];
+
+        for (const ie of iconEntries) {
+            if (!ie.id && !ie.bgEnabled) continue;
+            const ieIcon = ie.id ? getIconById(ie.id) : undefined;
+            const ieBgSize = ie.bgSize;
+            const ieCanvasGU = Math.max(ie.size, ieBgSize);
+            const ieCanvasPx = ieCanvasGU * GRID_SIZE;
+            const ieIconPx = ie.size * GRID_SIZE;
+            const ieBgPx = ieBgSize * GRID_SIZE;
+            const ieBg = ie.bgEnabled ? ie.bgColor : null;
+            const isAws = ieIcon?.source === 'aws';
+            const isVendorColor = ieIcon?.source === 'azure' || ieIcon?.source === 'gcp' || (isAws && !ie.monochrome);
+            const ieMono = isAws && ie.monochrome;
+            const ieSvgStr = ieMono ? (ieIcon?.svgMono || ieIcon?.svg || '') : (ieIcon?.svg || '');
+            const ieIconColor = (ie as any).iconColor as string || '';
+            const ieWhite = isVendorColor ? false : (ieIconColor ? false : (ie.bgEnabled ? true : isDarkMode()));
+            const ieSvg = buildCompositeIconSvg(
+                ieSvgStr || null, ieBg, ie.bgShape, ieSvgStr ? ieWhite : false,
+                ie.bgRadius, ie.bgChamfer, 'normal', false, ieCanvasPx, ieIconPx, ieBgPx,
+                ieIconColor || null, ie.iconOpacity ?? 100, ie.bgOpacity ?? 100
+            );
+            const ieHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(ieSvg)}`;
+            ie.href = ieHref;
+            const ox = ie.offsetX * GRID_SIZE;
+            const oy = ie.offsetY * GRID_SIZE;
+            const skTx = (ie.skewX || ie.skewY) ? `skewX(${ie.skewX}) skewY(${ie.skewY})` : '';
+
+            // 2D: only show "Main" icon (or the single icon if only one exists)
+            const showIn2D = iconEntries.length === 1 || ie.isMain;
+            if (showIn2D) {
+                const x2d = (shapeW - ieCanvasPx) / 2 + ox;
+                const y2d = (shapeH - ieCanvasPx) / 2 + oy;
+                twoDParts.push(`<image href="${ieHref}" x="${x2d}" y="${y2d}" width="${ieCanvasPx}" height="${ieCanvasPx}"/>`);
+            }
+
+            // ISO: per-face transform
+            if (ie.face === 'front') {
+                const lx = (shapeW - ieCanvasPx) / 2 + ox;
+                const ly = (iH - ieCanvasPx) / 2 + oy;
+                const fcx = lx + ieCanvasPx / 2;
+                const fcy = ly + ieCanvasPx / 2;
+                isoParts.push(`<g transform="matrix(1,0,-1,-1,0,${shapeH}) rotate(180,${fcx},${fcy}) ${skTx}"><image href="${ieHref}" x="${lx}" y="${ly}" width="${ieCanvasPx}" height="${ieCanvasPx}"/></g>`);
+            } else if (ie.face === 'side') {
+                const lx = (shapeH - ieCanvasPx) / 2 + ox;
+                const ly = (iH - ieCanvasPx) / 2 + oy;
+                const fcx = lx + ieCanvasPx / 2;
+                const fcy = ly + ieCanvasPx / 2;
+                isoParts.push(`<g transform="matrix(0,1,-1,-1,${shapeW},0) rotate(180,${fcx},${fcy}) ${skTx}"><image href="${ieHref}" x="${lx}" y="${ly}" width="${ieCanvasPx}" height="${ieCanvasPx}"/></g>`);
+            } else {
+                const ix = -iH + (shapeW - ieCanvasPx) / 2 + ox;
+                const iy = -iH + (shapeH - ieCanvasPx) / 2 + oy;
+                const wrap = skTx ? `<g transform="${skTx}"><image href="${ieHref}" x="${ix}" y="${iy}" width="${ieCanvasPx}" height="${ieCanvasPx}"/></g>` :
+                    `<image href="${ieHref}" x="${ix}" y="${iy}" width="${ieCanvasPx}" height="${ieCanvasPx}"/>`;
+                isoParts.push(wrap);
+            }
+        }
+
+        if (isoParts.length > 0 || twoDParts.length > 0) {
+            // Iso composite: large viewBox to accommodate all face projections
+            const vbSize = Math.max(shapeW, shapeH) + iH * 2;
+            const isoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-iH} ${-iH} ${vbSize} ${vbSize}" width="${vbSize}" height="${vbSize}">${isoParts.join('')}</svg>`;
+            const isoHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(isoSvg)}`;
+
+            const twoDSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${shapeW} ${shapeH}" width="${shapeW}" height="${shapeH}">${twoDParts.join('')}</svg>`;
+            const twoDHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(twoDSvg)}`;
+
+            iconShape.attr({
+                topIcon: { href: isoHref, x: -iH, y: -iH, width: vbSize, height: vbSize, transform: null, class: '' },
+                topIcon2D: { href: twoDHref, x: 0, y: 0, width: shapeW, height: shapeH, class: '' },
+            });
+            iconShape2D?.attr({
+                topIcon: { href: isoHref, x: -iH, y: -iH, width: vbSize, height: vbSize, transform: null, class: '' },
+                topIcon2D: { href: twoDHref, x: 0, y: 0, width: shapeW, height: shapeH, class: '' },
+            });
+            return;
+        }
+    }
+
+    const icon = selectedIcon ? getIconById(selectedIcon) : undefined;
+    const hasIcon = !!icon;
+    const hasBg = selectedIconBgEnabled;
+
+    if (!hasIcon && !hasBg) {
+        const noIconAttrs = {
+            topIcon:   { href: '', width: 0, height: 0 },
+            topIcon2D: { href: '', width: 0, height: 0 },
+        };
+        iconShape.attr(noIconAttrs);
+        iconShape2D?.attr(noIconAttrs);
+        return;
+    }
+
     const isAdaptive = selectedIconAdaptive && !selectedIconBgEnabled;
-    const isAwsIcon = isVendorIcon(icon as IconCatalogEntry);
-    const monoAws = isAwsIcon && selectedIconMonochrome;
-    const iconSvg = monoAws ? stripAwsBackground(icon.svg) : icon.svg;
-    const applyWhite = !isAdaptive && (!isAwsIcon || monoAws);
-    const iconPad = monoAws ? 'compact' : (isAwsIcon ? 'tight' : 'normal');
-    const clipIcon = isAwsIcon && !monoAws;
+    const entry = hasIcon ? (icon as IconCatalogEntry) : null;
+    const isAws = entry?.source === 'aws';
+    const monoAws = isAws && selectedIconMonochrome;
+    let iconSvg: string | null;
+    let bgColor: string | null;
+    let applyWhite: boolean;
+    let iconPad: 'normal' | 'compact' | 'tight' | 'none';
+    let clipIcon: boolean;
+
+    if (!hasIcon) {
+        // Background only, no icon
+        iconSvg = null;
+        bgColor = selectedIconBgColor;
+        applyWhite = false;
+        iconPad = 'none';
+        clipIcon = false;
+    } else if (isAws && !monoAws) {
+        // AWS Color: use original full-color SVG directly, independent of icon background
+        iconSvg = entry!.svg;
+        bgColor = hasBg ? selectedIconBgColor : null;
+        applyWhite = false;
+        iconPad = 'normal';
+        clipIcon = false;
+    } else if (monoAws) {
+        iconSvg = entry!.svgMono || entry!.svg;
+        bgColor = hasBg ? selectedIconBgColor : null;
+        applyWhite = hasBg ? !isAdaptive : isDarkMode();
+        iconPad = 'compact';
+        clipIcon = false;
+    } else if (entry!.source === 'azure' || entry!.source === 'gcp') {
+        iconSvg = entry!.svg;
+        bgColor = hasBg ? selectedIconBgColor : null;
+        applyWhite = false;
+        iconPad = 'normal';
+        clipIcon = false;
+    } else {
+        iconSvg = entry!.svg;
+        bgColor = hasBg ? selectedIconBgColor : null;
+        applyWhite = hasBg ? !isAdaptive : isDarkMode();
+        iconPad = 'normal';
+        clipIcon = false;
+    }
+
+    const canvasGU = hasIcon ? Math.max(selectedIconSize, selectedIconBgSize) : selectedIconBgSize;
+    const canvasPx = canvasGU * GRID_SIZE;
+    const iConPx = selectedIconSize * GRID_SIZE;
+    const bgPx = selectedIconBgSize * GRID_SIZE;
     const svgSource = buildCompositeIconSvg(
         iconSvg,
-        selectedIconBgEnabled ? selectedIconBgColor : null,
+        bgColor,
         selectedIconBgShape,
         applyWhite,
         selectedIconBgRadius,
         selectedIconBgChamfer,
         iconPad,
         clipIcon,
+        canvasPx,
+        iConPx,
+        bgPx,
     );
     const adaptiveClass = isAdaptive ? 'nr-icon-adaptive' : '';
-    const iconPx = selectedIconSize * GRID_SIZE;
+    const iconPx = canvasPx;
     const { width: w, height: h } = iconShape.size();
     const iH = iconShape.isometricHeight;
     const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgSource)}`;
     // 2D: centered in the shape's own bounding box
-    const x2D = (w - iconPx) / 2;
-    const y2D = (h - iconPx) / 2;
+    const oxPx = selectedIconOffsetX * GRID_SIZE;
+    const oyPx = selectedIconOffsetY * GRID_SIZE;
+    const x2D = (w - iconPx) / 2 + oxPx;
+    const y2D = (h - iconPx) / 2 + oyPx;
 
     let topIconAttrs: Record<string, unknown>;
 
+    const skewTx = (selectedIconSkewX !== 0 || selectedIconSkewY !== 0)
+        ? `skewX(${selectedIconSkewX}) skewY(${selectedIconSkewY})`
+        : '';
+
     if (selectedIconFace === 'front') {
-        const localX = (w - iconPx) / 2;
-        const localY = (iH - iconPx) / 2;
+        const localX = (w - iconPx) / 2 + oxPx;
+        const localY = (iH - iconPx) / 2 + oyPx;
         const cx = localX + iconPx / 2;
         const cy = localY + iconPx / 2;
         topIconAttrs = {
@@ -954,15 +1763,11 @@ function applyIconToCurrentShape() {
             y: localY,
             width:  iconPx,
             height: iconPx,
-            transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`,
+            transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy}) ${skewTx}`.trim(),
         };
     } else if (selectedIconFace === 'side') {
-        // Side face (right edge V1→V2):
-        //   V1=(w,0), V2=(w,h), topV1=(w-iH,-iH), topV2=(w-iH,h-iH)
-        // Local coords: origin=V1=(w,0), x-axis=(0,1), y-axis=(-1,-1)
-        //   → matrix(0, 1, -1, -1, w, 0)
-        const localX = (h - iconPx) / 2;
-        const localY = (iH - iconPx) / 2;
+        const localX = (h - iconPx) / 2 + oxPx;
+        const localY = (iH - iconPx) / 2 + oyPx;
         const cx = localX + iconPx / 2;
         const cy = localY + iconPx / 2;
         topIconAttrs = {
@@ -971,19 +1776,18 @@ function applyIconToCurrentShape() {
             y: localY,
             width:  iconPx,
             height: iconPx,
-            transform: `matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy})`,
+            transform: `matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy}) ${skewTx}`.trim(),
         };
     } else {
-        // Top face: standard positioning in model space, no extra transform.
-        const isoX = -iH + (w - iconPx) / 2;
-        const isoY = -iH + (h - iconPx) / 2;
+        const isoX = -iH + (w - iconPx) / 2 + oxPx;
+        const isoY = -iH + (h - iconPx) / 2 + oyPx;
         topIconAttrs = {
             href,
             x: isoX,
             y: isoY,
             width:  iconPx,
             height: iconPx,
-            transform: null,
+            transform: skewTx || null,
         };
     }
 
@@ -1003,6 +1807,7 @@ function applyIconToCurrentShape() {
         const view2D = paper2D.findViewByModel(iconShape2D);
         if (view2D) raiseToFront(view2D.el, 'topIcon2D');
     }
+    if (isComplexShape && !applyingAllLayerIcons) saveIconEntriesToLayer();
 }
 
 // Re-render the Icon accordion content in place. Called when the layer set
@@ -1034,58 +1839,9 @@ function buildIconContent(container: HTMLElement) {
     // below only reflects the layer set at inspector-construction time.
     iconAccordionContentEl = container;
 
+    ensureFullCatalog();
+
     const getVisible = () => getVisibleIcons(isComplexShape ? 'complexShape' : 'componentEditor');
-
-    // Layer target dropdown — only meaningful when editing a complex shape
-    // with more than one layer. Clamp first so the preselected <option>
-    // always matches a real layer.
-    if (isComplexShape && layers.length > 1) {
-        if (iconLayerIndex < 0 || iconLayerIndex >= layers.length) iconLayerIndex = 0;
-
-        const formItem = document.createElement('div');
-        formItem.className = 'cds--form-item';
-
-        const selectWrapper = document.createElement('div');
-        selectWrapper.className = 'cds--select';
-
-        const label = document.createElement('label');
-        label.className = 'cds--label';
-        label.setAttribute('for', 'cd-icon-layer-select');
-        label.textContent = 'Apply icon to layer';
-
-        const inputWrapper = document.createElement('div');
-        inputWrapper.className = 'cds--select-input-wrapper';
-
-        const select = document.createElement('select');
-        select.id = 'cd-icon-layer-select';
-        select.className = 'cds--select-input';
-
-        for (let i = 0; i < layers.length; i++) {
-            const opt = document.createElement('option');
-            opt.value = String(i);
-            opt.textContent = layers[i].name || `Layer ${i + 1}`;
-            opt.className = 'cds--select-option';
-            if (i === iconLayerIndex) opt.selected = true;
-            select.appendChild(opt);
-        }
-
-        select.addEventListener('change', () => {
-            const next = parseInt(select.value, 10);
-            if (Number.isNaN(next)) return;
-            iconLayerIndex = next;
-            applyIconToCurrentShape();
-        });
-
-        inputWrapper.appendChild(select);
-        inputWrapper.insertAdjacentHTML(
-            'beforeend',
-            `<svg class="cds--select__arrow" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M8 11L3 6l.7-.7L8 9.6l4.3-4.3.7.7z"/></svg>`
-        );
-        selectWrapper.appendChild(label);
-        selectWrapper.appendChild(inputWrapper);
-        formItem.appendChild(selectWrapper);
-        container.appendChild(formItem);
-    }
 
     // Icon source tabs
     let iconSourceTab: 'common' | 'aws' | 'gcp' | 'azure' = 'common';
@@ -1109,6 +1865,7 @@ function buildIconContent(container: HTMLElement) {
             iconSourceTab = td.key;
             tabBtns.forEach((b, k) => b.classList.toggle('nr-sd-icon-tab--active', k === td.key));
             renderGrid();
+            syncIconControlVisibility();
         });
         tabBtns.set(td.key, btn);
         tabRow.appendChild(btn);
@@ -1152,36 +1909,40 @@ function buildIconContent(container: HTMLElement) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'nr-sd-icon-btn';
-            if (icon.source === 'aws' || icon.source === 'gcp' || icon.source === 'azure') btn.classList.add('nr-icon-color');
-            if (icon.source === 'gcp') btn.style.background = '#cccccc';
+            const isVendor = icon.source === 'aws' || icon.source === 'gcp' || icon.source === 'azure';
+            if (isVendor) {
+                btn.classList.add('nr-icon-color');
+                if (icon.source === 'aws' && selectedIconMonochrome) btn.classList.add('nr-icon-mono');
+            }
             btn.setAttribute('title', icon.label);
             btn.setAttribute('aria-label', icon.label);
             btn.setAttribute('data-icon-id', icon.id ?? '');
+            if (icon.id === null) btn.classList.add('nr-sd-icon-btn--remove');
             const isSelected = icon.id === null ? selectedIcon === null : selectedIcon === icon.id;
             if (isSelected) btn.classList.add('nr-sd-icon-btn--selected');
-            btn.innerHTML = icon.svg;
+            if (icon.source === 'aws') {
+                const entry = filtered.find(ic => ic.id === icon.id) as IconCatalogEntry | undefined;
+                if (selectedIconMonochrome) {
+                    btn.innerHTML = entry?.svgMono || icon.svg;
+                } else {
+                    btn.innerHTML = icon.svg;
+                }
+            } else {
+                btn.innerHTML = icon.svg;
+            }
 
             btn.addEventListener('click', () => {
-                const wasVendor = selectedIcon ? isVendorIcon(getIconById(selectedIcon)) : false;
-                const isVendor = isVendorIcon(icon as IconCatalogEntry);
                 selectedIcon = icon.id;
-                if (isVendor) {
-                    if (!wasVendor) {
-                        selectedIconBgEnabled = false;
-                        selectedIconMonochrome = false;
-                        selectedIconBgShape = 'square';
-                        selectedIconBgRadius = 6;
-                    }
-                    const entry = getIconById(icon.id!);
-                    if (entry?.bgColor) selectedIconBgColor = entry.bgColor;
-                } else if (wasVendor) {
-                    selectedIconBgEnabled = true;
-                }
                 grid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
                     b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
                 );
                 syncIconControlVisibility();
                 applyIconToCurrentShape();
+                if (iconsSectionBodyEl) {
+                    const listEl = iconsSectionBodyEl.querySelector('div');
+                    if (listEl) renderIconsListFn?.();
+                }
+                markDirty();
             });
 
             if (icon.source === 'uploaded') {
@@ -1289,33 +2050,30 @@ function buildIconContent(container: HTMLElement) {
     adaptiveRow.appendChild(adaptiveTrack);
     container.appendChild(adaptiveRow);
 
-    // AWS icon mode switcher — Colored or Monochrome
+    // AWS icon mode switcher — Colored or Monochrome (only for AWS)
     const iconModeRow = document.createElement('div');
     iconModeRow.className = 'nr-sd-face-row';
-    const isAwsSelected = selectedIcon ? isVendorIcon(getIconById(selectedIcon)) : false;
-    iconModeRow.style.display = isAwsSelected ? '' : 'none';
+    iconModeRow.style.display = 'none';
 
     const modeLbl = document.createElement('label');
     modeLbl.className = 'nr-sd-row-label';
     modeLbl.textContent = 'Style';
 
     const modeSwitcher = document.createElement('div');
-    modeSwitcher.className = 'nr-sd-face-switcher';
+    modeSwitcher.className = 'nr-seg-control nr-seg-control--fixed';
 
     for (const mode of ['colored', 'mono'] as const) {
         const btn = document.createElement('button');
         btn.type = 'button';
         const isActive = mode === 'colored' ? !selectedIconMonochrome : selectedIconMonochrome;
-        btn.className = 'nr-sd-face-btn' + (isActive ? ' nr-sd-face-btn--active' : '');
-        btn.textContent = mode === 'colored' ? 'Colored' : 'Mono';
+        btn.className = 'nr-seg-btn' + (isActive ? ' nr-seg-btn--selected' : '');
+        btn.textContent = mode === 'colored' ? 'Color' : 'Mono';
         btn.addEventListener('click', () => {
             selectedIconMonochrome = mode === 'mono';
-            if (mode === 'mono' && !selectedIconBgEnabled) {
-                selectedIconBgEnabled = true;
-            }
-            modeSwitcher.querySelectorAll('.nr-sd-face-btn').forEach(b =>
-                b.classList.toggle('nr-sd-face-btn--active', b === btn)
+            modeSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
+                b.classList.toggle('nr-seg-btn--selected', b === btn)
             );
+            renderGrid();
             syncIconControlVisibility();
             applyIconToCurrentShape();
         });
@@ -1326,104 +2084,50 @@ function buildIconContent(container: HTMLElement) {
     iconModeRow.appendChild(modeSwitcher);
     container.appendChild(iconModeRow);
 
-    // AWS icon clip shape controls
-    const awsShapeRow = document.createElement('div');
-    awsShapeRow.className = 'nr-sd-face-row';
-    awsShapeRow.style.display = isAwsSelected ? '' : 'none';
-
-    const awsShapeLbl = document.createElement('label');
-    awsShapeLbl.className = 'nr-sd-row-label';
-    awsShapeLbl.textContent = 'Clip';
-
-    const awsShapeSwitcher = document.createElement('div');
-    awsShapeSwitcher.className = 'nr-sd-face-switcher';
-
-    for (const shape of ['square', 'circle', 'octagon'] as const) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'nr-sd-face-btn' + (selectedIconBgShape === shape ? ' nr-sd-face-btn--active' : '');
-        btn.textContent = shape.charAt(0).toUpperCase() + shape.slice(1);
-        btn.addEventListener('click', () => {
-            selectedIconBgShape = shape;
-            awsShapeSwitcher.querySelectorAll('.nr-sd-face-btn').forEach(b =>
-                b.classList.toggle('nr-sd-face-btn--active', b === btn)
-            );
-            awsRadiusRow.style.display = shape === 'square' ? '' : 'none';
-            document.querySelectorAll<HTMLInputElement>('input[name="sd-icon-bg-shape"]').forEach(r => {
-                r.checked = r.value === shape;
-            });
-            applyIconToCurrentShape();
-        });
-        awsShapeSwitcher.appendChild(btn);
-    }
-
-    awsShapeRow.appendChild(awsShapeLbl);
-    awsShapeRow.appendChild(awsShapeSwitcher);
-    container.appendChild(awsShapeRow);
-
-    // AWS icon corner radius
-    const awsRadiusRow = document.createElement('div');
-    awsRadiusRow.className = 'nr-sd-slider-row';
-    awsRadiusRow.style.display = (isAwsSelected && selectedIconBgShape === 'square') ? '' : 'none';
-
-    let awsRadiusInput: HTMLInputElement;
-    let awsRadiusVal: HTMLElement;
-    buildSliderField('Corner Radius', 'sd-aws-icon-radius', 0, 20, 1,
-        (el) => { awsRadiusInput = el; el.value = String(selectedIconBgRadius); },
-        (el) => { awsRadiusVal = el; el.textContent = `${selectedIconBgRadius} px`; },
-        () => {
-            selectedIconBgRadius = parseInt(awsRadiusInput.value, 10);
-            awsRadiusVal.textContent = `${selectedIconBgRadius} px`;
-            applyIconToCurrentShape();
-        },
-        awsRadiusRow);
-    container.appendChild(awsRadiusRow);
-
     function syncIconControlVisibility() {
-        const curIcon = selectedIcon ? getIconById(selectedIcon) : undefined;
-        const isAws = isVendorIcon(curIcon);
-        iconModeRow.style.display = isAws ? '' : 'none';
-        awsShapeRow.style.display = isAws ? '' : 'none';
-        awsRadiusRow.style.display = (isAws && selectedIconBgShape === 'square') ? '' : 'none';
-        if (awsRadiusInput) { awsRadiusInput.value = String(selectedIconBgRadius); }
-        awsShapeSwitcher.querySelectorAll('.nr-sd-face-btn').forEach((b, i) => {
-            const shapes = ['square', 'circle', 'octagon'];
-            b.classList.toggle('nr-sd-face-btn--active', shapes[i] === selectedIconBgShape);
+        iconModeRow.style.display = iconSourceTab === 'aws' ? '' : 'none';
+        modeSwitcher.querySelectorAll('.nr-seg-btn').forEach((b, i) => {
+            b.classList.toggle('nr-seg-btn--selected', i === 0 ? !selectedIconMonochrome : selectedIconMonochrome);
         });
-        if (iconBgNoBackgroundBtnEl) {
-            iconBgNoBackgroundBtnEl.classList.toggle('nr-sd-swatch-btn--selected', !selectedIconBgEnabled);
-        }
-        for (const ref of iconBgSwatchRefs) {
-            ref.btn.classList.toggle('nr-sd-swatch-btn--selected', selectedIconBgEnabled && ref.colorBase === selectedIconBgColor);
-        }
-        if (iconBgCustomColorInputRef) {
-            iconBgCustomColorInputRef.value = selectedIconBgColor;
-        }
-        modeSwitcher.querySelectorAll('.nr-sd-face-btn').forEach((b, i) => {
-            b.classList.toggle('nr-sd-face-btn--active', i === 0 ? !selectedIconMonochrome : selectedIconMonochrome);
+        // Apply mono filter only to AWS icons in the grid
+        grid.querySelectorAll('.nr-sd-icon-btn.nr-icon-color').forEach(btn => {
+            const isAws = iconSourceTab === 'aws';
+            btn.classList.toggle('nr-icon-mono', isAws && selectedIconMonochrome);
         });
     }
 
-    // Face toggle — top, front, or side
+
+
+    // ── Placement (merged from former Icon Placement section) ─────────
     iconFaceRowEl = document.createElement('div');
     iconFaceRowEl.className = 'nr-sd-face-row';
 
     const faceLbl = document.createElement('label');
     faceLbl.className = 'nr-sd-row-label';
-    faceLbl.textContent = 'Face';
+    faceLbl.textContent = 'Placement';
 
     const faceSwitcher = document.createElement('div');
-    faceSwitcher.className = 'nr-sd-face-switcher';
+    faceSwitcher.className = 'nr-seg-control nr-seg-control--fixed';
+
+    // For rotated forms, the internal face is swapped — show the default-form perspective
+    const swapFace = (f: 'top' | 'front' | 'side'): 'top' | 'front' | 'side' => {
+        if (!ROTATED_FORMS.has(selectedBaseShape)) return f;
+        if (f === 'front') return 'side';
+        if (f === 'side') return 'front';
+        return f;
+    };
+    const displayFace = swapFace(selectedIconFace);
 
     for (const face of ['top', 'front', 'side'] as const) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'nr-sd-face-btn' + (selectedIconFace === face ? ' nr-sd-face-btn--active' : '');
+        btn.className = 'nr-seg-btn' + (displayFace === face ? ' nr-seg-btn--selected' : '');
         btn.textContent = face.charAt(0).toUpperCase() + face.slice(1);
         btn.addEventListener('click', () => {
-            selectedIconFace = face;
-            faceSwitcher.querySelectorAll('.nr-sd-face-btn').forEach(b =>
-                b.classList.toggle('nr-sd-face-btn--active', b === btn)
+            // User picks in default-form perspective; swap to internal for rotated forms
+            selectedIconFace = swapFace(face);
+            faceSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
+                b.classList.toggle('nr-seg-btn--selected', b === btn)
             );
             applyIconToCurrentShape();
         });
@@ -1434,215 +2138,395 @@ function buildIconContent(container: HTMLElement) {
     iconFaceRowEl.appendChild(faceSwitcher);
     container.appendChild(iconFaceRowEl);
 
-    // Size slider — controls icon width/height (always square), in grid units
-    const sliderRow = document.createElement('div');
-    sliderRow.className = 'nr-sd-slider-row';
+    // Size — in pixels (1 GU = GRID_SIZE px)
+    let iconSizeInputRef: HTMLInputElement;
+    buildSliderField('Size', 'sd-icon-size', 0.5, 4, 0.1,
+        (el) => { iconSizeInputRef = el; el.value = String(selectedIconSize); },
+        (el) => { el.id = 'sd-icon-size-value'; },
+        () => {
+            selectedIconSize = parseFloat(iconSizeInputRef.value);
+            applyIconToCurrentShape();
+        },
+        container, 'px');
 
-    const labelRow = document.createElement('div');
-    labelRow.className = 'nr-sd-slider-label-row';
-    const sliderLbl = document.createElement('label');
-    sliderLbl.className = 'cds--label';
-    sliderLbl.setAttribute('for', 'sd-icon-size');
-    sliderLbl.textContent = 'Size';
-    const sliderValueEl = document.createElement('span');
-    sliderValueEl.className = 'nr-sd-slider-value';
-    sliderValueEl.id = 'sd-icon-size-value';
-    sliderValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
-    labelRow.appendChild(sliderLbl);
-    labelRow.appendChild(sliderValueEl);
+    // Helper: build a dual X/Y input row
+    const buildDualRow = (label: string, xVal: number, yVal: number, min: number, max: number, step: number, unit: string,
+        onChangeX: (v: number) => void, onChangeY: (v: number) => void) => {
+        const row = document.createElement('div');
+        row.className = 'nr-sd-number-row';
+        const lbl = document.createElement('label');
+        lbl.className = 'nr-sd-number-label';
+        lbl.textContent = label;
+        row.appendChild(lbl);
 
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.id = 'sd-icon-size';
-    slider.className = 'nr-sd-slider';
-    slider.min = '0.5';
-    slider.max = '4';
-    slider.step = '0.1';
-    slider.value = String(selectedIconSize);
-    setSliderFill(slider);
+        const wrap = document.createElement('div');
+        wrap.className = 'nr-sd-dual-inputs';
 
-    slider.addEventListener('input', () => {
-        setSliderFill(slider);
-        selectedIconSize = parseFloat(slider.value);
-        sliderValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
+        const buildHalf = (axis: string, val: number, onChange: (v: number) => void) => {
+            const group = document.createElement('div');
+            group.className = 'nr-sd-dual-group';
+            const axisLbl = document.createElement('span');
+            axisLbl.className = 'nr-sd-dual-axis';
+            axisLbl.textContent = axis;
+            group.appendChild(axisLbl);
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'nr-sd-dual-input';
+            input.value = Number.isInteger(val) ? `${val}${unit}` : `${parseFloat(val.toFixed(2))}${unit}`;
+            input.addEventListener('change', () => {
+                const raw = parseFloat(input.value);
+                if (!isNaN(raw)) {
+                    const clamped = Math.max(min, Math.min(max, raw));
+                    onChange(clamped);
+                    input.value = Number.isInteger(clamped) ? `${clamped}${unit}` : `${parseFloat(clamped.toFixed(2))}${unit}`;
+                }
+            });
+            // Drag-to-scrub
+            let scrubX = 0, scrubV = 0;
+            input.addEventListener('mousedown', (e: MouseEvent) => {
+                if (document.activeElement === input) return;
+                e.preventDefault();
+                scrubX = e.clientX;
+                scrubV = parseFloat(input.value) || 0;
+                document.body.style.cursor = 'ew-resize';
+                input.style.cursor = 'ew-resize';
+                const onMove = (ev: MouseEvent) => {
+                    const delta = Math.round((ev.clientX - scrubX) / 4) * step;
+                    const nv = Math.max(min, Math.min(max, scrubV + delta));
+                    onChange(nv);
+                    input.value = Number.isInteger(nv) ? `${nv}${unit}` : `${parseFloat(nv.toFixed(2))}${unit}`;
+                };
+                const onUp = () => {
+                    document.body.style.cursor = '';
+                    input.style.cursor = '';
+                    document.removeEventListener('mousemove', onMove);
+                    document.removeEventListener('mouseup', onUp);
+                };
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+            group.appendChild(input);
+            return group;
+        };
+
+        wrap.appendChild(buildHalf('X', xVal, onChangeX));
+        wrap.appendChild(buildHalf('Y', yVal, onChangeY));
+        row.appendChild(wrap);
+        container.appendChild(row);
+    };
+
+    // Offset
+    buildDualRow('Offset', selectedIconOffsetX, selectedIconOffsetY, -1, 1, 0.05, '',
+        (v) => { selectedIconOffsetX = v; applyIconToCurrentShape(); },
+        (v) => { selectedIconOffsetY = v; applyIconToCurrentShape(); });
+
+    // Skew
+    buildDualRow('Skew', selectedIconSkewX, selectedIconSkewY, -30, 30, 1, '°',
+        (v) => { selectedIconSkewX = v; applyIconToCurrentShape(); },
+        (v) => { selectedIconSkewY = v; applyIconToCurrentShape(); });
+
+    // Icon Color — same swatch popup pattern as background color
+    const iconColorRow = document.createElement('div');
+    iconColorRow.className = 'nr-sd-hex-color-row';
+    iconColorRow.style.position = 'relative';
+    const iconColorLabel = document.createElement('label');
+    iconColorLabel.className = 'nr-sd-number-label';
+    iconColorLabel.textContent = 'Icon Color';
+
+    const curIconColor = (editingIconIndex >= 0 && iconEntries[editingIconIndex])
+        ? ((iconEntries[editingIconIndex] as any).iconColor || '') : '';
+
+    const icHexWrap = document.createElement('div');
+    icHexWrap.className = 'nr-sd-hex-input-wrap';
+    const icHexInput = document.createElement('input');
+    icHexInput.type = 'text';
+    icHexInput.className = 'nr-sd-hex-input';
+    icHexInput.readOnly = true;
+    icHexInput.style.cursor = 'pointer';
+    icHexInput.value = curIconColor || 'None';
+    const icColorBtn = document.createElement('button');
+    icColorBtn.type = 'button';
+    icColorBtn.className = 'nr-sd-hex-color-btn';
+    icColorBtn.style.backgroundColor = curIconColor || 'transparent';
+
+    const icPopup = document.createElement('div');
+    icPopup.className = 'nr-sd-color-popup';
+    icPopup.style.display = 'none';
+
+    const setIconColor = (c: string) => {
+        icHexInput.value = c || 'None';
+        icColorBtn.style.backgroundColor = c || 'transparent';
+        if (editingIconIndex >= 0 && iconEntries[editingIconIndex]) {
+            (iconEntries[editingIconIndex] as any).iconColor = c;
+        }
         applyIconToCurrentShape();
-    });
+        markDirty();
+    };
 
-    sliderRow.appendChild(labelRow);
-    sliderRow.appendChild(slider);
-    container.appendChild(sliderRow);
+    // "None" button
+    const icNoneBtn = document.createElement('button');
+    icNoneBtn.type = 'button';
+    icNoneBtn.className = 'nr-sd-color-popup__no-color';
+    icNoneBtn.title = 'None';
+    icNoneBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1zm0 1a6 6 0 0 1 4.24 10.24L3.76 3.76A5.97 5.97 0 0 1 8 2zM3.76 12.24a6 6 0 0 1 8.48-8.48z"/></svg>';
+    icNoneBtn.addEventListener('click', () => { icPopup.style.display = 'none'; setIconColor(''); });
+    icPopup.appendChild(icNoneBtn);
+
+    for (const c of PRIMARY_COLORS) {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.className = 'nr-sd-color-popup__swatch';
+        swatch.style.backgroundColor = c.base;
+        swatch.title = c.label;
+        swatch.addEventListener('click', () => { icPopup.style.display = 'none'; setIconColor(c.base); });
+        icPopup.appendChild(swatch);
+    }
+
+    const icHiddenPicker = document.createElement('input');
+    icHiddenPicker.type = 'color';
+    icHiddenPicker.className = 'nr-sd-hex-hidden-picker';
+    icHiddenPicker.value = curIconColor || '#525252';
+    const icCustomSwatch = document.createElement('button');
+    icCustomSwatch.type = 'button';
+    icCustomSwatch.className = 'nr-sd-color-popup__swatch nr-sd-color-popup__swatch--custom';
+    icCustomSwatch.title = 'Custom color';
+    icCustomSwatch.innerHTML = '<svg viewBox="0 0 32 32" fill="currentColor" width="12" height="12"><path d="M29.391,2.609a3.279,3.279,0,0,0-4.634,0L18.4835,8.883,12.793,3.207,11.3789,4.6211l4.2764,4.2764L2.4072,22.146A.9967.9967,0,0,0,2.1,22.78L.042,29.0361a1,1,0,0,0,1.265,1.2637l6.2549-2.0586a.9974.9974,0,0,0,.6348-.3076L21.4453,14.6855l4.2764,4.2764,1.4141-1.4141L21.4116,11.8237l6.2744-6.2744.0051-.0051a3.2781,3.2781,0,0,0,0-4.634ZM6.8965,27.0017l-4.3384,1.4275L3.985,24.0908ZM28.2808,5.8281l-.0051.0051L21.9316,12.177l-.707-.707,6.3491-6.3491a1.2783,1.2783,0,0,1,1.806,0h0a1.2776,1.2776,0,0,1-.0977,1.7071Z"/></svg>';
+    icCustomSwatch.addEventListener('click', () => { icPopup.style.display = 'none'; icHiddenPicker.click(); });
+    icPopup.appendChild(icCustomSwatch);
+    icHiddenPicker.addEventListener('input', () => setIconColor(icHiddenPicker.value));
+
+    icColorBtn.addEventListener('click', () => {
+        const show = icPopup.style.display === 'none';
+        icPopup.style.display = show ? '' : 'none';
+        if (show) {
+            const r = icColorBtn.getBoundingClientRect();
+            icPopup.style.left = r.left + 'px';
+            requestAnimationFrame(() => {
+                const pH = icPopup.offsetHeight;
+                icPopup.style.top = (r.top - pH - 4) + 'px';
+            });
+        }
+    });
+    icHexInput.addEventListener('click', () => icColorBtn.click());
+    document.addEventListener('mousedown', (e) => { if (!icHexWrap.contains(e.target as Node)) icPopup.style.display = 'none'; }, true);
+
+    icHexWrap.appendChild(icHexInput);
+    icHexWrap.appendChild(icColorBtn);
+    icHexWrap.appendChild(icHiddenPicker);
+    icHexWrap.appendChild(icPopup);
+    iconColorRow.appendChild(iconColorLabel);
+    iconColorRow.appendChild(icHexWrap);
+    container.appendChild(iconColorRow);
+
+    // Icon Opacity
+    const curIconOpacity = (editingIconIndex >= 0 && iconEntries[editingIconIndex])
+        ? (iconEntries[editingIconIndex].iconOpacity ?? 100) : 100;
+    let iconOpacityInputRef: HTMLInputElement;
+    buildSliderField('Icon Opacity', 'sd-icon-opacity', 0, 100, 5,
+        (el) => { iconOpacityInputRef = el; el.value = String(curIconOpacity); },
+        () => {},
+        () => {
+            if (editingIconIndex >= 0 && iconEntries[editingIconIndex]) {
+                iconEntries[editingIconIndex].iconOpacity = parseFloat(iconOpacityInputRef.value);
+                applyIconToCurrentShape();
+            }
+        },
+        container, '%');
 }
 
 function buildIconBackgroundContent(container: HTMLElement) {
-    // ── Swatch row: no-bg circle + color circles ──────────────────────────────
-    const swatchRow = document.createElement('div');
-    swatchRow.className = 'nr-sd-swatch-row';
-
-    // Reset refs so syncExtrasFromShape always has fresh references.
     iconBgSwatchRefs = [];
+    syncIconBgColorDisplay = () => {};
 
-    // "No background" swatch — circle with diagonal slash (complex only)
-    const noBgBtn = document.createElement('button');
-    noBgBtn.type = 'button';
-    noBgBtn.className = 'nr-sd-swatch-btn nr-sd-swatch-btn--no-bg' + (!selectedIconBgEnabled ? ' nr-sd-swatch-btn--selected' : '');
-    noBgBtn.setAttribute('title', 'No background');
-    noBgBtn.setAttribute('aria-label', 'No background');
-    iconBgNoBackgroundBtnEl = noBgBtn;
-    noBgBtn.addEventListener('click', () => {
-        selectedIconBgEnabled = false;
-        noBgBtn.classList.add('nr-sd-swatch-btn--selected');
-        swatchRow.querySelectorAll('.nr-sd-swatch-btn:not(.nr-sd-swatch-btn--no-bg)').forEach(b =>
-            b.classList.remove('nr-sd-swatch-btn--selected')
-        );
-        updateAdaptiveToggleVisibility();
-        applyIconToCurrentShape();
-    });
-    swatchRow.appendChild(noBgBtn);
 
-    // Color swatches
+    // Hidden swatch row for sync compatibility
+    const swatchRow = document.createElement('div');
+    swatchRow.style.display = 'none';
     for (const color of PRIMARY_COLORS) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'nr-sd-swatch-btn' + (selectedIconBgEnabled && selectedIconBgColor === color.base ? ' nr-sd-swatch-btn--selected' : '');
-        btn.setAttribute('title', color.label);
-        btn.setAttribute('aria-label', color.label);
         iconBgSwatchRefs.push({ btn, colorBase: color.base });
-
-        const inner = document.createElement('span');
-        inner.className = 'nr-sd-swatch-inner';
-        inner.style.background = color.base;
-        btn.appendChild(inner);
-
-        btn.addEventListener('click', () => {
-            selectedIconBgEnabled = true;
-            selectedIconBgColor = color.base;
-            noBgBtn.classList.remove('nr-sd-swatch-btn--selected');
-            swatchRow.querySelectorAll('.nr-sd-swatch-btn:not(.nr-sd-swatch-btn--no-bg)').forEach(b =>
-                b.classList.toggle('nr-sd-swatch-btn--selected', b === btn)
-            );
-            if (iconBgCustomColorInputRef) iconBgCustomColorInputRef.value = color.base;
-            updateAdaptiveToggleVisibility();
-            applyIconToCurrentShape();
-        });
         swatchRow.appendChild(btn);
     }
-
     container.appendChild(swatchRow);
 
-    // ── Custom color picker (complex shape only) ──────────────────────────────
+    // ── Hex color input with color picker popup ──────────────────────────────
     const customColorRow = document.createElement('div');
-    customColorRow.className = 'nr-sd-custom-color-row';
+    customColorRow.className = 'nr-sd-hex-color-row';
     iconBgCustomColorRowEl = customColorRow;
 
     const customColorLabel = document.createElement('label');
-    customColorLabel.className = 'nr-sd-row-label';
-    customColorLabel.setAttribute('for', 'sd-icon-bg-custom-color');
-    customColorLabel.textContent = 'Custom';
+    customColorLabel.className = 'nr-sd-number-label';
+    customColorLabel.textContent = 'Background Color';
 
-    const customColorInput = document.createElement('input');
-    customColorInput.type = 'color';
-    customColorInput.id = 'sd-icon-bg-custom-color';
-    customColorInput.className = 'nr-sd-color-input';
-    customColorInput.value = selectedIconBgColor;
-    iconBgCustomColorInputRef = customColorInput;
+    const hexWrap = document.createElement('div');
+    hexWrap.className = 'nr-sd-hex-input-wrap';
 
-    customColorInput.addEventListener('input', () => {
-        selectedIconBgEnabled = true;
-        selectedIconBgColor = customColorInput.value;
-        noBgBtn.classList.remove('nr-sd-swatch-btn--selected');
-        swatchRow.querySelectorAll('.nr-sd-swatch-btn:not(.nr-sd-swatch-btn--no-bg)').forEach(b =>
-            b.classList.remove('nr-sd-swatch-btn--selected')
-        );
+    const hexInput = document.createElement('input');
+    hexInput.type = 'text';
+    hexInput.className = 'nr-sd-hex-input';
+    hexInput.placeholder = '#000000';
+    iconBgCustomColorInputRef = hexInput as any;
+
+    const colorBtn = document.createElement('button');
+    colorBtn.type = 'button';
+    colorBtn.className = 'nr-sd-hex-color-btn';
+
+    const NO_COLOR_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><line x1="3" y1="13" x2="13" y2="3"/></svg>';
+
+    const hiddenPicker = document.createElement('input');
+    hiddenPicker.type = 'color';
+    hiddenPicker.className = 'nr-sd-hex-hidden-picker';
+    hiddenPicker.value = selectedIconBgColor;
+
+    syncIconBgColorDisplay = () => {
+        if (selectedIconBgEnabled) {
+            hexInput.value = selectedIconBgColor;
+            hexInput.classList.remove('nr-sd-hex-input--default');
+            colorBtn.style.backgroundColor = selectedIconBgColor;
+            colorBtn.innerHTML = '';
+        } else {
+            hexInput.value = 'None';
+            hexInput.classList.add('nr-sd-hex-input--default');
+            colorBtn.style.backgroundColor = '';
+            colorBtn.innerHTML = NO_COLOR_ICON;
+        }
+        hiddenPicker.value = selectedIconBgColor;
+        if (iconBgSettingsWrapEl) iconBgSettingsWrapEl.style.display = selectedIconBgEnabled ? '' : 'none';
+    };
+    syncIconBgColorDisplay();
+
+    // Unified popup: no-color + presets + custom picker
+    const popup = document.createElement('div');
+    popup.className = 'nr-sd-color-popup';
+    popup.style.display = 'none';
+
+    // No color option
+    const noColorBtn = document.createElement('button');
+    noColorBtn.type = 'button';
+    noColorBtn.className = 'nr-sd-color-popup__no-color';
+    noColorBtn.title = 'No color';
+    noColorBtn.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><line x1="3" y1="13" x2="13" y2="3"/></svg>';
+    noColorBtn.addEventListener('click', () => {
+        selectedIconBgEnabled = false;
+        popup.style.display = 'none';
+        syncIconBgColorDisplay();
         updateAdaptiveToggleVisibility();
         applyIconToCurrentShape();
+        markDirty();
+    });
+    popup.appendChild(noColorBtn);
+
+    // Preset swatches
+    for (const color of PRIMARY_COLORS) {
+        const swatch = document.createElement('button');
+        swatch.type = 'button';
+        swatch.className = 'nr-sd-color-popup__swatch';
+        swatch.style.backgroundColor = color.base;
+        swatch.title = color.label;
+        swatch.addEventListener('click', () => {
+            selectedIconBgEnabled = true;
+            selectedIconBgColor = color.base;
+            hiddenPicker.value = color.base;
+            popup.style.display = 'none';
+            syncIconBgColorDisplay();
+            updateAdaptiveToggleVisibility();
+            applyIconToCurrentShape();
+            markDirty();
+        });
+        popup.appendChild(swatch);
+    }
+
+    // Custom color swatch (pipette icon)
+    const customSwatch = document.createElement('button');
+    customSwatch.type = 'button';
+    customSwatch.className = 'nr-sd-color-popup__swatch nr-sd-color-popup__swatch--custom';
+    customSwatch.title = 'Custom color';
+    customSwatch.innerHTML = carbonIconToString(Eyedropper16 as CarbonIcon);
+    customSwatch.addEventListener('click', () => {
+        popup.style.display = 'none';
+        hiddenPicker.click();
+    });
+    popup.appendChild(customSwatch);
+
+    colorBtn.addEventListener('click', () => {
+        const show = popup.style.display === 'none';
+        popup.style.display = show ? '' : 'none';
+        if (show) {
+            const r = colorBtn.getBoundingClientRect();
+            popup.style.left = r.left + 'px';
+            requestAnimationFrame(() => {
+                const pH = popup.offsetHeight;
+                popup.style.top = (r.top - pH - 4) + 'px';
+            });
+        }
     });
 
+    document.addEventListener('mousedown', (e) => {
+        if (!hexWrap.contains(e.target as Node)) popup.style.display = 'none';
+    }, true);
+
+    hiddenPicker.addEventListener('input', () => {
+        selectedIconBgEnabled = true;
+        selectedIconBgColor = hiddenPicker.value;
+        syncIconBgColorDisplay();
+        updateAdaptiveToggleVisibility();
+        applyIconToCurrentShape();
+        markDirty();
+    });
+
+    hexInput.readOnly = true;
+    hexInput.style.cursor = 'pointer';
+    hexInput.addEventListener('click', () => {
+        colorBtn.click();
+    });
+
+    hexWrap.appendChild(hexInput);
+    hexWrap.appendChild(colorBtn);
+    hexWrap.appendChild(hiddenPicker);
+    hexWrap.appendChild(popup);
     customColorRow.appendChild(customColorLabel);
-    customColorRow.appendChild(customColorInput);
+    customColorRow.appendChild(hexWrap);
     container.appendChild(customColorRow);
 
-    // ── Size slider ───────────────────────────────────────────────────────────
-    const sliderRow = document.createElement('div');
-    sliderRow.className = 'nr-sd-slider-row';
+    // ── Background settings (visible when bg color is selected) ─────────
+    const bgSettingsWrap = document.createElement('div');
+    bgSettingsWrap.className = 'nr-sd-bg-settings';
+    bgSettingsWrap.style.display = selectedIconBgEnabled ? '' : 'none';
+    iconBgSettingsWrapEl = bgSettingsWrap;
 
-    const labelRow = document.createElement('div');
-    labelRow.className = 'nr-sd-slider-label-row';
-    const sliderLbl = document.createElement('label');
-    sliderLbl.className = 'cds--label';
-    sliderLbl.setAttribute('for', 'sd-icon-bg-size');
-    sliderLbl.textContent = 'Size';
-    const sliderValueEl = document.createElement('span');
-    sliderValueEl.className = 'nr-sd-slider-value';
-    sliderValueEl.id = 'sd-icon-bg-size-value';
-    sliderValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
-    labelRow.appendChild(sliderLbl);
-    labelRow.appendChild(sliderValueEl);
+    let bgSizeInputRef: HTMLInputElement;
+    buildSliderField('Bg Size', 'sd-icon-bg-size', 0.5, 4, 0.1,
+        (el) => { bgSizeInputRef = el; el.value = String(selectedIconBgSize); },
+        (el) => { el.id = 'sd-icon-bg-size-value'; },
+        () => {
+            selectedIconBgSize = parseFloat(bgSizeInputRef.value);
+            applyIconToCurrentShape();
+        },
+        bgSettingsWrap, 'px');
 
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    slider.id = 'sd-icon-bg-size';
-    slider.className = 'nr-sd-slider';
-    slider.min = '0.5';
-    slider.max = '4';
-    slider.step = '0.1';
-    slider.value = String(selectedIconSize);
-    setSliderFill(slider);
+    // ── Shape switcher ─────────────────────────────────────────────────────
+    const shapeRow = document.createElement('div');
+    shapeRow.className = 'nr-sd-face-row';
 
-    slider.addEventListener('input', () => {
-        setSliderFill(slider);
-        selectedIconSize = parseFloat(slider.value);
-        sliderValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
-        // Keep the Icon-section size slider in sync
-        const iconSizeSlider = document.querySelector<HTMLInputElement>('#sd-icon-size');
-        const iconSizeValue  = document.querySelector<HTMLElement>('#sd-icon-size-value');
-        if (iconSizeSlider) {
-            iconSizeSlider.value = String(selectedIconSize);
-            setSliderFill(iconSizeSlider);
-        }
-        if (iconSizeValue)  iconSizeValue.textContent = `${selectedIconSize.toFixed(1)} cells`;
-        applyIconToCurrentShape();
-    });
+    const shapeLbl = document.createElement('label');
+    shapeLbl.className = 'nr-sd-row-label';
+    shapeLbl.textContent = 'Bg Shape';
 
-    sliderRow.appendChild(labelRow);
-    sliderRow.appendChild(slider);
-    container.appendChild(sliderRow);
+    const shapeSwitcher = document.createElement('div');
+    shapeSwitcher.className = 'nr-seg-control nr-seg-control--fixed';
 
-    // ── Shape radio ───────────────────────────────────────────────────────────
-    const fieldset = document.createElement('fieldset');
-    fieldset.className = 'cds--radio-button-group cds--radio-button-group--vertical';
-    fieldset.style.cssText = 'border:none;padding:0;margin:0;';
-
-    const legend = document.createElement('legend');
-    legend.className = 'cds--label';
-    legend.style.paddingBottom = '4px';
-    legend.textContent = 'Shape';
-    fieldset.appendChild(legend);
-
-    const bgShapeOptions: Array<{ value: 'circle' | 'square' | 'octagon'; label: string }> = [
-        { value: 'circle',  label: 'Circle' },
-        { value: 'square',  label: 'Square' },
-        { value: 'octagon', label: 'Octagon' },
-    ];
-
-    for (const opt of bgShapeOptions) {
-        const wrapper = document.createElement('div');
-        wrapper.className = 'cds--radio-button-wrapper';
-
-        const input = document.createElement('input');
-        input.type = 'radio';
-        input.className = 'cds--radio-button';
-        input.name = 'sd-icon-bg-shape';
-        input.id = `sd-bg-shape-${opt.value}`;
-        input.value = opt.value;
-        if (opt.value === selectedIconBgShape) input.checked = true;
-
-        const lbl = document.createElement('label');
-        lbl.className = 'cds--radio-button__label';
-        lbl.setAttribute('for', `sd-bg-shape-${opt.value}`);
-        lbl.innerHTML = `<span class="cds--radio-button__appearance"></span><span class="cds--radio-button__label-text">${opt.label}</span>`;
-
-        input.addEventListener('change', () => {
+    for (const opt of [{ value: 'square' as const, label: 'Square' }, { value: 'circle' as const, label: 'Circle' }, { value: 'octagon' as const, label: 'Octagon' }]) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-seg-btn' + (selectedIconBgShape === opt.value ? ' nr-seg-btn--selected' : '');
+        btn.title = opt.label;
+        btn.innerHTML = CLIP_SHAPE_ICONS[opt.value];
+        btn.addEventListener('click', () => {
             selectedIconBgShape = opt.value;
+            shapeSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
+                b.classList.toggle('nr-seg-btn--selected', b === btn)
+            );
             if (iconBgCornerRadiusRowEl) {
                 iconBgCornerRadiusRowEl.style.display = opt.value === 'square' ? '' : 'none';
             }
@@ -1651,185 +2535,266 @@ function buildIconBackgroundContent(container: HTMLElement) {
             }
             applyIconToCurrentShape();
         });
-
-        wrapper.appendChild(input);
-        wrapper.appendChild(lbl);
-        fieldset.appendChild(wrapper);
+        shapeSwitcher.appendChild(btn);
     }
 
-    container.appendChild(fieldset);
+    shapeRow.appendChild(shapeLbl);
+    shapeRow.appendChild(shapeSwitcher);
+    bgSettingsWrap.appendChild(shapeRow);
 
-    // ── Corner Radius slider (square only) ────────────────────────────────────
-    const crRow = document.createElement('div');
-    crRow.className = 'nr-sd-slider-row';
-    crRow.style.display = selectedIconBgShape === 'square' ? '' : 'none';
-    iconBgCornerRadiusRowEl = crRow;
+    // ── Corner Roundness (square only) ─────────────────────────────────
+    const crWrap = document.createElement('div');
+    crWrap.style.display = selectedIconBgShape === 'square' ? '' : 'none';
+    iconBgCornerRadiusRowEl = crWrap;
+    buildSliderField('Bg Corner Radius', 'sd-icon-bg-radius', 0, 32, 1,
+        (el) => { el.value = String(selectedIconBgRadius); iconBgCornerRadiusInputRef = el; },
+        (el) => { el.id = 'sd-icon-bg-radius-value'; },
+        () => {
+            selectedIconBgRadius = parseInt(iconBgCornerRadiusInputRef!.value, 10);
+            applyIconToCurrentShape();
+        },
+        crWrap, 'px');
+    bgSettingsWrap.appendChild(crWrap);
 
-    const crLabelRow = document.createElement('div');
-    crLabelRow.className = 'nr-sd-slider-label-row';
-    const crLbl = document.createElement('label');
-    crLbl.className = 'cds--label';
-    crLbl.setAttribute('for', 'sd-icon-bg-radius');
-    crLbl.textContent = 'Corner Roundness';
-    const crValueEl = document.createElement('span');
-    crValueEl.className = 'nr-sd-slider-value';
-    crValueEl.id = 'sd-icon-bg-radius-value';
-    crValueEl.textContent = `${selectedIconBgRadius}px`;
-    crLabelRow.appendChild(crLbl);
-    crLabelRow.appendChild(crValueEl);
+    // ── Octagon Cut Depth (octagon only) ──────────────────────────────
+    const ocWrap = document.createElement('div');
+    ocWrap.style.display = selectedIconBgShape === 'octagon' ? '' : 'none';
+    iconBgChamferRowEl = ocWrap;
+    buildSliderField('Bg Depth', 'sd-icon-bg-chamfer', 0.05, 0.45, 0.01,
+        (el) => { el.value = String(selectedIconBgChamfer); iconBgChamferInputRef = el; },
+        (el) => { el.id = 'sd-icon-bg-chamfer-value'; },
+        () => {
+            selectedIconBgChamfer = parseFloat(iconBgChamferInputRef.value);
+            applyIconToCurrentShape();
+        },
+        ocWrap, '%');
+    bgSettingsWrap.appendChild(ocWrap);
 
-    const crSlider = document.createElement('input');
-    crSlider.type = 'range';
-    crSlider.id = 'sd-icon-bg-radius';
-    crSlider.className = 'nr-sd-slider';
-    crSlider.min = '0';
-    crSlider.max = '32';
-    crSlider.step = '1';
-    crSlider.value = String(selectedIconBgRadius);
-    setSliderFill(crSlider);
-    iconBgCornerRadiusInputRef = crSlider;
+    // Background Opacity
+    const curBgOpacity = (editingIconIndex >= 0 && iconEntries[editingIconIndex])
+        ? (iconEntries[editingIconIndex].bgOpacity ?? 100) : 100;
+    let bgOpacityInputRef: HTMLInputElement;
+    buildSliderField('Bg Opacity', 'sd-icon-bg-opacity', 0, 100, 5,
+        (el) => { bgOpacityInputRef = el; el.value = String(curBgOpacity); },
+        () => {},
+        () => {
+            if (editingIconIndex >= 0 && iconEntries[editingIconIndex]) {
+                iconEntries[editingIconIndex].bgOpacity = parseFloat(bgOpacityInputRef.value);
+                applyIconToCurrentShape();
+            }
+        },
+        bgSettingsWrap, '%');
 
-    crSlider.addEventListener('input', () => {
-        setSliderFill(crSlider);
-        selectedIconBgRadius = parseInt(crSlider.value, 10);
-        crValueEl.textContent = `${selectedIconBgRadius}px`;
-        applyIconToCurrentShape();
-    });
+    container.appendChild(bgSettingsWrap);
 
-    crRow.appendChild(crLabelRow);
-    crRow.appendChild(crSlider);
-    container.appendChild(crRow);
-
-    // ── Octagon Cut Depth slider (octagon only) ──────────────────────────────
-    const ocRow = document.createElement('div');
-    ocRow.className = 'nr-sd-slider-row';
-    ocRow.style.display = selectedIconBgShape === 'octagon' ? '' : 'none';
-    iconBgChamferRowEl = ocRow;
-
-    const ocLabelRow = document.createElement('div');
-    ocLabelRow.className = 'nr-sd-slider-label-row';
-    const ocLbl = document.createElement('label');
-    ocLbl.className = 'cds--label';
-    ocLbl.setAttribute('for', 'sd-icon-bg-chamfer');
-    ocLbl.textContent = 'Cut Depth';
-    const ocValueEl = document.createElement('span');
-    ocValueEl.className = 'nr-sd-slider-value';
-    ocValueEl.id = 'sd-icon-bg-chamfer-value';
-    ocValueEl.textContent = `${Math.round(selectedIconBgChamfer * 100)}%`;
-    ocLabelRow.appendChild(ocLbl);
-    ocLabelRow.appendChild(ocValueEl);
-
-    const ocSlider = document.createElement('input');
-    ocSlider.type = 'range';
-    ocSlider.id = 'sd-icon-bg-chamfer';
-    ocSlider.className = 'nr-sd-slider';
-    ocSlider.min = '0.05';
-    ocSlider.max = '0.45';
-    ocSlider.step = '0.01';
-    ocSlider.value = String(selectedIconBgChamfer);
-    setSliderFill(ocSlider);
-    iconBgChamferInputRef = ocSlider;
-
-    ocSlider.addEventListener('input', () => {
-        setSliderFill(ocSlider);
-        selectedIconBgChamfer = parseFloat(ocSlider.value);
-        ocValueEl.textContent = `${Math.round(selectedIconBgChamfer * 100)}%`;
-        applyIconToCurrentShape();
-    });
-
-    ocRow.appendChild(ocLabelRow);
-    ocRow.appendChild(ocSlider);
-    container.appendChild(ocRow);
 }
 
 function buildColorContent(container: HTMLElement) {
-    const row = document.createElement('div');
-    row.className = 'nr-sd-color-row';
+    const hasCustomColor = !!(selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor);
+    const current = hasCustomColor ? (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor) : null;
 
-    const lbl = document.createElement('label');
-    lbl.className = 'nr-sd-row-label';
-    lbl.setAttribute('for', 'sd-color-base');
-    lbl.textContent = 'Shape Color';
-
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.id = 'sd-color-base';
-    input.className = 'nr-sd-color-input';
-    const current = selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || '#e0e0e0';
-    input.value = current;
-    colorPickerRef = input;
-
-    input.addEventListener('input', () => {
-        const val = input.value;
+    function applyColor(val: string) {
         selectedStyle.topColor   = val;
         selectedStyle.frontColor = val;
         selectedStyle.sideColor  = val;
         if (isComplexShape) {
             const layer = layers[selectedLayerIndex];
-            if (layer) {
-                layer.style.topColor   = val;
-                layer.style.frontColor = val;
-                layer.style.sideColor  = val;
-            }
-            const s    = layerShapes[selectedLayerIndex];
-            const s2D  = layerShapes2D[selectedLayerIndex];
+            if (layer) { layer.style.topColor = val; layer.style.frontColor = val; layer.style.sideColor = val; }
+            const s = layerShapes[selectedLayerIndex], s2D = layerShapes2D[selectedLayerIndex];
             if (s)   applyShapeStyle(s,   layer?.style ?? {});
             if (s2D) applyShapeStyle(s2D, layer?.style ?? {});
             return;
         }
         if (currentShape)   applyShapeStyle(currentShape,   selectedStyle);
         if (currentShape2D) applyShapeStyle(currentShape2D, selectedStyle);
-    });
+    }
 
-    const clearBtn = document.createElement('button');
-    clearBtn.type = 'button';
-    clearBtn.className = 'nr-sd-color-clear-btn';
-    clearBtn.setAttribute('title', 'Clear color');
-    clearBtn.setAttribute('aria-label', 'Clear color');
-    clearBtn.innerHTML = CDS_ICON_TRASH;
-    clearBtn.addEventListener('click', () => {
-        selectedStyle.topColor   = '';
+    function buildHexColorRow(label: string, id: string, value: string | null, onChange: (val: string) => void, onClear?: () => void): HTMLElement {
+        const NO_COLOR_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><line x1="3" y1="13" x2="13" y2="3"/></svg>';
+        let isNone = value === null;
+
+        const row = document.createElement('div');
+        row.className = 'nr-sd-hex-color-row';
+
+        const lbl = document.createElement('label');
+        lbl.className = 'nr-sd-number-label';
+        lbl.textContent = label;
+
+        const hexWrap = document.createElement('div');
+        hexWrap.className = 'nr-sd-hex-input-wrap';
+
+        const hexInput = document.createElement('input');
+        hexInput.type = 'text';
+        hexInput.id = id;
+        hexInput.className = 'nr-sd-hex-input';
+        hexInput.placeholder = '#000000';
+
+        const colorBtn = document.createElement('button');
+        colorBtn.type = 'button';
+        colorBtn.className = 'nr-sd-hex-color-btn';
+
+        const hiddenPicker = document.createElement('input');
+        hiddenPicker.type = 'color';
+        hiddenPicker.className = 'nr-sd-hex-hidden-picker';
+        hiddenPicker.value = value || '#e0e0e0';
+
+        if (id === 'sd-color-light') colorPickerRef = hiddenPicker;
+
+        const syncDisplay = () => {
+            if (isNone) {
+                hexInput.value = 'None';
+                hexInput.classList.add('nr-sd-hex-input--default');
+                colorBtn.style.backgroundColor = '';
+                colorBtn.innerHTML = NO_COLOR_ICON;
+            } else {
+                hexInput.value = value!;
+                hexInput.classList.remove('nr-sd-hex-input--default');
+                colorBtn.style.backgroundColor = value!;
+                colorBtn.innerHTML = '';
+            }
+        };
+        syncDisplay();
+
+        const popup = document.createElement('div');
+        popup.className = 'nr-sd-color-popup';
+        popup.style.display = 'none';
+
+        if (onClear) {
+            const noColorBtn = document.createElement('button');
+            noColorBtn.type = 'button';
+            noColorBtn.className = 'nr-sd-color-popup__no-color';
+            noColorBtn.title = 'Default';
+            noColorBtn.innerHTML = NO_COLOR_ICON;
+            noColorBtn.addEventListener('click', () => {
+                isNone = true;
+                popup.style.display = 'none';
+                syncDisplay();
+                onClear();
+            });
+            popup.appendChild(noColorBtn);
+        }
+
+        for (const color of PRIMARY_COLORS) {
+            const swatch = document.createElement('button');
+            swatch.type = 'button';
+            swatch.className = 'nr-sd-color-popup__swatch';
+            swatch.style.backgroundColor = color.base;
+            swatch.title = color.label;
+            swatch.addEventListener('click', () => {
+                isNone = false;
+                value = color.base;
+                hiddenPicker.value = color.base;
+                popup.style.display = 'none';
+                syncDisplay();
+                onChange(color.base);
+            });
+            popup.appendChild(swatch);
+        }
+        const customSwatch = document.createElement('button');
+        customSwatch.type = 'button';
+        customSwatch.className = 'nr-sd-color-popup__swatch nr-sd-color-popup__swatch--custom';
+        customSwatch.title = 'Custom color';
+        customSwatch.innerHTML = carbonIconToString(Eyedropper16 as CarbonIcon);
+        customSwatch.addEventListener('click', () => { popup.style.display = 'none'; hiddenPicker.click(); });
+        popup.appendChild(customSwatch);
+
+        colorBtn.addEventListener('click', () => { popup.style.display = popup.style.display === 'none' ? '' : 'none'; });
+        document.addEventListener('mousedown', (e) => { if (!hexWrap.contains(e.target as Node)) popup.style.display = 'none'; }, true);
+
+        hiddenPicker.addEventListener('input', () => {
+            isNone = false;
+            value = hiddenPicker.value;
+            syncDisplay();
+            onChange(hiddenPicker.value);
+        });
+
+        hexInput.readOnly = true;
+        hexInput.style.cursor = 'pointer';
+        hexInput.addEventListener('click', () => { colorBtn.click(); });
+        hexInput.addEventListener('change', () => {
+            let v = hexInput.value.trim();
+            if (!v.startsWith('#')) v = '#' + v;
+            if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+                isNone = false;
+                value = v;
+                hiddenPicker.value = v;
+                syncDisplay();
+                onChange(v);
+            }
+        });
+
+        hexWrap.appendChild(hexInput);
+        hexWrap.appendChild(colorBtn);
+        hexWrap.appendChild(hiddenPicker);
+        hexWrap.appendChild(popup);
+        row.appendChild(lbl);
+        row.appendChild(hexWrap);
+        return row;
+    }
+
+    const clearColor = () => {
+        selectedStyle.topColor = '';
         selectedStyle.frontColor = '';
-        selectedStyle.sideColor  = '';
-        input.value = '#e0e0e0';
-        if (isComplexShape) {
-            const layer = layers[selectedLayerIndex];
-            if (layer) layer.style = {};
-            const s    = layerShapes[selectedLayerIndex];
-            const s2D  = layerShapes2D[selectedLayerIndex];
-            if (s) {
-                s.attr('top/fill',   '#a8a8a8');
-                s.attr('front/fill', '#e0e0e0');
-                s.attr('base/fill',  '#e0e0e0');
-                s.attr('side/fill',  '#c6c6c6');
+        selectedStyle.sideColor = '';
+        selectedStyle.strokeColor = '';
+        for (const shape of [currentShape, currentShape2D]) {
+            if (!shape) continue;
+            const isTubeDuct = shape.attr('body/d') || shape.attr('outline/d');
+            const defaults: Record<string, string> = isTubeDuct
+                ? { body: '#e0e0e0', frontEllipse: '#c6c6c6', backArc: '#c6c6c6', outline: '#e0e0e0', frontFace: '#c6c6c6' }
+                : { top: '#e0e0e0', front: '#c6c6c6', base: '#c6c6c6', side: '#a8a8a8', cornerV1: '#a8a8a8', cornerV2: '#a8a8a8', cornerV3: '#c6c6c6' };
+            for (const [sel, fill] of Object.entries(defaults)) {
+                shape.attr(`${sel}/fill`, fill);
             }
-            if (s2D) {
-                s2D.attr('top/fill',   '#a8a8a8');
-                s2D.attr('front/fill', '#e0e0e0');
-                s2D.attr('base/fill',  '#e0e0e0');
-                s2D.attr('side/fill',  '#c6c6c6');
-            }
-            return;
         }
-        if (currentShape) {
-            currentShape.attr('top/fill',   '#a8a8a8');
-            currentShape.attr('front/fill', '#e0e0e0');
-            currentShape.attr('side/fill',  '#c6c6c6');
-        }
-        if (currentShape2D) {
-            currentShape2D.attr('top/fill',   '#a8a8a8');
-            currentShape2D.attr('front/fill', '#e0e0e0');
-            currentShape2D.attr('side/fill',  '#c6c6c6');
+    };
+    container.appendChild(buildHexColorRow('Light Mode', 'sd-color-light', current, applyColor, clearColor));
+    container.appendChild(buildHexColorRow('Dark Mode', 'sd-color-dark', current, applyColor, clearColor));
+
+    const colorResetBtn = document.createElement('button');
+    colorResetBtn.type = 'button';
+    colorResetBtn.className = 'nr-sd-reset-btn';
+    colorResetBtn.title = 'Reset to default';
+    colorResetBtn.innerHTML = 'Reset to default';
+    colorResetBtn.addEventListener('click', () => {
+        clearColor();
+        // Update both color row displays to "None" without rebuilding
+        container.querySelectorAll<HTMLInputElement>('.nr-sd-hex-input').forEach(inp => {
+            inp.value = 'None';
+            inp.classList.add('nr-sd-hex-input--default');
+        });
+        container.querySelectorAll<HTMLElement>('.nr-sd-hex-color-btn').forEach(btn => {
+            btn.style.backgroundColor = '';
+            btn.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><line x1="3" y1="13" x2="13" y2="3"/></svg>';
+        });
+        markDirty();
+    });
+    container.appendChild(colorResetBtn);
+}
+
+function saveAccordionState(): Record<string, boolean> {
+    const state: Record<string, boolean> = {};
+    inspectorEl.querySelectorAll('.cds--accordion__item').forEach(li => {
+        const title = li.querySelector('.cds--accordion__title')?.textContent ?? '';
+        if (title) state[title] = li.classList.contains('cds--accordion__item--active');
+    });
+    return state;
+}
+
+function restoreAccordionState(state: Record<string, boolean>) {
+    if (Object.keys(state).length === 0) return;
+    inspectorEl.querySelectorAll('.cds--accordion__item').forEach(li => {
+        const title = li.querySelector('.cds--accordion__title')?.textContent ?? '';
+        if (title in state) {
+            li.classList.toggle('cds--accordion__item--active', state[title]);
+            const heading = li.querySelector('.cds--accordion__heading');
+            if (heading) heading.setAttribute('aria-expanded', String(state[title]));
         }
     });
-
-    row.appendChild(lbl);
-    row.appendChild(input);
-    row.appendChild(clearBtn);
-    container.appendChild(row);
 }
 
 function buildInspectorPanel() {
+    const prevAccordionState = saveAccordionState();
     inspectorEl.innerHTML = '';
 
     const header = document.createElement('div');
@@ -1838,16 +2803,104 @@ function buildInspectorPanel() {
     title.className = 'nr-panel-title';
     title.textContent = 'Component Configuration';
     header.appendChild(title);
-    inspectorEl.appendChild(header);
 
-    // No user-defined shape selected — show empty state and stop here.
+    headerSaveBtn = document.createElement('button');
+    headerSaveBtn.type = 'button';
+    headerSaveBtn.className = 'nr-save-btn nr-save-btn--disabled';
+    headerSaveBtn.disabled = true;
+    headerSaveBtn.innerHTML = carbonIconToString(Save16 as CarbonIcon);
+    headerSaveBtn.title = 'Save Component';
+    headerSaveBtn.addEventListener('click', async () => {
+        await onSave();
+        clearDirty();
+    });
+    // Overflow menu (Duplicate / Delete)
+    const overflowWrap = document.createElement('div');
+    overflowWrap.className = 'nr-overflow-wrap';
+
+    const overflowBtn = document.createElement('button');
+    overflowBtn.type = 'button';
+    overflowBtn.className = 'nr-save-btn';
+    overflowBtn.title = 'More actions';
+    overflowBtn.innerHTML = carbonIconToString(OverflowMenuVertical16 as CarbonIcon);
+
+    const overflowMenu = document.createElement('ul');
+    overflowMenu.className = 'nr-overflow-menu';
+
+    const dupItem = document.createElement('li');
+    dupItem.className = 'nr-overflow-menu__item';
+    dupItem.innerHTML = CDS_ICON_COPY + ' Duplicate';
+    dupItem.addEventListener('click', () => {
+        overflowMenu.classList.remove('nr-overflow-menu--open');
+        showDuplicateShapeModal(currentShapeId);
+    });
+
+    const delItem = document.createElement('li');
+    delItem.className = 'nr-overflow-menu__item nr-overflow-menu__item--danger';
+    delItem.innerHTML = CDS_ICON_TRASH + ' Delete';
+    delItem.addEventListener('click', () => {
+        overflowMenu.classList.remove('nr-overflow-menu--open');
+        showDeleteConfirmModal(currentShapeId);
+    });
+
+    overflowMenu.appendChild(dupItem);
+    overflowMenu.appendChild(delItem);
+
+    overflowBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        overflowMenu.classList.toggle('nr-overflow-menu--open');
+    });
+
+    document.addEventListener('click', () => {
+        overflowMenu.classList.remove('nr-overflow-menu--open');
+    });
+
+    overflowWrap.appendChild(overflowBtn);
+    overflowWrap.appendChild(overflowMenu);
+
+    const adminToggleBtn = document.createElement('button');
+    adminToggleBtn.type = 'button';
+    adminToggleBtn.className = 'nr-save-btn' + (adminMode ? ' nr-save-btn--active' : '');
+    adminToggleBtn.title = adminMode ? 'Hide admin controls' : 'Show admin controls';
+    adminToggleBtn.innerHTML = carbonIconToString((adminMode ? View16 : ViewOff16) as CarbonIcon);
+    adminToggleBtn.addEventListener('click', () => {
+        adminMode = !adminMode;
+        adminToggleBtn.innerHTML = carbonIconToString((adminMode ? View16 : ViewOff16) as CarbonIcon);
+        adminToggleBtn.classList.toggle('nr-save-btn--active', adminMode);
+        adminToggleBtn.title = adminMode ? 'Hide admin controls' : 'Show admin controls';
+        if (setDefaultBtn) setDefaultBtn.style.display = adminMode ? '' : 'none';
+        // Toggle admin-only icon fields and modifier fields
+        document.querySelectorAll<HTMLElement>('[data-icon-admin]').forEach(el => {
+            el.style.display = adminMode ? '' : 'none';
+        });
+        syncModifierVisibility();
+    });
+
+    const headerActions = document.createElement('div');
+    headerActions.className = 'nr-header-actions';
+    headerActions.appendChild(adminToggleBtn);
+    headerActions.appendChild(overflowWrap);
+    headerActions.appendChild(headerSaveBtn);
+    header.appendChild(headerActions);
+
+    inspectorEl.appendChild(header);
+    inspectorDirty = false;
+
+    inspectorEl.addEventListener('input', markDirty);
+    inspectorEl.addEventListener('change', markDirty);
+    inspectorEl.addEventListener('click', (e) => {
+        const t = e.target as HTMLElement;
+        if (t.closest('.nr-toggle__track, .nr-sd-dropdown__item, .nr-sd-color-swatch, .nr-sd-face-btn, [data-icon-id]')) {
+            markDirty();
+        }
+    });
+
+    // No user-defined shape selected — hide inspector, show empty state on canvas.
     if (!currentShapeId) {
-        const empty = document.createElement('p');
-        empty.className = 'nr-inspector-empty';
-        empty.textContent = 'Create a component to get started.';
-        inspectorEl.appendChild(empty);
+        inspectorEl.style.display = 'none';
         return;
     }
+    inspectorEl.style.display = '';
 
     // Name field
     const nameSection = document.createElement('div');
@@ -1877,15 +2930,14 @@ function buildInspectorPanel() {
 
     // Component Type dropdown
     const ctLabel = document.createElement('label');
-    ctLabel.className = 'cds--label';
+    ctLabel.className = 'nr-sd-row-label';
     ctLabel.setAttribute('for', 'sd-component-type');
     ctLabel.textContent = 'Component Type';
-    ctLabel.style.marginTop = '8px';
 
     componentTypeSelect = document.createElement('select');
     const ctSelect = componentTypeSelect;
     ctSelect.id = 'sd-component-type';
-    ctSelect.className = 'cds--text-input cds--text-input--sm';
+    ctSelect.className = 'nr-sd-select';
     const ctOptions = ['', 'Server', 'Firewall', 'Switch', 'Storage', 'NIC', 'HSM', 'Custom'];
     for (const opt of ctOptions) {
         const el = document.createElement('option');
@@ -1908,7 +2960,7 @@ function buildInspectorPanel() {
 
     const hideLabelText = document.createElement('span');
     hideLabelText.className = 'nr-toggle__label-text';
-    hideLabelText.textContent = 'Hide label';
+    hideLabelText.textContent = 'Hide label on canvas';
 
     const hideLabelTrack = document.createElement('button');
     hideLabelTrack.type = 'button';
@@ -1940,7 +2992,7 @@ function buildInspectorPanel() {
 
     const toggleText = document.createElement('span');
     toggleText.className = 'nr-toggle__label-text';
-    toggleText.textContent = 'Complex Shape';
+    toggleText.textContent = 'Multi-Layer Shape';
 
     const toggleTrack = document.createElement('button');
     toggleTrack.type = 'button';
@@ -1965,7 +3017,7 @@ function buildInspectorPanel() {
 
     const variationsText = document.createElement('span');
     variationsText.className = 'nr-toggle__label-text';
-    variationsText.textContent = 'Variations';
+    variationsText.textContent = 'Enable 90° variant';
 
     const variationsTrack = document.createElement('button');
     variationsTrack.type = 'button';
@@ -2009,116 +3061,787 @@ function buildInspectorPanel() {
         variationsWrapper.classList.toggle('nr-toggle--checked', hasVariations);
         variationsTrack.setAttribute('aria-checked', hasVariations ? 'true' : 'false');
         variationSwitcher.style.display = hasVariations ? '' : 'none';
+        if (hasVariations && isComplexShape && !ShapeRegistry[currentShapeId]?.turned90) {
+            saveIconEntriesToLayer();
+            const currentDef = collectCurrentDef();
+            updateShapeDefinition(currentShapeId, {
+                ...currentDef,
+                displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
+                componentType: componentTypeSelect?.value || undefined,
+                hasVariations: true,
+                turned90: {
+                    ...currentDef,
+                    layers: layers.map(l => ({ ...l, style: { ...l.style }, icons: l.icons?.map(e => ({ ...e })) })),
+                } as ShapeDefinition,
+            });
+            saveRegistryToStorage();
+        }
         if (!hasVariations) {
             activeVariation = 'default';
             rebuildVariationButtons();
         }
+        rebuildVariationButtons();
+        markDirty();
     });
 
     variationsWrapper.appendChild(variationsText);
     variationsWrapper.appendChild(variationsTrack);
 
-    nameSection.appendChild(nameLabel);
-    nameSection.appendChild(shapeNameInput);
-    nameSection.appendChild(ctLabel);
-    nameSection.appendChild(ctSelect);
-    nameSection.appendChild(hideLabelWrapper);
-    nameSection.appendChild(variationsWrapper);
-    nameSection.appendChild(variationSwitcher);
-    nameSection.appendChild(complexToggleWrapper);
-    inspectorEl.appendChild(nameSection);
+    // Name field above tabs — single row: label left, input right
+    const nameWrap = document.createElement('div');
+    nameWrap.className = 'nr-cd-name-wrap';
+    nameLabel.className = 'nr-sd-row-label';
+    shapeNameInput.className = 'nr-sd-number-display';
+    shapeNameInput.style.cursor = 'text';
+    shapeNameInput.style.fontFamily = 'var(--cds-body-compact-01-font-family, \'IBM Plex Sans\', sans-serif)';
+    shapeNameInput.style.fontSize = '0.8125rem';
+    nameWrap.appendChild(nameLabel);
+    nameWrap.appendChild(shapeNameInput);
+    inspectorEl.appendChild(nameWrap);
+
+    // Tab navigation: Design | Settings
+    const tabBar = document.createElement('div');
+    tabBar.className = 'nr-cd-tabs';
+
+    const designTabBtn = document.createElement('button');
+    designTabBtn.type = 'button';
+    designTabBtn.className = 'nr-cd-tabs__btn nr-cd-tabs__btn--active';
+    designTabBtn.textContent = 'Design';
+
+    const settingsTabBtn = document.createElement('button');
+    settingsTabBtn.type = 'button';
+    settingsTabBtn.className = 'nr-cd-tabs__btn';
+    settingsTabBtn.textContent = 'Settings';
+
+    tabBar.appendChild(designTabBtn);
+    tabBar.appendChild(settingsTabBtn);
+    inspectorEl.appendChild(tabBar);
+
+    const designPanel = document.createElement('div');
+    designPanel.className = 'nr-cd-tab-panel';
+
+    const settingsPanel = document.createElement('div');
+    settingsPanel.className = 'nr-cd-tab-panel';
+    settingsPanel.style.display = 'none';
+
+    // Component Type — inline row (label left, dropdown right)
+    const ctRow = document.createElement('div');
+    ctRow.className = 'nr-sd-face-row';
+    ctRow.style.padding = '12px 16px 12px 10px';
+    ctRow.style.gap = '4px';
+    addTooltip(ctRow, 'Determines which data properties can be configured for this component in the System Designer.', 'prepend');
+    ctRow.appendChild(ctLabel);
+    ctSelect.style.flex = '0 0 160px';
+    ctSelect.style.width = '160px';
+    ctRow.appendChild(ctSelect);
+    settingsPanel.appendChild(ctRow);
+
+    // Multi-layer toggle — flat row below component type
+    addTooltip(complexToggleWrapper, 'Multi-layer mode. Build components with stacked layers, each with independent shapes and colors.', 'prepend');
+    complexToggleWrapper.style.padding = '4px 16px 4px 10px';
+    complexToggleWrapper.style.gap = '4px';
+    settingsPanel.appendChild(complexToggleWrapper);
+
+    variationsWrapper.style.padding = '4px 16px 4px 10px';
+    variationsWrapper.style.gap = '4px';
+    settingsPanel.appendChild(variationsWrapper);
+    variationSwitcher.style.padding = '4px 16px';
+    settingsPanel.appendChild(variationSwitcher);
+
+    designTabBtn.addEventListener('click', () => {
+        designTabBtn.classList.add('nr-cd-tabs__btn--active');
+        settingsTabBtn.classList.remove('nr-cd-tabs__btn--active');
+        designPanel.style.display = '';
+        settingsPanel.style.display = 'none';
+    });
+    settingsTabBtn.addEventListener('click', () => {
+        settingsTabBtn.classList.add('nr-cd-tabs__btn--active');
+        designTabBtn.classList.remove('nr-cd-tabs__btn--active');
+        settingsPanel.style.display = '';
+        designPanel.style.display = 'none';
+    });
 
     const accordion = document.createElement('ul');
     accordion.className = 'cds--accordion';
-    accordion.appendChild(buildAccordionItem('Form Factor',     false, buildFormFactorContent));
-    accordion.appendChild(buildAccordionItem('Dimensions',      false, buildDimensionsContent));
+
+    const formFactorLi = buildAccordionItem('Form Factor', false, buildFormFactorContent);
+    formFactorLi.setAttribute('data-design-only', 'true');
+    accordion.appendChild(formFactorLi);
+
+    const dimensionsLi = buildAccordionItem('Dimensions', false, buildDimensionsContent);
+    dimensionsLi.setAttribute('data-design-only', 'true');
+    accordion.appendChild(dimensionsLi);
+
     modifiersAccordionLi = buildAccordionItem('Modifiers', false, buildModifiersContent);
+    modifiersAccordionLi.setAttribute('data-design-only', 'true');
     accordion.appendChild(modifiersAccordionLi);
 
-    // Rotation section — visible for all shapes except cuboid
-    rotationAccordionLi = buildAccordionItem('Rotation', false, buildRotationContent);
-    rotationAccordionLi.style.display = selectedBaseShape !== 'cuboid' ? '' : 'none';
-    accordion.appendChild(rotationAccordionLi);
+    rotationAccordionLi = null;
 
-    // Position section — only visible in complex shape mode
-    positionAccordionLi = buildAccordionItem('Position', false, buildPositionContent);
+    positionAccordionLi = buildAccordionItem('Position', isComplexShape, buildPositionContent);
     positionAccordionLi.style.display = isComplexShape ? '' : 'none';
+    positionAccordionLi.setAttribute('data-design-only', 'true');
     accordion.appendChild(positionAccordionLi);
 
-    accordion.appendChild(buildAccordionItem('Icon',            false, buildIconContent));
-    accordion.appendChild(buildAccordionItem('Icon Background', false, buildIconBackgroundContent));
-    accordion.appendChild(buildAccordionItem('Color',           false, buildColorContent));
+    // ── Icons section (plus/minus pattern) ────────────────────────────
+    {
+        const iconsLi = document.createElement('li');
+        iconsLi.className = 'cds--accordion__item nr-float-section nr-float-section--active';
 
-    // SVG Footprint section — only visible in complex shape mode
+        const iconsHeader = document.createElement('div');
+        iconsHeader.className = 'nr-float-section__header';
+        const iconsTitle = document.createElement('span');
+        iconsTitle.className = 'nr-float-section__title';
+        iconsTitle.textContent = 'Icons';
+        iconsHeader.appendChild(iconsTitle);
+
+        const iconsAddIcon = carbonIconToString(AddLarge16 as CarbonIcon);
+
+        const iconsAddBtn = document.createElement('button');
+        iconsAddBtn.type = 'button';
+        iconsAddBtn.className = 'nr-float-section__btn';
+        iconsAddBtn.innerHTML = iconsAddIcon;
+        iconsAddBtn.title = 'Add icon';
+        // Event listener attached after openIconEditor is defined (see below)
+        iconsHeader.appendChild(iconsAddBtn);
+        iconsLi.appendChild(iconsHeader);
+
+        const iconsBody = document.createElement('div');
+        iconsBody.className = 'nr-float-section__body';
+        iconsBody.style.display = '';
+        iconsSectionBodyEl = iconsBody;
+
+        // Icon list container (entries) and popup container (editor)
+        const listEl = document.createElement('div');
+        let popupEl = document.getElementById('nr-icon-editor-popup') as HTMLDivElement | null;
+        if (!popupEl) {
+            popupEl = document.createElement('div');
+            popupEl.id = 'nr-icon-editor-popup';
+            popupEl.className = 'nr-icon-editor-popup';
+            popupEl.style.display = 'none';
+            document.body.appendChild(popupEl);
+        }
+        popupEl.style.display = 'none';
+
+        // Auto-reposition popup when content changes (fields show/hide)
+        let popupDesiredTop = 0;
+        let repositioning = false;
+        const repositionPopup = () => {
+            if (repositioning || popupEl!.style.display === 'none') return;
+            repositioning = true;
+            const popupH = popupEl!.offsetHeight;
+            const maxTop = window.innerHeight - popupH - 8;
+            popupEl!.style.top = Math.max(0, Math.min(popupDesiredTop, maxTop)) + 'px';
+            repositioning = false;
+        };
+        new MutationObserver(repositionPopup).observe(popupEl, { childList: true, subtree: true });
+
+        const openIconEditor = (idx: number) => {
+            editingIconIndex = idx;
+            const entry = iconEntries[idx];
+            if (!entry) return;
+            popupEl!.innerHTML = '';
+            popupEl!.style.display = '';
+            // Position popup aligned with the Icons section header
+            const headerRect = iconsHeader.getBoundingClientRect();
+            popupDesiredTop = headerRect.top - 1;
+            popupEl!.style.top = popupDesiredTop + 'px';
+            requestAnimationFrame(repositionPopup);
+
+            // Header — Carbon Modal pattern: title left, X flush top-right
+            const closeRow = document.createElement('div');
+            closeRow.className = 'nr-icon-editor-header';
+            const closeTitle = document.createElement('span');
+            closeTitle.style.fontWeight = '600';
+            closeTitle.style.fontSize = '0.8125rem';
+            closeTitle.style.cursor = 'text';
+            closeTitle.textContent = (entry as any).name || `Icon ${idx + 1}`;
+            closeTitle.addEventListener('click', () => {
+                const inp = document.createElement('input');
+                inp.type = 'text';
+                inp.className = 'nr-icon-entry-name-input';
+                inp.style.fontWeight = '600';
+                inp.style.fontSize = '0.8125rem';
+                inp.value = (entry as any).name || `Icon ${idx + 1}`;
+                closeTitle.replaceWith(inp);
+                inp.focus();
+                inp.select();
+                const commit = () => {
+                    (entry as any).name = inp.value || `Icon ${idx + 1}`;
+                    inp.replaceWith(closeTitle);
+                    closeTitle.textContent = (entry as any).name;
+                    renderIconsList();
+                };
+                inp.addEventListener('blur', commit);
+                inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
+            });
+            closeRow.appendChild(closeTitle);
+            const closeBtn = document.createElement('button');
+            closeBtn.type = 'button';
+            closeBtn.className = 'nr-icon-editor-close';
+            closeBtn.title = 'Close';
+            closeBtn.innerHTML = carbonIconToString(CloseLarge16 as CarbonIcon);
+            closeBtn.addEventListener('click', () => {
+                syncLegacyStateToIconEntry();
+                popupEl.style.display = 'none';
+                editingIconIndex = -1;
+                renderIconsList();
+            });
+            closeRow.appendChild(closeBtn);
+            popupEl.appendChild(closeRow);
+
+            // Icon selector (reuse existing buildIconContent into the popup)
+            const iconContentWrap = document.createElement('div');
+            buildIconContent(iconContentWrap);
+            popupEl.appendChild(iconContentWrap);
+
+            // Sync the legacy icon state from this entry so the existing controls work
+            selectedIcon = entry.id || null;
+            selectedIconFace = entry.face;
+            selectedIconSize = entry.size;
+            selectedIconOffsetX = entry.offsetX;
+            selectedIconOffsetY = entry.offsetY;
+            selectedIconSkewX = entry.skewX;
+            selectedIconSkewY = entry.skewY;
+            selectedIconBgEnabled = entry.bgEnabled;
+            selectedIconBgColor = entry.bgColor;
+            selectedIconBgShape = entry.bgShape;
+            selectedIconBgSize = entry.bgSize;
+            selectedIconBgRadius = entry.bgRadius;
+            selectedIconBgChamfer = entry.bgChamfer;
+            selectedIconMonochrome = entry.monochrome;
+
+            // Background controls
+            const bgContentWrap = document.createElement('div');
+            buildIconBackgroundContent(bgContentWrap);
+            popupEl.appendChild(bgContentWrap);
+        };
+
+        const renderIconsList = renderIconsListFn = () => {
+            listEl.innerHTML = '';
+            iconsBody.style.padding = iconEntries.length > 0 ? '' : '0';
+            iconsBody.style.display = '';
+
+            let dragSrcIdx = -1;
+            let dropTargetIdx = -1;
+
+            // Drag-over on the list container: compute target index from mouse position
+            listEl.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer!.dropEffect = 'move';
+                const rows = listEl.querySelectorAll('.nr-icon-entry-row');
+                let targetIdx = iconEntries.length; // default: drop at end
+                rows.forEach((r, i) => {
+                    const rect = r.getBoundingClientRect();
+                    if (e.clientY < rect.top + rect.height / 2) {
+                        if (targetIdx === iconEntries.length) targetIdx = i;
+                    }
+                });
+                if (targetIdx !== dropTargetIdx) {
+                    rows.forEach(r => r.classList.remove('nr-icon-entry-row--drop'));
+                    dropTargetIdx = targetIdx;
+                    if (targetIdx < rows.length) {
+                        rows[targetIdx].classList.add('nr-icon-entry-row--drop');
+                    } else if (rows.length > 0) {
+                        // Dropping at end: highlight last row's bottom (handled by CSS border-bottom)
+                        rows[rows.length - 1].classList.add('nr-icon-entry-row--drop-after');
+                    }
+                }
+            });
+            listEl.addEventListener('dragleave', (e) => {
+                if (!listEl.contains(e.relatedTarget as Node)) {
+                    listEl.querySelectorAll('.nr-icon-entry-row--drop, .nr-icon-entry-row--drop-after').forEach(r => r.classList.remove('nr-icon-entry-row--drop', 'nr-icon-entry-row--drop-after'));
+                    dropTargetIdx = -1;
+                }
+            });
+            listEl.addEventListener('drop', (e) => {
+                e.preventDefault();
+                listEl.querySelectorAll('.nr-icon-entry-row--drop, .nr-icon-entry-row--drop-after').forEach(r => r.classList.remove('nr-icon-entry-row--drop', 'nr-icon-entry-row--drop-after'));
+                if (dragSrcIdx < 0 || dropTargetIdx < 0 || dragSrcIdx === dropTargetIdx) { dragSrcIdx = -1; dropTargetIdx = -1; return; }
+                const [moved] = iconEntries.splice(dragSrcIdx, 1);
+                const insertAt = dropTargetIdx > dragSrcIdx ? dropTargetIdx - 1 : dropTargetIdx;
+                iconEntries.splice(insertAt, 0, moved);
+                if (editingIconIndex === dragSrcIdx) editingIconIndex = insertAt;
+                else if (editingIconIndex >= Math.min(dragSrcIdx, insertAt) && editingIconIndex <= Math.max(dragSrcIdx, insertAt)) {
+                    editingIconIndex += dragSrcIdx < insertAt ? -1 : 1;
+                }
+                dragSrcIdx = -1;
+                dropTargetIdx = -1;
+                renderIconsList();
+                applyIconToCurrentShape();
+                markDirty();
+            });
+
+            for (let idx = 0; idx < iconEntries.length; idx++) {
+                const entry = iconEntries[idx];
+                const isEditing = idx === editingIconIndex;
+                const row = document.createElement('div');
+                row.className = 'nr-icon-entry-row' + (isEditing ? ' nr-icon-entry-row--active' : '');
+
+                // Drag-and-drop
+                row.draggable = true;
+                row.addEventListener('dragstart', (e) => {
+                    dragSrcIdx = idx;
+                    row.style.opacity = '0.4';
+                    e.dataTransfer!.effectAllowed = 'move';
+                });
+                row.addEventListener('dragend', () => {
+                    row.style.opacity = '';
+                    listEl.querySelectorAll('.nr-icon-entry-row--drop, .nr-icon-entry-row--drop-after').forEach(r => r.classList.remove('nr-icon-entry-row--drop', 'nr-icon-entry-row--drop-after'));
+                    dragSrcIdx = -1;
+                    dropTargetIdx = -1;
+                });
+
+                // Drag handle (hidden when only 1 icon)
+                const dragHandle = document.createElement('span');
+                dragHandle.className = 'nr-icon-entry-drag' + (iconEntries.length < 2 ? ' nr-icon-entry-drag--hidden' : '');
+                dragHandle.innerHTML = carbonIconToString(Draggable16 as CarbonIcon).replace('width="16"', 'width="12"').replace('height="16"', 'height="12"');
+                row.appendChild(dragHandle);
+
+                // Preview thumbnail
+                const preview = document.createElement('div');
+                preview.className = 'nr-icon-entry-preview';
+                if (entry.id) {
+                    const iconData = getIconById(entry.id);
+                    if (iconData) {
+                        preview.innerHTML = iconData.svg;
+                        const isColor = iconData.source === 'aws' && !entry.monochrome
+                            || iconData.source === 'azure' || iconData.source === 'gcp';
+                        if (isColor) preview.classList.add('nr-icon-entry-preview--color');
+                    }
+                }
+                row.appendChild(preview);
+
+                // Name + Main tag
+                const nameWrap = document.createElement('div');
+                nameWrap.className = 'nr-icon-entry-name-wrap';
+                const nameEl = document.createElement('span');
+                nameEl.className = 'nr-icon-entry-name';
+                const catalogLabel = entry.id ? (getIconById(entry.id)?.label || '') : '';
+                nameEl.textContent = (entry as any).name || catalogLabel || `Icon ${idx + 1}`;
+                nameWrap.appendChild(nameEl);
+                if (entry.isMain) {
+                    const mainTag = document.createElement('span');
+                    mainTag.className = 'nr-icon-entry-main-tag';
+                    mainTag.textContent = 'Main';
+                    nameWrap.appendChild(mainTag);
+                }
+                row.appendChild(nameWrap);
+
+                // Right-click: popup with "Make Main"
+                row.addEventListener('contextmenu', (e) => {
+                    e.preventDefault();
+                    const existing = document.querySelector('.nr-icon-ctx-menu');
+                    if (existing) existing.remove();
+                    const menu = document.createElement('div');
+                    menu.className = 'nr-icon-ctx-menu';
+                    menu.style.position = 'fixed';
+                    menu.style.left = e.clientX + 'px';
+                    menu.style.top = e.clientY + 'px';
+                    menu.style.zIndex = '200';
+                    const item = document.createElement('button');
+                    item.type = 'button';
+                    item.className = 'nr-icon-ctx-menu__item';
+                    item.textContent = 'Make Main';
+                    item.addEventListener('click', () => {
+                        iconEntries.forEach(ie => ie.isMain = false);
+                        entry.isMain = true;
+                        menu.remove();
+                        renderIconsList();
+                        applyIconToCurrentShape();
+                        markDirty();
+                    });
+                    menu.appendChild(item);
+                    document.body.appendChild(menu);
+                    const dismiss = (ev: MouseEvent) => {
+                        if (!menu.contains(ev.target as Node)) { menu.remove(); document.removeEventListener('mousedown', dismiss); }
+                    };
+                    setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
+                });
+
+                // Clicking the row opens the icon editor for this entry
+                row.style.cursor = 'pointer';
+                row.addEventListener('click', (e) => {
+                    if ((e.target as HTMLElement).closest('.nr-icon-entry-btn')) return;
+                    openIconEditor(idx);
+                    renderIconsList();
+                });
+
+                // Settings button (Tuning icon)
+                const settingsBtn = document.createElement('button');
+                settingsBtn.type = 'button';
+                settingsBtn.className = 'nr-icon-entry-btn';
+                settingsBtn.title = 'Edit icon settings';
+                settingsBtn.innerHTML = carbonIconToString(Tuning16 as CarbonIcon);
+                settingsBtn.addEventListener('click', () => { openIconEditor(idx); renderIconsList(); });
+                row.appendChild(settingsBtn);
+
+                // Remove button
+                const removeBtn = document.createElement('button');
+                removeBtn.type = 'button';
+                removeBtn.className = 'nr-icon-entry-btn nr-icon-entry-btn--danger';
+                removeBtn.title = 'Remove icon';
+                removeBtn.innerHTML = carbonIconToString(Subtract16 as CarbonIcon);
+                removeBtn.addEventListener('click', () => {
+                    iconEntries.splice(idx, 1);
+                    if (editingIconIndex === idx) { popupEl.style.display = 'none'; editingIconIndex = -1; }
+                    else if (editingIconIndex > idx) editingIconIndex--;
+                    if (iconEntries.length === 0) { selectedIcon = null; selectedIconBgEnabled = false; }
+                    renderIconsList();
+                    applyIconToCurrentShape();
+                    markDirty();
+                });
+                row.appendChild(removeBtn);
+
+                listEl.appendChild(row);
+            }
+        };
+
+        // Wire + button now that openIconEditor exists
+        iconsAddBtn.addEventListener('click', () => {
+            const entry = defaultIconEntry(iconEntries.length === 0);
+            iconEntries.push(entry);
+            editingIconIndex = iconEntries.length - 1;
+            renderIconsList();
+            openIconEditor(editingIconIndex);
+        });
+
+        renderIconsList();
+
+        iconsBody.appendChild(listEl);
+        iconsLi.appendChild(iconsBody);
+        accordion.appendChild(iconsLi);
+    }
+
+    const colorLi = buildAccordionItem('Shape Color', false, buildColorContent);
+    colorLi.setAttribute('data-design-only', 'true');
+    accordion.appendChild(colorLi);
+
     svgFootprintAccordionLi = buildAccordionItem('SVG Footprint', false, (contentEl) => {
         svgFootprintAccordionContent = contentEl;
         syncSvgFootprintSection();
     });
     svgFootprintAccordionLi.style.display = isComplexShape ? '' : 'none';
+    svgFootprintAccordionLi.setAttribute('data-design-only', 'true');
     accordion.appendChild(svgFootprintAccordionLi);
 
-    inspectorEl.appendChild(accordion);
+    designPanel.appendChild(accordion);
+    inspectorEl.appendChild(designPanel);
 
-    const footer = document.createElement('div');
-    footer.className = 'nr-sd-panel-footer';
+    inspectorEl.appendChild(settingsPanel);
 
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
-    saveBtn.type = 'button';
-    saveBtn.style.width = '100%';
-    saveBtn.textContent = 'Save Component';
-    saveBtn.addEventListener('click', onSave);
+    // ── Canvas HUD (left side panel) ────────────────────────────────────
+    const hud = document.getElementById('cd2-view-toggle-container')!;
+    hud.innerHTML = '';
+    hud.style.display = currentShapeId ? '' : 'none';
 
-    const duplicateBtn = document.createElement('button');
-    duplicateBtn.className = 'cds--btn cds--btn--secondary cds--btn--sm';
-    duplicateBtn.type = 'button';
-    duplicateBtn.style.width = '100%';
-    duplicateBtn.textContent = 'Duplicate Component';
-    duplicateBtn.addEventListener('click', () => showDuplicateShapeModal(currentShapeId));
+    const hudHeader = document.createElement('div');
+    hudHeader.className = 'nr-cd-hud-header';
+    const hudTitle = document.createElement('div');
+    hudTitle.className = 'nr-cd-hud-title';
+    hudTitle.textContent = 'Display Preview';
+    hudHeader.appendChild(hudTitle);
 
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'cds--btn cds--btn--sm nr-btn--danger-ghost';
-    deleteBtn.type = 'button';
-    deleteBtn.style.width = '100%';
-    deleteBtn.textContent = 'Delete Component';
-    deleteBtn.addEventListener('click', () => showDeleteConfirmModal(currentShapeId));
+    const hudMinBtn = document.createElement('button');
+    hudMinBtn.type = 'button';
+    hudMinBtn.className = 'nr-cd-hud-minimize';
+    hudMinBtn.title = 'Minimize';
+    hudMinBtn.innerHTML = carbonIconToString(Minimize16CD as CarbonIcon);
 
-    const exportSvgBtn = document.createElement('button');
-    exportSvgBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
-    exportSvgBtn.type = 'button';
-    exportSvgBtn.style.width = '100%';
-    exportSvgBtn.textContent = 'Export SVG';
-    exportSvgBtn.addEventListener('click', exportShapeSvg);
+    let hudRestoreBtn = document.getElementById('nr-cd-hud-restore') as HTMLButtonElement | null;
+    if (!hudRestoreBtn) {
+        hudRestoreBtn = document.createElement('button');
+        hudRestoreBtn.type = 'button';
+        hudRestoreBtn.id = 'nr-cd-hud-restore';
+        hudRestoreBtn.className = 'nr-cd-hud-restore';
+        hudRestoreBtn.title = 'Display Preview';
+        hudRestoreBtn.innerHTML = carbonIconToString(SettingsView16 as CarbonIcon);
+        hudRestoreBtn.style.display = 'none';
+        hud.parentElement?.appendChild(hudRestoreBtn);
+    }
 
-    const saveToInvBtn = document.createElement('button');
-    saveToInvBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
-    saveToInvBtn.type = 'button';
-    saveToInvBtn.style.width = '100%';
-    saveToInvBtn.textContent = 'Save SVG to Inventory';
-    saveToInvBtn.addEventListener('click', async () => {
-        const root = document.documentElement;
-        const wasDark = isDarkMode();
-        const svgCurrent = await buildShapeSvgString();
-        if (!svgCurrent) return;
-        root.className = wasDark ? 'cds--white' : 'cds--g100';
-        void document.body.offsetHeight;
-        const svgOther = await buildShapeSvgString();
-        root.className = wasDark ? 'cds--g100' : 'cds--white';
-        const svgLight = wasDark ? (svgOther ?? svgCurrent) : svgCurrent;
-        const svgDark  = wasDark ? svgCurrent : (svgOther ?? svgCurrent);
-        const name = ShapeRegistry[currentShapeId]?.displayName ?? currentShapeId;
-        const generalStored = shapeStore.list('general').find(s => s.id === currentShapeId);
-        const col = generalStored?.definition.collection || ShapeRegistry[currentShapeId]?.collection || 'General';
-        saveToInventory(currentShapeId, name, col, svgLight, svgDark);
-        showToast('SVG saved to inventory');
+    hudMinBtn.addEventListener('click', () => {
+        hud.style.display = 'none';
+        if (hudRestoreBtn) hudRestoreBtn.style.display = '';
+    });
+    hudRestoreBtn.addEventListener('click', () => {
+        hud.style.display = '';
+        if (hudRestoreBtn) hudRestoreBtn.style.display = 'none';
     });
 
-    footer.appendChild(saveBtn);
-    footer.appendChild(duplicateBtn);
-    footer.appendChild(exportSvgBtn);
-    footer.appendChild(saveToInvBtn);
-    footer.appendChild(deleteBtn);
-    inspectorEl.appendChild(footer);
+    hudHeader.appendChild(hudMinBtn);
+    hud.appendChild(hudHeader);
+
+    // Controls flex to fill available width via CSS (no fixed width).
+    const toIcon14 = (icon: CarbonIcon) => carbonIconToString(icon).replace('width="16"', 'width="14"').replace('height="16"', 'height="14"');
+    const HIDE_ICON = '<svg viewBox="0 0 32 32" fill="currentColor" width="14" height="14"><path d="M2,16A14,14,0,1,0,16,2,14,14,0,0,0,2,16Zm23.15,7.75L8.25,6.85a12,12,0,0,1,16.9,16.9ZM8.24,25.16A12,12,0,0,1,6.84,8.27L23.73,25.16a12,12,0,0,1-15.49,0Z"/></svg>';
+
+    // ── Label Position (icon tile popup) ──────────────────────────────────
+    const hudLabelItem = document.createElement('div');
+    hudLabelItem.className = 'nr-cd-hud-item';
+    hudLabelItem.style.position = 'relative';
+    const hudLabelText = document.createElement('span');
+    hudLabelText.textContent = 'Label';
+
+    const labelPositions: { value: string; label: string; icon: string; col: number; row: number }[] = [
+        { value: 'top-left',      label: 'Top Left',      icon: toIcon14(AlignBoxTopLeft16 as CarbonIcon),      col: 0, row: 0 },
+        { value: 'top-center',    label: 'Top Center',    icon: toIcon14(AlignBoxTopCenter16 as CarbonIcon),    col: 1, row: 0 },
+        { value: 'top-right',     label: 'Top Right',     icon: toIcon14(AlignBoxTopRight16 as CarbonIcon),     col: 2, row: 0 },
+        { value: 'middle-left',   label: 'Middle Left',   icon: toIcon14(AlignBoxMiddleLeft16 as CarbonIcon),   col: 0, row: 1 },
+        { value: 'middle-right',  label: 'Middle Right',  icon: toIcon14(AlignBoxMiddleRight16 as CarbonIcon),  col: 2, row: 1 },
+        { value: 'bottom-left',   label: 'Bottom Left',   icon: toIcon14(AlignBoxBottomLeft16 as CarbonIcon),   col: 0, row: 2 },
+        { value: 'bottom-center', label: 'Bottom Center', icon: toIcon14(AlignBoxBottomCenter16 as CarbonIcon), col: 1, row: 2 },
+        { value: 'bottom-right',  label: 'Bottom Right',  icon: toIcon14(AlignBoxBottomRight16 as CarbonIcon),  col: 2, row: 2 },
+    ];
+    let curLabelPos = labelHidden ? 'none' : 'bottom-right';
+    const curLabelDef = labelPositions.find(p => p.value === curLabelPos);
+
+    const hudLabelTrigger = document.createElement('button');
+    hudLabelTrigger.type = 'button';
+    hudLabelTrigger.className = 'nr-marker-picker-btn';
+    hudLabelTrigger.style.justifyContent = 'flex-start';
+    hudLabelTrigger.style.gap = '6px';
+    hudLabelTrigger.style.padding = '0 8px';
+    hudLabelTrigger.innerHTML = `${curLabelDef ? curLabelDef.icon : HIDE_ICON}<span style="font-size:0.75rem">${curLabelDef ? curLabelDef.label : 'Hidden'}</span>`;
+
+    const hudLabelPopup = document.createElement('div');
+    hudLabelPopup.className = 'nr-label-pos-popup';
+    hudLabelPopup.style.display = 'none';
+    const hudLabelGrid = document.createElement('div');
+    hudLabelGrid.className = 'nr-label-pos-grid';
+
+    const applyHudLabelPos = (val: string) => {
+        curLabelPos = val;
+        const pos = labelPositions.find(p => p.value === val);
+        hudLabelTrigger.innerHTML = `${pos ? pos.icon : HIDE_ICON}<span style="font-size:0.75rem">${pos ? pos.label : 'Hidden'}</span>`;
+        hudLabelPopup.style.display = 'none';
+        const targets = isComplexShape ? [layerShapes[0], layerShapes2D[0]] : [currentShape, currentShape2D];
+        for (const s of targets) {
+            if (!s) continue;
+            if (val === 'none') { s.attr('label/display', 'none'); continue; }
+            s.attr('label/display', null);
+            const iH = s.isometricHeight ?? 0;
+            const topY = -iH - 4;
+            switch (val) {
+                case 'bottom-right':  s.attr({ label: { x: 'calc(w + 10)', y: 'calc(h + 12)', textAnchor: 'start' } }); break;
+                case 'bottom-left':   s.attr({ label: { x: -10, y: 'calc(h + 12)', textAnchor: 'end' } }); break;
+                case 'bottom-center': s.attr({ label: { x: 'calc(w / 2)', y: 'calc(h + 12)', textAnchor: 'middle' } }); break;
+                case 'top-right':     s.attr({ label: { x: 'calc(w + 10)', y: topY, textAnchor: 'start' } }); break;
+                case 'top-left':      s.attr({ label: { x: -10, y: topY, textAnchor: 'end' } }); break;
+                case 'top-center':    s.attr({ label: { x: 'calc(w / 2)', y: topY, textAnchor: 'middle' } }); break;
+                case 'middle-left':   s.attr({ label: { x: -10, y: `calc(h / 2 - ${iH / 2})`, textAnchor: 'end' } }); break;
+                case 'middle-right':  s.attr({ label: { x: 'calc(w + 10)', y: `calc(h / 2 - ${iH / 2})`, textAnchor: 'start' } }); break;
+            }
+        }
+    };
+
+    for (const pos of labelPositions) {
+        const tile = document.createElement('button');
+        tile.type = 'button';
+        tile.className = 'nr-label-pos-tile' + (pos.value === curLabelPos ? ' nr-label-pos-tile--selected' : '');
+        tile.title = pos.label;
+        tile.innerHTML = pos.icon;
+        tile.style.gridColumn = String(pos.col + 1);
+        tile.style.gridRow = String(pos.row + 1);
+        tile.addEventListener('click', () => {
+            hudLabelGrid.querySelectorAll('.nr-label-pos-tile--selected').forEach(t => t.classList.remove('nr-label-pos-tile--selected'));
+            tile.classList.add('nr-label-pos-tile--selected');
+            applyHudLabelPos(pos.value);
+        });
+        hudLabelGrid.appendChild(tile);
+    }
+    const hideBtn = document.createElement('button');
+    hideBtn.type = 'button';
+    hideBtn.className = 'nr-label-pos-tile' + (curLabelPos === 'none' ? ' nr-label-pos-tile--selected' : '');
+    hideBtn.title = 'Hide Label';
+    hideBtn.innerHTML = HIDE_ICON;
+    hideBtn.style.gridColumn = '2';
+    hideBtn.style.gridRow = '2';
+    hideBtn.addEventListener('click', () => {
+        hudLabelGrid.querySelectorAll('.nr-label-pos-tile--selected').forEach(t => t.classList.remove('nr-label-pos-tile--selected'));
+        hideBtn.classList.add('nr-label-pos-tile--selected');
+        applyHudLabelPos('none');
+    });
+    hudLabelGrid.appendChild(hideBtn);
+    hudLabelPopup.appendChild(hudLabelGrid);
+    hudLabelTrigger.addEventListener('click', () => { hudLabelPopup.style.display = hudLabelPopup.style.display === 'none' ? '' : 'none'; });
+    document.addEventListener('mousedown', (e) => { if (!hudLabelItem.contains(e.target as Node)) hudLabelPopup.style.display = 'none'; });
+    hudLabelItem.appendChild(hudLabelText);
+    hudLabelItem.appendChild(hudLabelTrigger);
+    hudLabelItem.appendChild(hudLabelPopup);
+    hud.appendChild(hudLabelItem);
+
+    // ── Orientation switcher ──────────────────────────────────────────────
+    const hudVariationItem = document.createElement('div');
+    hudVariationItem.className = 'nr-cd-hud-item';
+    const hudVariationText = document.createElement('span');
+    hudVariationText.textContent = 'Orientation';
+    const hudVarGroup = document.createElement('div');
+    hudVarGroup.className = 'nr-seg-control';
+    for (const v of ['default', 'turned90'] as const) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-seg-btn' + (activeVariation === v ? ' nr-seg-btn--selected' : '');
+        btn.textContent = v === 'default' ? 'Default' : 'Rotated';
+        btn.addEventListener('click', () => {
+            if (activeVariation === v) return;
+            switchVariation(v);
+        });
+        hudVarGroup.appendChild(btn);
+    }
+    hudVariationItem.appendChild(hudVariationText);
+    hudVariationItem.appendChild(hudVarGroup);
+    hudVariationItem.style.display = hasVariations ? '' : 'none';
+    hud.appendChild(hudVariationItem);
+
+    // Rotate 90° toggle (simple shapes with rotate pair)
+    const hudRotateItem = document.createElement('div');
+    hudRotateItem.className = 'nr-cd-hud-item';
+    const hudRotateText = document.createElement('span');
+    hudRotateText.textContent = 'Rotate 90\u00B0';
+    const hudRotateTrack = document.createElement('button');
+    hudRotateTrack.type = 'button';
+    hudRotateTrack.className = 'nr-toggle__track';
+    hudRotateTrack.setAttribute('role', 'switch');
+    hudRotateTrack.setAttribute('aria-checked', activeVariation === 'turned90' ? 'true' : 'false');
+    hudRotateTrack.setAttribute('aria-label', 'Rotate 90 degrees');
+    if (activeVariation === 'turned90') hudRotateTrack.classList.add('nr-toggle__track--on');
+    hudRotateTrack.addEventListener('click', () => {
+        const isOn = hudRotateTrack.classList.toggle('nr-toggle__track--on');
+        hudRotateTrack.setAttribute('aria-checked', isOn ? 'true' : 'false');
+        rotateShape90();
+    });
+    hudRotateItem.appendChild(hudRotateText);
+    hudRotateItem.appendChild(hudRotateTrack);
+    hudRotateItemEl = hudRotateItem;
+    const hasRotatePair = !!ROTATE_PAIR[selectedBaseShape];
+    hudRotateItem.style.display = (hasRotatePair && !isComplexShape) ? '' : 'none';
+    hud.appendChild(hudRotateItem);
+
+    // ── Opacity (reuses buildSliderField for drag-to-scrub + ±) ─────────
+    buildSliderField('Opacity', 'sd-hud-opacity', 0, 100, 5,
+        (el) => { el.value = '100'; },
+        () => {},
+        () => {
+            const el = hud.querySelector<HTMLInputElement>('#sd-hud-opacity');
+            if (!el) return;
+            const op = parseFloat(el.value) / 100;
+            if (isComplexShape) {
+                for (const s of layerShapes) { const v = paper.findViewByModel(s); if (v) v.el.style.opacity = String(op); }
+                for (const s of layerShapes2D) { const v = paper2D.findViewByModel(s); if (v) v.el.style.opacity = String(op); }
+            } else {
+                if (currentShape) { const v = paper.findViewByModel(currentShape); if (v) v.el.style.opacity = String(op); }
+                if (currentShape2D) { const v = paper2D.findViewByModel(currentShape2D); if (v) v.el.style.opacity = String(op); }
+            }
+        },
+        hud, '%');
+
+    // ── Mode (Light / Dark) switcher ──────────────────────────────────────
+    const hudThemeItem = document.createElement('div');
+    hudThemeItem.className = 'nr-cd-hud-item';
+    const hudThemeText = document.createElement('span');
+    hudThemeText.textContent = 'Mode';
+    hudThemeItem.appendChild(hudThemeText);
+
+    const lightIcon = carbonIconToString(Light16 as CarbonIcon).replace('width="16"', 'width="14"').replace('height="16"', 'height="14"');
+    const darkIcon = carbonIconToString(Asleep16 as CarbonIcon).replace('width="16"', 'width="14"').replace('height="16"', 'height="14"');
+
+    const themeSwitcher = document.createElement('div');
+    themeSwitcher.className = 'nr-seg-control';
+    const isDark = document.documentElement.classList.contains('cds--g100');
+
+    const lightBtn = document.createElement('button');
+    lightBtn.type = 'button';
+    lightBtn.className = 'nr-seg-btn' + (!isDark ? ' nr-seg-btn--selected' : '');
+    lightBtn.style.display = 'inline-flex';
+    lightBtn.style.alignItems = 'center';
+    lightBtn.style.justifyContent = 'center';
+    lightBtn.style.gap = '4px';
+    lightBtn.innerHTML = `${lightIcon}<span style="font-size:0.75rem">Light</span>`;
+    lightBtn.title = 'Light mode';
+
+    const darkBtn = document.createElement('button');
+    darkBtn.type = 'button';
+    darkBtn.className = 'nr-seg-btn' + (isDark ? ' nr-seg-btn--selected' : '');
+    darkBtn.style.display = 'inline-flex';
+    darkBtn.style.alignItems = 'center';
+    darkBtn.style.justifyContent = 'center';
+    darkBtn.style.gap = '4px';
+    darkBtn.innerHTML = `${darkIcon}<span style="font-size:0.75rem">Dark</span>`;
+    darkBtn.title = 'Dark mode';
+
+    const applyThemeFromHud = (dark: boolean) => {
+        localStorage.setItem('nr-theme', dark ? 'dark' : 'light');
+        document.documentElement.classList.toggle('cds--g100', dark);
+        document.documentElement.classList.toggle('cds--white', !dark);
+        lightBtn.classList.toggle('nr-seg-btn--selected', !dark);
+        darkBtn.classList.toggle('nr-seg-btn--selected', dark);
+        const navBtn = document.getElementById('nav-theme');
+        if (navBtn) navBtn.click();
+    };
+
+    lightBtn.addEventListener('click', () => applyThemeFromHud(false));
+    darkBtn.addEventListener('click', () => applyThemeFromHud(true));
+
+    themeSwitcher.appendChild(lightBtn);
+    themeSwitcher.appendChild(darkBtn);
+    hudThemeItem.appendChild(themeSwitcher);
+    hud.appendChild(hudThemeItem);
+
+    // ── Hit Area controls (complex shapes only) ─────────────────────────
+    const isOrWillBeComplex = isComplexShape || !!ShapeRegistry[currentShapeId]?.complexShape;
+    if (isOrWillBeComplex) {
+        const hudHitAreaItem = document.createElement('div');
+        hudHitAreaItem.className = 'nr-cd-hud-item';
+        const hudHitAreaText = document.createElement('span');
+        hudHitAreaText.textContent = 'Hit Area';
+        const hudHitAreaTrack = document.createElement('button');
+        hudHitAreaTrack.type = 'button';
+        hudHitAreaTrack.className = 'nr-toggle__track';
+        hudHitAreaTrack.setAttribute('role', 'switch');
+        hudHitAreaTrack.setAttribute('aria-checked', 'false');
+        hudHitAreaTrack.setAttribute('aria-label', 'Show Hit Area');
+
+        const hitSizeWrap = document.createElement('div');
+        hitSizeWrap.style.display = 'none';
+
+        hudHitAreaTrack.addEventListener('click', () => {
+            const isOn = hudHitAreaTrack.classList.toggle('nr-toggle__track--on');
+            hudHitAreaTrack.setAttribute('aria-checked', isOn ? 'true' : 'false');
+            hitSizeWrap.style.display = isOn ? '' : 'none';
+            if (isOn) showHitAreaOverlay();
+            else hideHitAreaOverlay();
+        });
+        hudHitAreaItem.appendChild(hudHitAreaText);
+        hudHitAreaItem.appendChild(hudHitAreaTrack);
+        hud.appendChild(hudHitAreaItem);
+
+        const haDefSize = getHitAreaSize();
+        buildSliderField('Width', 'sd-hud-ha-w', 10, 400, 5,
+            (el) => { el.value = String(haDefSize.width); },
+            () => {},
+            () => {
+                const el = hud.querySelector<HTMLInputElement>('#sd-hud-ha-w');
+                if (!el || !hitAreaShape) return;
+                const w = parseFloat(el.value) || 40;
+                hitAreaShape.resize(w, hitAreaShape.size().height);
+            },
+            hitSizeWrap, 'px');
+        buildSliderField('Height', 'sd-hud-ha-h', 10, 400, 5,
+            (el) => { el.value = String(haDefSize.height); },
+            () => {},
+            () => {
+                const el = hud.querySelector<HTMLInputElement>('#sd-hud-ha-h');
+                if (!el || !hitAreaShape) return;
+                const h = parseFloat(el.value) || 40;
+                hitAreaShape.resize(hitAreaShape.size().width, h);
+            },
+            hitSizeWrap, 'px');
+        hud.appendChild(hitSizeWrap);
+    }
+
+    restoreAccordionState(prevAccordionState);
+    syncAllInspectorFields();
 }
 
 // All form factors except 'cuboid' require width === height (square base).
@@ -2133,6 +3856,10 @@ function supportsCornerRadius(baseShape: string): boolean {
 
 // Returns true when a layer uses a custom SVG footprint for rendering.
 function isLayerSvg(layer: ShapeLayer): boolean {
+    return !!(layer.svgNormVerts && layer.svgNormVerts.length >= 3 && layer.baseShape !== 'custom');
+}
+
+function isLayerCustomVerts(layer: ShapeLayer): boolean {
     return !!(layer.svgNormVerts && layer.svgNormVerts.length >= 3);
 }
 
@@ -2164,6 +3891,8 @@ function applyChamferSizeToCurrentShape() {
 
 function applyChamferStartToCurrentShape() {
     if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        if (layer) layer.chamferStart = selectedChamferStart;
         layerShapes[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
         layerShapes2D[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
         return;
@@ -2171,6 +3900,108 @@ function applyChamferStartToCurrentShape() {
     if (!currentShape) return;
     currentShape.set('chamferStart', selectedChamferStart);
     currentShape2D?.set('chamferStart', selectedChamferStart);
+}
+
+function applyChamferBottomSizeToCurrentShape() {
+    if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        if (layer) layer.chamferBottomSize = selectedChamferBottomSize;
+        layerShapes[selectedLayerIndex]?.set('chamferBottomSize', selectedChamferBottomSize);
+        layerShapes2D[selectedLayerIndex]?.set('chamferBottomSize', selectedChamferBottomSize);
+        return;
+    }
+    if (!currentShape) return;
+    currentShape.set('chamferBottomSize', selectedChamferBottomSize);
+    currentShape2D?.set('chamferBottomSize', selectedChamferBottomSize);
+}
+
+function applyChamferBottomStartToCurrentShape() {
+    if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        if (layer) layer.chamferBottomStart = selectedChamferBottomStart;
+        layerShapes[selectedLayerIndex]?.set('chamferBottomStart', selectedChamferBottomStart);
+        layerShapes2D[selectedLayerIndex]?.set('chamferBottomStart', selectedChamferBottomStart);
+        return;
+    }
+    if (!currentShape) return;
+    currentShape.set('chamferBottomStart', selectedChamferBottomStart);
+    currentShape2D?.set('chamferBottomStart', selectedChamferBottomStart);
+}
+
+function applyShedRoofToCurrentShape() {
+    if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        if (layer) {
+            layer.shedRoofDrop = selectedShedRoofDrop;
+            layer.shedRoofDirection = selectedShedRoofDirection;
+        }
+        layerShapes[selectedLayerIndex]?.set('shedRoofDrop', selectedShedRoofDrop);
+        layerShapes[selectedLayerIndex]?.set('shedRoofDirection', selectedShedRoofDirection);
+        layerShapes2D[selectedLayerIndex]?.set('shedRoofDrop', selectedShedRoofDrop);
+        layerShapes2D[selectedLayerIndex]?.set('shedRoofDirection', selectedShedRoofDirection);
+        return;
+    }
+    if (!currentShape) return;
+    currentShape.set('shedRoofDrop', selectedShedRoofDrop);
+    currentShape.set('shedRoofDirection', selectedShedRoofDirection);
+    currentShape2D?.set('shedRoofDrop', selectedShedRoofDrop);
+    currentShape2D?.set('shedRoofDirection', selectedShedRoofDirection);
+}
+
+const ALL_MODIFIERS = new Set(['cornerRadius', 'chamfer', 'chamferHeight', 'chamferBottom', 'chamferBottomHeight', 'taper', 'twist', 'scaleTopX', 'scaleTopY', 'shedRoof', 'shedRoofDir']);
+const HIDDEN_MODIFIERS: Record<string, Set<string>> = {
+    cylinder: new Set(['cornerRadius', 'chamfer', 'chamferHeight', 'twist']),
+    tube:     ALL_MODIFIERS,
+    pipe:     ALL_MODIFIERS,
+    duct:     ALL_MODIFIERS,
+    channel:  ALL_MODIFIERS,
+};
+
+const BASE_SHAPE_LABELS: Record<string, string> = {
+    cuboid: 'Square', cylinder: 'Circle', octagon: 'Octagon', pyramid: 'Pyramid',
+    tube: 'Tube', pipe: 'Pipe (Tube rotated)', duct: 'Duct', channel: 'Channel (Duct rotated)', custom: 'Complex',
+};
+
+const ROTATE_PAIR: Record<string, string> = {
+    tube: 'pipe', pipe: 'tube',
+    duct: 'channel', channel: 'duct',
+};
+
+const ROTATED_FORMS = new Set(['pipe', 'channel']);
+const TUBE_FAMILY = new Set(['tube', 'pipe', 'duct', 'channel']);
+
+function updateResizeTools() {
+    paper.removeTools();
+    paper2D.removeTools();
+    if (dimensionYAdjustable && currentShape) {
+        currentShape.addTools(paper, View.Isometric, ['size']);
+    }
+    if (dimensionYAdjustable && currentShape2D) {
+        currentShape2D.addTools(paper2D, View.TwoDimensional, ['size']);
+    }
+}
+
+function rotateShape90() {
+    if (!currentShape || isComplexShape) return;
+
+    const pairedShape = ROTATE_PAIR[selectedBaseShape];
+    if (!pairedShape) return;
+
+    // Capture real canvas dimensions and swap for the new extrusion axis
+    const { width: realW, height: realH } = currentShape.size();
+
+    if (selectedIconFace === 'front') selectedIconFace = 'side';
+    else if (selectedIconFace === 'side') selectedIconFace = 'front';
+
+    selectedBaseShape = pairedShape as BaseShape;
+
+    widthInput.value = String(realH);
+    heightInput.value = String(realW);
+
+    applyFormFactorToCanvas();
+    if (currentShape) centerShapeOnCanvas(currentShape, currentShape2D ?? null);
+    buildInspectorPanel();
+    updateResizeTools();
 }
 
 function applyRotation() {
@@ -2189,6 +4020,13 @@ function apply3DModifiers() {
         scaleTopX: selectedScaleTopX, scaleTopY: selectedScaleTopY,
     };
     if (isComplexShape) {
+        const layer = layers[selectedLayerIndex];
+        if (layer) {
+            layer.taper = selectedTaper;
+            layer.twist = selectedTwist;
+            layer.scaleTopX = selectedScaleTopX;
+            layer.scaleTopY = selectedScaleTopY;
+        }
         const s = layerShapes[selectedLayerIndex];
         const s2 = layerShapes2D[selectedLayerIndex];
         if (s) for (const [k, v] of Object.entries(attrs)) s.set(k, v);
@@ -2204,51 +4042,113 @@ function apply3DModifiers() {
 
 // Enforce square-base (height = width) and pyramid min-depth constraints.
 function updateDimensionLock() {
+    if (!heightInput) return;
     const locked = requiresSquareBase(selectedBaseShape);
     heightInput.disabled = locked;
     heightInput.style.opacity = locked ? '0.4' : '';
     if (locked) {
         heightInput.value = widthInput.value;
         if (heightValueEl) {
-            heightValueEl.textContent = isComplexShape
-                ? `${Math.round(parseFloat(widthInput.value))} px`
-                : `${parseFloat(widthInput.value).toFixed(1)} GU`;
+            heightValueEl.textContent = `${Math.round(parseFloat(widthInput.value))} px`;
         }
     }
 
-    // Pyramid depth minimum: only enforced in simple (GU) mode.
-    // In complex pixel mode the depth slider min is already set to 0.
-    if (!isComplexShape) {
-        const minDepth = selectedBaseShape === 'pyramid' ? 2 : 0;
-        depthInput.min = String(minDepth);
-        if (parseFloat(depthInput.value) < minDepth) {
-            depthInput.value = String(minDepth);
-            if (depthValueEl) depthValueEl.textContent = `${minDepth.toFixed(1)} GU`;
-        }
+    const minDepth = selectedBaseShape === 'pyramid' ? 60 : 0;
+    depthInput.min = String(minDepth);
+    if (parseFloat(depthInput.value) < minDepth) {
+        depthInput.value = String(minDepth);
+        if (depthValueEl) depthValueEl.textContent = `${minDepth} px`;
     }
 
     // Corner radius and chamfer are only available for built-in polygon shapes,
     // not for SVG-footprint layers (SVG vertices are always used without rounding).
     const currentSvgLayer = isComplexShape ? (layers[selectedLayerIndex] ?? null) : null;
     const hasSvgLayer     = currentSvgLayer !== null && isLayerSvg(currentSvgLayer);
-    const isCuboid = supportsCornerRadius(selectedBaseShape);
     if (rotationAccordionLi) rotationAccordionLi.style.display = selectedBaseShape !== 'cuboid' ? '' : 'none';
     if (modifiersSvgInfoEl) modifiersSvgInfoEl.style.display = hasSvgLayer ? '' : 'none';
+    const showBehaviour = selectedBaseShape === 'duct' || selectedBaseShape === 'pipe'
+        || selectedBaseShape === 'tube' || selectedBaseShape === 'channel';
+    if (dimBehaviourRowEl) dimBehaviourRowEl.style.display = showBehaviour ? '' : 'none';
+    if (hudRotateItemEl) hudRotateItemEl.style.display = ROTATE_PAIR[selectedBaseShape] ? '' : 'none';
+
+    syncModifierVisibility();
 }
 
 // Update dimension sliders and value displays from the shape's current state.
+function syncModifierVisibility(): void {
+    const hidden = HIDDEN_MODIFIERS[selectedBaseShape] ?? new Set<string>();
+    if (modifiersAccordionLi) {
+        let allHidden = true;
+        ALL_MODIFIERS.forEach(m => { if (!hidden.has(m)) allHidden = false; });
+        modifiersAccordionLi.style.display = allHidden ? 'none' : '';
+        if (!allHidden) {
+            modifiersAccordionLi.querySelectorAll<HTMLElement>('[data-modifier]').forEach(el => {
+                const mod = el.dataset.modifier!;
+                const isHidden = hidden.has(mod);
+                const isAdminOnly = mod === 'cornerRadius';
+                el.style.display = (isHidden || (isAdminOnly && !adminMode)) ? 'none' : '';
+            });
+        }
+    }
+}
+
+function dimDisplayValue(px: number): string {
+    return `${Math.round(px)}`;
+}
+
+function syncAllInspectorFields() {
+    if (currentShape) syncFormFromShape(currentShape);
+    syncModifierFields();
+    syncIconBgColorDisplay();
+    applyIconToCurrentShape();
+    if (setDefaultBtn) {
+        const shapeLabel = BASE_SHAPE_LABELS[selectedBaseShape] || selectedBaseShape;
+        setDefaultBtn.textContent = `Set as default for ${shapeLabel}`;
+    }
+}
+
+function syncModifierFields() {
+    if (cornerRadiusInput) { cornerRadiusInput.value = String(selectedCornerRadius); setSliderFill(cornerRadiusInput); }
+    if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${selectedCornerRadius} px`;
+    if (chamferSizeInput) { chamferSizeInput.value = String(selectedChamferSize); setSliderFill(chamferSizeInput); }
+    if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${selectedChamferSize} px`;
+    if (taperInput) { taperInput.value = String(selectedTaper); setSliderFill(taperInput); }
+    if (taperValueEl) taperValueEl.textContent = selectedTaper.toFixed(2);
+    if (twistInput) { twistInput.value = String(selectedTwist); setSliderFill(twistInput); }
+    if (twistValueEl) twistValueEl.textContent = selectedTwist.toFixed(2);
+    if (stxInput) { stxInput.value = String(selectedScaleTopX); setSliderFill(stxInput); }
+    if (stxValueEl) stxValueEl.textContent = selectedScaleTopX.toFixed(2);
+    if (styInput) { styInput.value = String(selectedScaleTopY); setSliderFill(styInput); }
+    if (styValueEl) styValueEl.textContent = selectedScaleTopY.toFixed(2);
+}
+
 function syncFormFromShape(shape: IsometricShape) {
     const { width, height } = shape.size();
     const depth = shape.get('isometricHeight') ?? 0;
-    const wGU = width  / GRID_SIZE;
-    const hGU = height / GRID_SIZE;
-    const dGU = depth  / GRID_SIZE;
-    widthInput.value  = String(wGU);
-    heightInput.value = String(hGU);
-    depthInput.value  = String(dGU);
-    if (widthValueEl)  widthValueEl.textContent  = `${wGU.toFixed(1)} GU`;
-    if (heightValueEl) heightValueEl.textContent = `${hGU.toFixed(1)} GU`;
-    if (depthValueEl)  depthValueEl.textContent  = `${dGU.toFixed(1)} GU`;
+    const swapped = ROTATED_FORMS.has(selectedBaseShape);
+    const wPx = swapped ? height : width;
+    const isTube = TUBE_FAMILY.has(selectedBaseShape);
+
+    if (isTube) {
+        widthInput.value  = String(wPx);
+        heightInput.value = String(depth);
+        depthInput.value  = String(depth);
+        if (widthDisplayEl)  widthDisplayEl.value  = String(Math.round(wPx));
+        if (heightDisplayEl) heightDisplayEl.value = String(Math.round(depth));
+        if (widthValueEl)  widthValueEl.textContent  = `${Math.round(wPx)} px`;
+        if (heightValueEl) heightValueEl.textContent = `${Math.round(depth)} px`;
+    } else {
+        const hPx = swapped ? width : height;
+        widthInput.value  = String(wPx);
+        heightInput.value = String(hPx);
+        depthInput.value  = String(depth);
+        if (widthDisplayEl)  widthDisplayEl.value  = String(Math.round(wPx));
+        if (heightDisplayEl) heightDisplayEl.value = String(Math.round(hPx));
+        if (depthDisplayEl)  depthDisplayEl.value  = String(Math.round(depth));
+        if (widthValueEl)  widthValueEl.textContent  = `${Math.round(wPx)} px`;
+        if (heightValueEl) heightValueEl.textContent = `${Math.round(hPx)} px`;
+        if (depthValueEl)  depthValueEl.textContent  = `${Math.round(depth)} px`;
+    }
     updateDimensionLock();
     syncAllSliderFills();
 }
@@ -2260,14 +4160,25 @@ function syncExtrasFromShape(id: string) {
     selectedBaseShape   = (defaults?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid') as BaseShape;
     selectedIconFace    = defaults?.iconFace   ?? 'top';
     selectedIcon        = defaults?.icon       ?? null;
-    selectedIconSize    = defaults?.iconSize   ?? 1;
+    selectedIconSize    = defaults?.iconSize   ?? 1.5;
     iconLayerIndex      = defaults?.iconLayerIndex ?? 0;
-    selectedIconBgEnabled  = true; // reset to enabled on shape switch
+    selectedIconBgEnabled  = defaults?.iconBgEnabled
+        ?? (!!defaults?.iconHref && !!defaults?.iconBgColor
+            && decodeURIComponent(defaults.iconHref).includes(`fill="${defaults.iconBgColor}"`));
     selectedIconAdaptive   = false;
     selectedIconBgColor = defaults?.iconBgColor ?? PRIMARY_COLORS[0].base;
     selectedIconBgShape  = (defaults?.iconBgShape ?? 'circle') as 'circle' | 'square' | 'octagon';
     selectedIconBgRadius = defaults?.iconBgRadius ?? 6;
     selectedIconBgChamfer = defaults?.iconBgChamfer ?? 0.18;
+    selectedIconBgSize = defaults?.iconBgSize ?? (defaults?.iconSize ?? 1.5);
+
+    // For complex shapes, icons live per-layer — don't load from shape-level.
+    // For simple shapes, migrate from old format.
+    if (!defaults?.complexShape) {
+        iconEntries = defaults ? migrateIconDef(defaults) : [];
+    }
+    editingIconIndex = -1;
+
     selectedStyle     = {
         topColor:    defaults?.style?.topColor    ?? '',
         sideColor:   defaults?.style?.sideColor   ?? '',
@@ -2275,6 +4186,7 @@ function syncExtrasFromShape(id: string) {
         strokeColor: defaults?.style?.strokeColor ?? '',
     };
     selectedRotation  = defaults?.rotation  ?? 0;
+    dimensionYAdjustable = defaults?.dimYAdjustable ?? false;
     selectedTaper     = defaults?.taper     ?? 0;
     selectedTwist     = defaults?.twist     ?? 0;
     selectedScaleTopX = defaults?.scaleTopX ?? 1;
@@ -2285,6 +4197,7 @@ function syncExtrasFromShape(id: string) {
         r.checked = r.value === selectedBaseShape;
     });
     syncFormFactorTiles();
+    syncFormFactorDropdown();
 
     // Sync icon selection — no-icon button has data-icon-id="" which maps to selectedIcon===null
     inspectorEl.querySelectorAll<HTMLElement>('.nr-sd-icon-btn').forEach(btn => {
@@ -2294,15 +4207,16 @@ function syncExtrasFromShape(id: string) {
         btn.classList.toggle('nr-sd-icon-btn--selected', match);
     });
 
-    // Sync both size sliders (Icon section + Icon Background section share selectedIconSize)
+    // Sync icon size slider
     const sizeSlider = inspectorEl.querySelector<HTMLInputElement>('#sd-icon-size');
     const sizeValueEl = inspectorEl.querySelector<HTMLElement>('#sd-icon-size-value');
     if (sizeSlider) { sizeSlider.value = String(selectedIconSize); setSliderFill(sizeSlider); }
     if (sizeValueEl) sizeValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
+    // Sync icon background size slider (independent)
     const bgSizeSlider = inspectorEl.querySelector<HTMLInputElement>('#sd-icon-bg-size');
     const bgSizeValueEl = inspectorEl.querySelector<HTMLElement>('#sd-icon-bg-size-value');
-    if (bgSizeSlider) { bgSizeSlider.value = String(selectedIconSize); setSliderFill(bgSizeSlider); }
-    if (bgSizeValueEl) bgSizeValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
+    if (bgSizeSlider) { bgSizeSlider.value = String(selectedIconBgSize); setSliderFill(bgSizeSlider); }
+    if (bgSizeValueEl) bgSizeValueEl.textContent = `${selectedIconBgSize.toFixed(1)} cells`;
 
     // Sync icon background: no-bg swatch + color swatches + custom color picker
     if (iconBgNoBackgroundBtnEl) {
@@ -2311,22 +4225,19 @@ function syncExtrasFromShape(id: string) {
     for (const { btn, colorBase } of iconBgSwatchRefs) {
         btn.classList.toggle('nr-sd-swatch-btn--selected', selectedIconBgEnabled && colorBase === selectedIconBgColor);
     }
-    if (iconBgCustomColorInputRef) iconBgCustomColorInputRef.value = selectedIconBgColor;
 
     // Sync icon background shape radio
     inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-icon-bg-shape"]').forEach(r => {
         r.checked = r.value === selectedIconBgShape;
     });
 
-    // Sync corner radius slider visibility and value
+    // Sync corner roundness slider visibility and value
     if (iconBgCornerRadiusRowEl) {
         iconBgCornerRadiusRowEl.style.display = selectedIconBgShape === 'square' ? '' : 'none';
     }
     if (iconBgCornerRadiusInputRef) {
         iconBgCornerRadiusInputRef.value = String(selectedIconBgRadius);
         setSliderFill(iconBgCornerRadiusInputRef);
-        const crValueEl = document.getElementById('sd-icon-bg-radius-value');
-        if (crValueEl) crValueEl.textContent = `${selectedIconBgRadius}px`;
     }
 
     // Sync octagon cut depth slider visibility and value
@@ -2340,6 +4251,9 @@ function syncExtrasFromShape(id: string) {
         if (ocValueEl) ocValueEl.textContent = `${Math.round(selectedIconBgChamfer * 100)}%`;
     }
 
+    // Sync icon background color display
+    syncIconBgColorDisplay();
+
     // Sync single color input
     const representativeColor = selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || '#e0e0e0';
     if (colorPickerRef) colorPickerRef.value = representativeColor;
@@ -2347,6 +4261,7 @@ function syncExtrasFromShape(id: string) {
     // Apply dimension lock now that selectedBaseShape has been updated.
     updateDimensionLock();
     syncAllSliderFills();
+
 }
 
 // Swap the canvas shape to match the selected form factor, preserving current dimensions.
@@ -2355,13 +4270,18 @@ function applyFormFactorToCanvas() {
         const layer = layers[selectedLayerIndex];
         if (!layer) return;
         layer.baseShape = selectedBaseShape;
+        if (selectedBaseShape !== 'custom') {
+            delete layer.svgNormVerts;
+        }
         if (requiresSquareBase(selectedBaseShape)) {
             layer.height = layer.width;
-            heightInput.value = String(layer.width / GRID_SIZE);
-            if (heightValueEl) heightValueEl.textContent = `${(layer.width / GRID_SIZE).toFixed(1)} GU`;
+            heightInput.value = String(layer.width);
+            if (heightValueEl) heightValueEl.textContent = `${Math.round(layer.width)} px`;
+            if (heightDisplayEl) heightDisplayEl.value = String(Math.round(layer.width));
         }
         updateDimensionLock();
         renderLayersOnCanvas();
+        syncInspectorToLayer(selectedLayerIndex);
         return;
     }
 
@@ -2371,12 +4291,9 @@ function applyFormFactorToCanvas() {
     if (requiresSquareBase(selectedBaseShape)) heightInput.value = widthInput.value;
     updateDimensionLock();
 
-    const widthGU  = parseFloat(widthInput.value);
-    const heightGU = parseFloat(heightInput.value);
-    const depthGU  = parseFloat(depthInput.value);
-    const width  = (isNaN(widthGU)  || widthGU  < 0.5 ? 1 : widthGU)  * GRID_SIZE;
-    const height = (isNaN(heightGU) || heightGU < 0.5 ? 1 : heightGU) * GRID_SIZE;
-    const depth  = (isNaN(depthGU)  || depthGU  < 0   ? 0 : depthGU)  * GRID_SIZE;
+    const width  = parseFloat(widthInput.value)  || 40;
+    const height = parseFloat(heightInput.value) || 40;
+    const depth  = parseFloat(depthInput.value)  || 0;
 
     const pos = currentShape.position();
 
@@ -2418,10 +4335,12 @@ function applyFormFactorToCanvas() {
     }
     apply3DModifiers();
     applyRotation();
+    centerShapeOnCanvas(currentShape, currentShape2D);
 }
 
 // Apply slider dimension values to the preview shape (grid units → px).
 function onFieldChange() {
+    markDirty();
     if (isComplexShape) {
         // Sliders operate in pixels in complex mode.
         const layer = layers[selectedLayerIndex];
@@ -2453,18 +4372,43 @@ function onFieldChange() {
         return;
     }
     if (!currentShape) return;
-    const widthGU = parseFloat(widthInput.value);
+    const widthPx = parseFloat(widthInput.value);
     if (requiresSquareBase(selectedBaseShape)) {
-        heightInput.value = String(widthGU);
-        if (heightValueEl) heightValueEl.textContent = `${widthGU.toFixed(1)} GU`;
+        heightInput.value = String(widthPx);
+        if (heightValueEl) heightValueEl.textContent = `${Math.round(widthPx)} px`;
     }
-    const heightGU = parseFloat(heightInput.value);
-    const depthGU  = parseFloat(depthInput.value);
-    if (isNaN(widthGU) || isNaN(heightGU) || isNaN(depthGU) || widthGU < 0.5 || heightGU < 0.5 || depthGU < 0) return;
-    currentShape.resize(widthGU * GRID_SIZE, heightGU * GRID_SIZE);
-    currentShape.set('isometricHeight', depthGU * GRID_SIZE);
-    currentShape2D?.resize(widthGU * GRID_SIZE, heightGU * GRID_SIZE);
-    currentShape2D?.set('isometricHeight', depthGU * GRID_SIZE);
+
+    const isTube = TUBE_FAMILY.has(selectedBaseShape);
+    if (isTube) {
+        const lengthPx = widthPx;
+        const diameterPx = parseFloat(heightInput.value);
+        if (isNaN(lengthPx) || isNaN(diameterPx) || lengthPx < 1 || diameterPx < 1) return;
+        depthInput.value = String(diameterPx);
+        const swapped = ROTATED_FORMS.has(selectedBaseShape);
+        const canvasW = swapped ? diameterPx : lengthPx;
+        const canvasH = swapped ? lengthPx : diameterPx;
+        resizeFromInput = true;
+        currentShape.resize(canvasW, canvasH);
+        currentShape.set('isometricHeight', diameterPx);
+        currentShape2D?.resize(canvasW, canvasH);
+        currentShape2D?.set('isometricHeight', diameterPx);
+        resizeFromInput = false;
+        centerShapeOnCanvas(currentShape, currentShape2D ?? null);
+        return;
+    }
+
+    const heightPx = parseFloat(heightInput.value);
+    const depthPx  = parseFloat(depthInput.value);
+    if (isNaN(widthPx) || isNaN(heightPx) || isNaN(depthPx) || widthPx < 1 || heightPx < 1 || depthPx < 0) return;
+    const swapped = ROTATED_FORMS.has(selectedBaseShape);
+    const canvasW = swapped ? heightPx : widthPx;
+    const canvasH = swapped ? widthPx : heightPx;
+    resizeFromInput = true;
+    currentShape.resize(canvasW, canvasH);
+    currentShape.set('isometricHeight', depthPx);
+    currentShape2D?.resize(canvasW, canvasH);
+    currentShape2D?.set('isometricHeight', depthPx);
+    resizeFromInput = false;
     centerShapeOnCanvas(currentShape, currentShape2D ?? null);
 }
 
@@ -2474,32 +4418,50 @@ function collectCurrentDef(): Partial<ShapeDefinition> {
     if (selectedIcon) {
         const iconEntry = getIconById(selectedIcon);
         if (iconEntry) {
-            const isAws = isVendorIcon(iconEntry);
-            const isAwsMono = isAws && selectedIconMonochrome;
-            const iconSvg = isAwsMono ? stripAwsBackground(iconEntry.svg) : iconEntry.svg;
-            const applyWhite = !isAws || isAwsMono;
-            const pad = isAwsMono ? 'compact' : (isAws ? 'tight' : 'normal');
-            const clip = isAws && !isAwsMono;
-            const svg = buildCompositeIconSvg(iconSvg, selectedIconBgEnabled ? selectedIconBgColor : null, selectedIconBgShape, applyWhite, selectedIconBgRadius, selectedIconBgChamfer, pad, clip);
+            const isAwsEntry = iconEntry.source === 'aws';
+            const isAwsMono = isAwsEntry && selectedIconMonochrome;
+            let iSvg: string, iBg: string | null, iWhite: boolean, iPad: 'normal' | 'compact' | 'tight' | 'none', iClip: boolean;
+            if (isAwsEntry && !isAwsMono) {
+                iSvg = iconEntry.svg;
+                iBg = selectedIconBgEnabled ? selectedIconBgColor : null;
+                iWhite = false;
+                iPad = 'normal';
+                iClip = false;
+            } else if (isAwsMono) {
+                iSvg = iconEntry.svgMono || iconEntry.svg;
+                iBg = selectedIconBgEnabled ? selectedIconBgColor : null;
+                iWhite = selectedIconBgEnabled ? true : isDarkMode();
+                iPad = 'compact';
+                iClip = false;
+            } else if (iconEntry.source === 'azure' || iconEntry.source === 'gcp') {
+                iSvg = iconEntry.svg;
+                iBg = selectedIconBgEnabled ? selectedIconBgColor : null;
+                iWhite = false;
+                iPad = 'normal';
+                iClip = false;
+            } else {
+                iSvg = iconEntry.svg;
+                iBg = selectedIconBgEnabled ? selectedIconBgColor : null;
+                iWhite = selectedIconBgEnabled ? true : isDarkMode();
+                iPad = 'normal';
+                iClip = false;
+            }
+            const cGU = Math.max(selectedIconSize, selectedIconBgSize);
+            const cPx = cGU * GRID_SIZE;
+            const iPx = selectedIconSize * GRID_SIZE;
+            const bPx = selectedIconBgSize * GRID_SIZE;
+            const svg = buildCompositeIconSvg(iSvg, iBg, selectedIconBgShape, iWhite, selectedIconBgRadius, selectedIconBgChamfer, iPad, iClip, cPx, iPx, bPx);
             iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
         }
     }
 
     if (isComplexShape && layers.length > 0) {
+        saveIconEntriesToLayer();
         const layer1 = layers[0];
         return {
             defaultSize: { width: layer1.width, height: layer1.height },
             defaultIsometricHeight: layer1.depth,
             baseShape: layer1.baseShape,
-            iconFace: selectedIconFace,
-            icon: selectedIcon ?? undefined,
-            iconSize: selectedIconSize,
-            iconBgColor: selectedIconBgColor,
-            iconBgShape: selectedIconBgShape,
-            iconBgRadius: selectedIconBgRadius,
-            iconBgChamfer: selectedIconBgChamfer,
-            iconHref,
-            iconLayerIndex,
             cornerRadius: selectedCornerRadius,
             chamferSize: selectedChamferSize,
             chamferStart: selectedChamferStart || undefined,
@@ -2510,16 +4472,22 @@ function collectCurrentDef(): Partial<ShapeDefinition> {
                 strokeColor: selectedStyle.strokeColor || undefined,
             },
             complexShape: true,
-            layers: layers.map(l => ({ ...l, style: { ...l.style } })),
+            layers: layers.map(l => ({ ...l, style: { ...l.style }, icons: l.icons?.map(e => ({ ...e })) })),
+            hitAreaSize: hitAreaShape ? { ...hitAreaShape.size() } : undefined,
         };
     }
 
-    const widthGU = parseFloat(widthInput.value);
-    const heightGU = parseFloat(heightInput.value);
-    const depthGU = parseFloat(depthInput.value);
+    syncLegacyStateToIconEntry();
+
+    const dispW = parseFloat(widthInput.value);
+    const dispH = parseFloat(heightInput.value);
+    const depthPx = parseFloat(depthInput.value);
+    const swapped = ROTATED_FORMS.has(selectedBaseShape);
+    const saveW = swapped ? dispH : dispW;
+    const saveH = swapped ? dispW : dispH;
     return {
-        defaultSize: { width: widthGU * GRID_SIZE, height: heightGU * GRID_SIZE },
-        defaultIsometricHeight: depthGU * GRID_SIZE,
+        defaultSize: { width: saveW, height: saveH },
+        defaultIsometricHeight: depthPx,
         baseShape: selectedBaseShape,
         iconFace: selectedIconFace,
         icon: selectedIcon ?? undefined,
@@ -2529,6 +4497,7 @@ function collectCurrentDef(): Partial<ShapeDefinition> {
         iconBgRadius: selectedIconBgRadius,
         iconBgChamfer: selectedIconBgChamfer,
         iconHref,
+        icons: iconEntries.length > 0 ? iconEntries : undefined,
         cornerRadius: selectedCornerRadius,
         chamferSize: selectedChamferSize,
         chamferStart: selectedChamferStart || undefined,
@@ -2544,6 +4513,7 @@ function collectCurrentDef(): Partial<ShapeDefinition> {
             ? (currentShape.get('normalizedVerts') as [number, number][] | undefined)
             : undefined,
         rotation: selectedRotation || undefined,
+        dimYAdjustable: dimensionYAdjustable || undefined,
         taper: selectedTaper || undefined,
         twist: selectedTwist || undefined,
         scaleTopX: selectedScaleTopX !== 1 ? selectedScaleTopX : undefined,
@@ -2552,6 +4522,7 @@ function collectCurrentDef(): Partial<ShapeDefinition> {
 }
 
 function switchVariation(target: 'default' | 'turned90') {
+    saveIconEntriesToLayer();
     const currentDef = collectCurrentDef();
     if (activeVariation === 'default') {
         updateShapeDefinition(currentShapeId, {
@@ -2610,9 +4581,11 @@ async function onSave() {
                 update.iconFace = existing.iconFace;
                 update.icon = existing.icon;
                 update.iconSize = existing.iconSize;
+                update.iconBgEnabled = existing.iconBgEnabled;
                 update.iconBgColor = existing.iconBgColor;
                 update.iconBgShape = existing.iconBgShape;
                 update.iconBgRadius = existing.iconBgRadius;
+                update.iconBgSize = existing.iconBgSize;
                 update.iconBgChamfer = existing.iconBgChamfer;
                 update.iconHref = existing.iconHref;
                 update.cornerRadius = existing.cornerRadius;
@@ -2639,22 +4612,17 @@ async function onSave() {
     document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
     buildPalettePanel();
 
-    // Auto-save SVG to inventory (both light + dark variants)
-    const root = document.documentElement;
-    const wasDark = isDarkMode();
-    const svgCurrent = await buildShapeSvgString();
-    if (svgCurrent) {
-        root.className = wasDark ? 'cds--white' : 'cds--g100';
-        void document.body.offsetHeight;
-        const svgOther = await buildShapeSvgString();
-        root.className = wasDark ? 'cds--g100' : 'cds--white';
-        const svgLight = wasDark ? (svgOther ?? svgCurrent) : svgCurrent;
-        const svgDark  = wasDark ? svgCurrent : (svgOther ?? svgCurrent);
+    // Auto-save SVG to inventory (current theme only — no theme swap to avoid flash)
+    const svg = await buildShapeSvgString();
+    if (svg) {
+        const wasDark = isDarkMode();
         const generalStored = shapeStore.list('general').find(s => s.id === currentShapeId);
         const col = generalStored?.definition.collection || ShapeRegistry[currentShapeId]?.collection || 'General';
-        saveToInventory(currentShapeId, name, col, svgLight, svgDark);
+        saveToInventory(currentShapeId, name, col, wasDark ? svg : svg, wasDark ? svg : svg);
         document.dispatchEvent(new CustomEvent('nextrack:inventory-changed'));
     }
+
+    showToast('Component saved');
 }
 
 function centerShapeOnCanvas(shape: IsometricShape, shape2D: IsometricShape | null) {
@@ -2711,12 +4679,99 @@ function recenterCompositeShape() {
 
     translate(layerShapes);
     translate(layerShapes2D);
+
+    if (hitAreaVisible) {
+        if (hitAreaShape) centerHitArea(hitAreaShape, graph);
+        if (hitAreaShape2D) centerHitArea(hitAreaShape2D, graph2D);
+    }
+}
+
+function getHitAreaSize(): { width: number; height: number } {
+    const reg = ShapeRegistry[currentShapeId];
+    if (reg?.hitAreaSize) return { ...reg.hitAreaSize };
+    const L0 = layers[0];
+    if (!L0) return { width: GRID_SIZE * 2, height: GRID_SIZE * 2 };
+    let minX = 0, minY = 0, maxX = L0.width, maxY = L0.height;
+    for (const l of layers) {
+        const lx = l.offsetX - L0.width / 2 + l.width / 2;
+        const ly = l.offsetY - L0.height / 2 + l.height / 2;
+        minX = Math.min(minX, lx - l.width / 2);
+        minY = Math.min(minY, ly - l.height / 2);
+        maxX = Math.max(maxX, lx + l.width / 2 + L0.width / 2);
+        maxY = Math.max(maxY, ly + l.height / 2 + L0.height / 2);
+    }
+    return { width: maxX - minX, height: maxY - minY };
+}
+
+function centerHitArea(area: IsometricShape, g: dia.Graph) {
+    const gridPx = CD_GRID_COUNT * GRID_SIZE;
+    const center = gridPx / 2;
+    const s = area.size();
+    area.position(center - s.width / 2, center - s.height / 2);
+}
+
+function showHitAreaOverlay() {
+    hideHitAreaOverlay();
+    hitAreaVisible = true;
+    const haSize = getHitAreaSize();
+
+    const createOverlay = (g: dia.Graph, p: dia.Paper): IsometricShape => {
+        const area = new Area();
+        area.resize(haSize.width, haSize.height);
+        area.attr('body/fill', 'rgba(15, 98, 254, 0.08)');
+        area.attr('body/stroke', '#0f62fe');
+        area.attr('body/stroke-width', 1);
+        area.attr('body/stroke-dasharray', '4 3');
+        area.attr('label/display', 'none');
+        area.set('z', 1000);
+        centerHitArea(area, g);
+        g.addCell(area);
+        area.addTools(p, View.TwoDimensional);
+        return area;
+    };
+
+    hitAreaShape = createOverlay(graph, paper);
+    hitAreaShape2D = createOverlay(graph2D, paper2D);
+
+    hitAreaShape.on('change:size', () => {
+        if (!hitAreaShape) return;
+        centerHitArea(hitAreaShape, graph);
+        const s = hitAreaShape.size();
+        if (hitAreaShape2D) {
+            hitAreaShape2D.resize(s.width, s.height);
+            centerHitArea(hitAreaShape2D, graph2D);
+        }
+        const wEl = document.getElementById('sd-hud-ha-w') as HTMLInputElement | null;
+        const hEl = document.getElementById('sd-hud-ha-h') as HTMLInputElement | null;
+        if (wEl) { wEl.value = String(Math.round(s.width)); const d = wEl.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display'); if (d) d.value = `${Math.round(s.width)}px`; }
+        if (hEl) { hEl.value = String(Math.round(s.height)); const d = hEl.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display'); if (d) d.value = `${Math.round(s.height)}px`; }
+        markDirty();
+    });
+}
+
+function hideHitAreaOverlay() {
+    hitAreaVisible = false;
+    if (hitAreaShape) { hitAreaShape.remove(); hitAreaShape = null; }
+    if (hitAreaShape2D) { hitAreaShape2D.remove(); hitAreaShape2D = null; }
 }
 
 // Keep form in sync when resize or height tools are used directly on the shape.
 graph.on('change:size', (cell: dia.Cell) => {
-    if (isComplexShape) return; // layer shapes have no resize tools
+    if (isComplexShape) return;
     if (currentShape && cell.id === currentShape.id) {
+        // For adjustable tube/duct shapes, constrain to only change the length axis
+        // Default (tube/duct): length=canvas width, cross-section=canvas height (fix height)
+        // Rotated (pipe/channel): length=canvas height, cross-section=canvas width (fix width)
+        if (!resizeFromInput && dimensionYAdjustable && ROTATE_PAIR[selectedBaseShape]) {
+            const { width, height } = currentShape.size();
+            const isRotated = ROTATED_FORMS.has(selectedBaseShape);
+            const fixedPx = parseFloat(heightInput.value) || 40;
+            if (isRotated && Math.abs(width - fixedPx) > 0.5) {
+                currentShape.resize(fixedPx, height, { silent: true });
+            } else if (!isRotated && Math.abs(height - fixedPx) > 0.5) {
+                currentShape.resize(width, fixedPx, { silent: true });
+            }
+        }
         syncFormFromShape(currentShape);
         applyIconToCurrentShape();
         if (currentShape2D) {
@@ -2725,6 +4780,41 @@ graph.on('change:size', (cell: dia.Cell) => {
         }
         centerShapeOnCanvas(currentShape, currentShape2D);
     }
+});
+
+paper.on('element:mouseenter', () => {
+    paper.el.querySelectorAll('.joint-tools').forEach(el => el.classList.add('nr-tools--hover'));
+});
+paper.on('element:mouseleave', () => {
+    paper.el.querySelectorAll('.nr-tools--hover').forEach(el => el.classList.remove('nr-tools--hover'));
+});
+
+graph2D.on('change:size', (cell: dia.Cell) => {
+    if (isComplexShape) return;
+    if (currentShape2D && cell.id === currentShape2D.id) {
+        if (!resizeFromInput && dimensionYAdjustable && ROTATE_PAIR[selectedBaseShape]) {
+            const { width, height } = currentShape2D.size();
+            const isRotated = ROTATED_FORMS.has(selectedBaseShape);
+            const fixedPx = parseFloat(heightInput.value) || 40;
+            if (isRotated && Math.abs(width - fixedPx) > 0.5) {
+                currentShape2D.resize(fixedPx, height, { silent: true });
+            } else if (!isRotated && Math.abs(height - fixedPx) > 0.5) {
+                currentShape2D.resize(width, fixedPx, { silent: true });
+            }
+        }
+        const { width, height } = currentShape2D.size();
+        currentShape?.resize(width, height);
+        syncFormFromShape(currentShape2D);
+        applyIconToCurrentShape();
+        centerShapeOnCanvas(currentShape!, currentShape2D);
+    }
+});
+
+paper2D.on('element:mouseenter', () => {
+    paper2D.el.querySelectorAll('.joint-tools').forEach(el => el.classList.add('nr-tools--hover'));
+});
+paper2D.on('element:mouseleave', () => {
+    paper2D.el.querySelectorAll('.nr-tools--hover').forEach(el => el.classList.remove('nr-tools--hover'));
 });
 
 graph.on('change:isometricHeight', (cell: dia.Cell) => {
@@ -2760,43 +4850,37 @@ function syncSvgFootprintSection() {
 
     if (!layer) return;
 
-    if (isLayerSvg(layer)) {
-        // ── SVG is loaded: show filename + preview and an icon-only remove button ──
-        const row = document.createElement('div');
-        row.className = 'nr-svgfp-row';
+    // Row: label left, control right (160px) — same layout as other inputs
+    const row = document.createElement('div');
+    row.className = 'nr-sd-number-row';
 
+    const lbl = document.createElement('span');
+    lbl.className = 'nr-sd-number-label';
+    lbl.textContent = 'File';
+    row.appendChild(lbl);
+
+    const controlWrap = document.createElement('div');
+    controlWrap.className = 'nr-svgfp-control';
+
+    if (isLayerSvg(layer)) {
         const fileName = document.createElement('span');
-        fileName.className = 'nr-svgfp-filename nr-svgfp-filename--body';
+        fileName.className = 'nr-svgfp-name';
         fileName.title = layer.svgFootprintName ?? 'custom.svg';
         fileName.textContent = layer.svgFootprintName ?? 'custom.svg';
 
         const removeBtn = document.createElement('button');
         removeBtn.type = 'button';
         removeBtn.className = 'nr-svgfp-remove-btn';
-        removeBtn.title = 'Remove SVG footprint';
+        removeBtn.title = 'Remove';
         removeBtn.setAttribute('aria-label', 'Remove SVG footprint');
         removeBtn.innerHTML = CDS_ICON_TRASH;
         removeBtn.addEventListener('click', onRemoveSvgFootprint);
 
-        row.appendChild(fileName);
-        row.appendChild(removeBtn);
-        svgFootprintAccordionContent.appendChild(row);
-
-        // Live preview — render the raw uploaded SVG so the user can confirm the outline.
-        if (layer.svgFootprint) {
-            const preview = document.createElement('div');
-            preview.className = 'nr-svgfp-preview';
-            preview.setAttribute('aria-label', 'SVG footprint preview');
-            preview.innerHTML = layer.svgFootprint;
-            svgFootprintAccordionContent.appendChild(preview);
-        }
+        controlWrap.appendChild(fileName);
+        controlWrap.appendChild(removeBtn);
     } else {
-        // ── No SVG loaded: label left, compact upload button right ────────
-        const uploadRow = document.createElement('div');
-        uploadRow.className = 'nr-svgfp-row';
-
         const fileNameSpan = document.createElement('span');
-        fileNameSpan.className = 'nr-svgfp-filename';
+        fileNameSpan.className = 'nr-svgfp-name nr-svgfp-name--empty';
         fileNameSpan.textContent = 'No file';
 
         const fileInput = document.createElement('input');
@@ -2806,21 +4890,61 @@ function syncSvgFootprintSection() {
         fileInput.style.display = 'none';
         fileInput.addEventListener('change', () => onSvgFootprintUpload(fileInput));
 
-        const uploadLabel = document.createElement('label');
-        uploadLabel.className = 'cds--btn cds--btn--secondary cds--btn--sm nr-svgfp-upload-label';
-        uploadLabel.setAttribute('for', 'sd-svgfp-input');
-        uploadLabel.textContent = 'Upload';
+        const uploadBtn = document.createElement('label');
+        uploadBtn.className = 'nr-svgfp-upload-btn';
+        uploadBtn.setAttribute('for', 'sd-svgfp-input');
+        uploadBtn.textContent = 'Upload';
 
-        uploadRow.appendChild(fileNameSpan);
-        uploadRow.appendChild(fileInput);
-        uploadRow.appendChild(uploadLabel);
-        svgFootprintAccordionContent.appendChild(uploadRow);
+        controlWrap.appendChild(fileNameSpan);
+        controlWrap.appendChild(fileInput);
+        controlWrap.appendChild(uploadBtn);
+    }
 
-        const hint = document.createElement('p');
-        hint.className = 'cds--form__helper-text';
-        hint.style.marginTop = '4px';
-        hint.textContent = 'Single closed outline SVG only.';
-        svgFootprintAccordionContent.appendChild(hint);
+    row.appendChild(controlWrap);
+    svgFootprintAccordionContent.appendChild(row);
+
+    if (isLayerSvg(layer) && layer.svgFootprint) {
+        const preview = document.createElement('div');
+        preview.className = 'nr-svgfp-preview';
+        preview.setAttribute('aria-label', 'SVG footprint preview');
+        preview.innerHTML = layer.svgFootprint;
+        svgFootprintAccordionContent.appendChild(preview);
+
+        // Billboard toggle
+        const bbRow = document.createElement('div');
+        bbRow.className = 'nr-sd-face-row';
+        const bbLabel = document.createElement('span');
+        bbLabel.className = 'nr-sd-row-label';
+        bbLabel.textContent = 'Stand Up';
+        bbRow.appendChild(bbLabel);
+
+        const bbToggle = document.createElement('div');
+        bbToggle.className = 'nr-toggle';
+        const bbBtn = document.createElement('button');
+        bbBtn.type = 'button';
+        bbBtn.id = 'sd-svg-billboard';
+        bbBtn.setAttribute('role', 'switch');
+        const isBillboard = !!(layer as any).svgBillboard;
+        bbBtn.setAttribute('aria-checked', String(isBillboard));
+        if (isBillboard) bbToggle.classList.add('nr-toggle--checked');
+        const bbTrack = document.createElement('span');
+        bbTrack.className = 'nr-toggle__track';
+        bbBtn.appendChild(bbTrack);
+        bbBtn.addEventListener('click', () => {
+            const next = !((layer as any).svgBillboard);
+            (layer as any).svgBillboard = next;
+            bbBtn.setAttribute('aria-checked', String(next));
+            bbToggle.classList.toggle('nr-toggle--checked', next);
+            applyBillboardMode(next);
+            markDirty();
+        });
+        bbToggle.appendChild(bbBtn);
+        bbRow.appendChild(bbToggle);
+        svgFootprintAccordionContent.appendChild(bbRow);
+
+        // Apply billboard mode to current shapes
+        applyBillboardMode(isBillboard);
+    } else if (!isLayerSvg(layer)) {
     }
 
     // Parse error (cleared on layer switch and on successful upload/remove)
@@ -2830,6 +4954,53 @@ function syncSvgFootprintSection() {
         errEl.style.marginTop = '4px';
         errEl.textContent = svgParseError;
         svgFootprintAccordionContent.appendChild(errEl);
+    }
+}
+
+function applyBillboardMode(enabled: boolean): void {
+    const layer = layers[selectedLayerIndex];
+    if (!layer) return;
+    const svgStr = layer.svgFootprint;
+
+    for (let i = 0; i < layerShapes.length; i++) {
+        const s = layerShapes[i];
+        const s2D = layerShapes2D[i];
+        if (!s) continue;
+
+        if (enabled && svgStr) {
+            const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgStr)}`;
+            const { width: w, height: h } = s.size();
+            const iH = (s.get('isometricHeight') as number) || 10;
+
+            // Hide normal 3D faces
+            s.attr('side/display', 'none');
+            s.attr('top/display', 'none');
+            s.attr('base/display', 'none');
+
+            const cx = w / 2;
+            const cy = h / 2;
+            s.attr('billboardFront', {
+                href, x: 0, y: 0, width: w, height: h, display: null,
+                transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`,
+            });
+
+            // 2D flat view
+            if (s2D) {
+                s2D.attr('base/display', 'none');
+                s2D.attr('billboard2D', {
+                    href, x: 0, y: 0, width: w, height: h, display: null,
+                });
+            }
+        } else {
+            s.attr('side/display', null);
+            s.attr('top/display', null);
+            s.attr('base/display', null);
+            s.attr('billboardFront/display', 'none');
+            if (s2D) {
+                s2D.attr('base/display', null);
+                s2D.attr('billboard2D/display', 'none');
+            }
+        }
     }
 }
 
@@ -2882,12 +5053,10 @@ function onRemoveSvgFootprint() {
 
 function showLayersPanel() {
     layerPanelEl.style.display = 'flex';
-    canvasWrapEl.style.right = '508px'; // 300px inspector + 208px layers
 }
 
 function hideLayersPanel() {
     layerPanelEl.style.display = 'none';
-    canvasWrapEl.style.right = '';
 }
 
 /**
@@ -2916,10 +5085,8 @@ function renderLayersOnCanvas() {
         const isoX = bx - layer.width  / 2 + layer.offsetX - layer.baseElevation;
         const isoY = by - layer.height / 2 + layer.offsetY - layer.baseElevation;
 
-        // Use SvgPolygonShape when the layer has an uploaded SVG footprint,
-        // otherwise fall back to the selected built-in form factor.
         let shape: IsometricShape;
-        if (isLayerSvg(layer)) {
+        if (isLayerCustomVerts(layer)) {
             const svgShape = new SvgPolygonShape();
             svgShape.set('normalizedVerts', layer.svgNormVerts!);
             shape = svgShape;
@@ -2932,9 +5099,27 @@ function renderLayersOnCanvas() {
         shape.set('defaultSize',            { width: layer.width, height: layer.height });
         if (layer.cornerRadius !== undefined) shape.set('cornerRadius', layer.cornerRadius);
         if (layer.chamferSize !== undefined) shape.set('chamferSize', layer.chamferSize);
+        if (layer.chamferStart) shape.set('chamferStart', layer.chamferStart);
+        if (layer.chamferBottomSize) shape.set('chamferBottomSize', layer.chamferBottomSize);
+        if (layer.chamferBottomStart) shape.set('chamferBottomStart', layer.chamferBottomStart);
+        if (layer.taper) shape.set('taper', layer.taper);
+        if (layer.twist) shape.set('twist', layer.twist);
+        if (layer.scaleTopX !== undefined && layer.scaleTopX !== 1) shape.set('scaleTopX', layer.scaleTopX);
+        if (layer.scaleTopY !== undefined && layer.scaleTopY !== 1) shape.set('scaleTopY', layer.scaleTopY);
+        if (layer.shedRoofDrop) shape.set('shedRoofDrop', layer.shedRoofDrop);
+        if (layer.shedRoofDirection) shape.set('shedRoofDirection', layer.shedRoofDirection);
         shape.position(isoX, isoY);
         shape.toggleView(View.Isometric);
-        // Only the first layer carries the shape's label; additional layers are unlabelled.
+        if ((layer as any).svgBillboard && layer.svgFootprint) {
+            const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(layer.svgFootprint)}`;
+            const lw = layer.width, lh = layer.height;
+            const cx = lw / 2, cy = lh / 2;
+            shape.attr({ 'side': { display: 'none' }, 'top': { display: 'none' }, 'base': { display: 'none' } });
+            shape.attr('billboardFront', {
+                href, x: 0, y: 0, width: lw, height: lh, display: null,
+                transform: `matrix(1,0,-1,-1,0,${lh}) rotate(180,${cx},${cy})`,
+            });
+        }
         if (idx > 0) shape.attr('label/text', '');
         layerShapes.push(shape);
 
@@ -2942,7 +5127,7 @@ function renderLayersOnCanvas() {
         const y2D = by - layer.height / 2 + layer.offsetY;
 
         let shape2D: IsometricShape;
-        if (isLayerSvg(layer)) {
+        if (isLayerCustomVerts(layer)) {
             const svgShape2D = new SvgPolygonShape();
             svgShape2D.set('normalizedVerts', layer.svgNormVerts!);
             shape2D = svgShape2D;
@@ -2955,15 +5140,26 @@ function renderLayersOnCanvas() {
         shape2D.set('defaultSize',            { width: layer.width, height: layer.height });
         if (layer.cornerRadius !== undefined) shape2D.set('cornerRadius', layer.cornerRadius);
         if (layer.chamferSize !== undefined) shape2D.set('chamferSize', layer.chamferSize);
+        if (layer.chamferStart) shape2D.set('chamferStart', layer.chamferStart);
+        if (layer.chamferBottomSize) shape2D.set('chamferBottomSize', layer.chamferBottomSize);
+        if (layer.chamferBottomStart) shape2D.set('chamferBottomStart', layer.chamferBottomStart);
+        if (layer.taper) shape2D.set('taper', layer.taper);
+        if (layer.twist) shape2D.set('twist', layer.twist);
+        if (layer.scaleTopX !== undefined && layer.scaleTopX !== 1) shape2D.set('scaleTopX', layer.scaleTopX);
+        if (layer.scaleTopY !== undefined && layer.scaleTopY !== 1) shape2D.set('scaleTopY', layer.scaleTopY);
+        if (layer.shedRoofDrop) shape2D.set('shedRoofDrop', layer.shedRoofDrop);
+        if (layer.shedRoofDirection) shape2D.set('shedRoofDirection', layer.shedRoofDirection);
         shape2D.position(x2D, y2D);
         shape2D.toggleView(View.TwoDimensional);
+        if ((layer as any).svgBillboard && layer.svgFootprint) {
+            const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(layer.svgFootprint)}`;
+            shape2D.attr('base/display', 'none');
+            shape2D.attr('billboard2D', { href, x: 0, y: 0, width: layer.width, height: layer.height, display: null });
+        }
         if (idx > 0) shape2D.attr('label/text', '');
         layerShapes2D.push(shape2D);
     }
 
-    // Add cells in FORWARD order so SVG painter's algorithm puts Layer 0
-    // (the main/base layer) at the bottom of the stack, with additional
-    // layers painting above it. First cell added = painted first = behind.
     for (let idx = 0; idx < layerShapes.length; idx++) {
         graph.addCell(layerShapes[idx]);
         const s = layers[idx];
@@ -2979,12 +5175,15 @@ function renderLayersOnCanvas() {
         }
     }
 
-    // currentShape points to the selected layer (used by slider sync on canvas events).
     currentShape   = layerShapes[selectedLayerIndex]   ?? null;
     currentShape2D = layerShapes2D[selectedLayerIndex] ?? null;
 
-    // Reapply icon to Layer 1 (component-level attribute) after canvas rebuild.
-    applyIconToCurrentShape();
+    // Apply each layer's stored icons to its own shape.
+    if (isComplexShape) {
+        applyAllLayerIcons();
+    } else {
+        applyIconToCurrentShape();
+    }
 
     // Realign the composite bbox to the canvas centre.
     recenterCompositeShape();
@@ -3054,11 +5253,21 @@ function buildLayersPanel() {
         li.appendChild(menuBtn);
 
         li.addEventListener('click', () => {
+            saveIconEntriesToLayer();
+            editingIconIndex = -1;
+            const edPopup = document.getElementById('nr-icon-editor-popup');
+            if (edPopup) edPopup.style.display = 'none';
             selectedLayerIndex = i;
-            buildLayersPanel();
-            syncInspectorToLayer(i);
+            selectedBaseShape = layers[i]?.baseShape ?? 'cuboid';
             currentShape   = layerShapes[i]   ?? null;
             currentShape2D = layerShapes2D[i] ?? null;
+            iconEntries = layers[i]?.icons?.map(e => ({ ...e })) ?? [];
+            selectedIcon = null;
+            selectedIconBgEnabled = false;
+            buildLayersPanel();
+            buildInspectorPanel();
+            syncInspectorToLayer(i);
+            applyAllLayerIcons();
         });
 
         list.appendChild(li);
@@ -3222,6 +5431,53 @@ function showRenameLayerModal(index: number) {
     nameInput.focus();
 }
 
+let applyingAllLayerIcons = false;
+
+function applyAllLayerIcons() {
+    if (!isComplexShape) return;
+    applyingAllLayerIcons = true;
+    const noIconAttrs = {
+        topIcon:   { href: '', width: 0, height: 0 },
+        topIcon2D: { href: '', width: 0, height: 0 },
+    };
+    const savedEntries = iconEntries;
+    const savedShape = currentShape;
+    const savedShape2D = currentShape2D;
+    for (let idx = 0; idx < layers.length; idx++) {
+        const layerIcons = layers[idx].icons;
+        const shape = layerShapes[idx];
+        const shape2D = layerShapes2D[idx];
+        if (!layerIcons || !layerIcons.some(e => !!e.id || e.bgEnabled)) {
+            shape?.attr(noIconAttrs);
+            shape2D?.attr(noIconAttrs);
+            continue;
+        }
+        iconEntries = layerIcons;
+        currentShape = shape ?? null;
+        currentShape2D = shape2D ?? null;
+        applyIconToCurrentShape();
+    }
+    iconEntries = savedEntries;
+    currentShape = savedShape;
+    currentShape2D = savedShape2D;
+    applyingAllLayerIcons = false;
+}
+
+function saveIconEntriesToLayer() {
+    if (!isComplexShape) return;
+    const layer = layers[selectedLayerIndex];
+    if (layer) layer.icons = iconEntries.map(e => ({ ...e }));
+}
+
+function loadIconEntriesFromLayer(index: number) {
+    if (!isComplexShape) return;
+    const layer = layers[index];
+    iconEntries = layer?.icons?.map(e => ({ ...e })) ?? [];
+    selectedIcon = null;
+    selectedIconBgEnabled = false;
+    if (renderIconsListFn) renderIconsListFn();
+}
+
 function syncInspectorToLayer(index: number) {
     const layer = layers[index];
     if (!layer) return;
@@ -3238,13 +5494,28 @@ function syncInspectorToLayer(index: number) {
     if (widthValueEl)  widthValueEl.textContent  = `${Math.round(layer.width)} px`;
     if (heightValueEl) heightValueEl.textContent = `${Math.round(layer.height)} px`;
     if (depthValueEl)  depthValueEl.textContent  = `${Math.round(layer.depth)} px`;
+    if (widthDisplayEl)  widthDisplayEl.value  = String(Math.round(layer.width));
+    if (heightDisplayEl) heightDisplayEl.value = String(Math.round(layer.height));
+    if (depthDisplayEl)  depthDisplayEl.value  = String(Math.round(layer.depth));
 
-    if (offsetXInput)        { offsetXInput.value       = String(layer.offsetX);       setSliderFill(offsetXInput); }
-    if (offsetYInput)        { offsetYInput.value       = String(layer.offsetY);       setSliderFill(offsetYInput); }
+    if (offsetXInput)        {
+        offsetXInput.value = String(layer.offsetX);
+        setSliderFill(offsetXInput);
+        const d = offsetXInput.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
+        if (d) d.value = `${Math.round(layer.offsetX)}px`;
+    }
+    if (offsetYInput)        {
+        offsetYInput.value = String(layer.offsetY);
+        setSliderFill(offsetYInput);
+        const d = offsetYInput.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
+        if (d) d.value = `${Math.round(layer.offsetY)}px`;
+    }
     if (baseElevationInput)  {
-        baseElevationInput.value    = String(layer.baseElevation);
+        baseElevationInput.value = String(layer.baseElevation);
         baseElevationInput.disabled = index === 0;
         setSliderFill(baseElevationInput);
+        const d = baseElevationInput.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
+        if (d) d.value = `${Math.round(layer.baseElevation)}px`;
     }
     if (offsetXValueEl)       offsetXValueEl.textContent       = `${Math.round(layer.offsetX)} px`;
     if (offsetYValueEl)       offsetYValueEl.textContent       = `${Math.round(layer.offsetY)} px`;
@@ -3269,19 +5540,74 @@ function syncInspectorToLayer(index: number) {
     // Sync corner radius and chamfer (may be overridden/hidden for SVG layers by updateDimensionLock)
     const cr = layer.cornerRadius ?? 0;
     selectedCornerRadius = cr;
-    if (cornerRadiusInput)   { cornerRadiusInput.value   = String(cr); setSliderFill(cornerRadiusInput); }
+    if (cornerRadiusInput) {
+        cornerRadiusInput.value = String(cr);
+        setSliderFill(cornerRadiusInput);
+        const d = cornerRadiusInput.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
+        if (d) d.value = `${cr}px`;
+    }
     if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${cr} px`;
 
     const cs = layer.chamferSize ?? 0;
     selectedChamferSize = cs;
-    if (chamferSizeInput)   { chamferSizeInput.value   = String(cs); setSliderFill(chamferSizeInput); }
+    if (chamferSizeInput) {
+        chamferSizeInput.value = String(cs);
+        setSliderFill(chamferSizeInput);
+        const d = chamferSizeInput.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
+        if (d) d.value = `${cs}px`;
+    }
     if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${cs} px`;
+
+    const syncSlider = (input: HTMLInputElement | null, val: number) => {
+        if (!input) return;
+        input.value = String(val);
+        setSliderFill(input);
+        const d = input.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
+        if (d) d.value = `${val}px`;
+    };
+
+    selectedChamferStart = layer.chamferStart ?? 0;
+    syncSlider(chamferStartInput, selectedChamferStart);
+
+    selectedChamferBottomSize = layer.chamferBottomSize ?? 0;
+    syncSlider(chamferBottomSizeInput, selectedChamferBottomSize);
+
+    selectedChamferBottomStart = layer.chamferBottomStart ?? 0;
+    syncSlider(chamferBottomStartInput, selectedChamferBottomStart);
+
+    selectedTaper = layer.taper ?? 0;
+    syncSlider(taperInput, selectedTaper);
+    if (taperValueEl) taperValueEl.textContent = selectedTaper.toFixed(2);
+
+    selectedTwist = layer.twist ?? 0;
+    syncSlider(twistInput, selectedTwist);
+    if (twistValueEl) twistValueEl.textContent = `${selectedTwist}°`;
+
+    selectedScaleTopX = layer.scaleTopX ?? 1;
+    syncSlider(stxInput, selectedScaleTopX);
+    if (stxValueEl) stxValueEl.textContent = selectedScaleTopX.toFixed(2);
+
+    selectedScaleTopY = layer.scaleTopY ?? 1;
+    syncSlider(styInput, selectedScaleTopY);
+    if (styValueEl) styValueEl.textContent = selectedScaleTopY.toFixed(2);
+
+    selectedShedRoofDrop = layer.shedRoofDrop ?? 0;
+    syncSlider(shedDropInput, selectedShedRoofDrop);
+
+    selectedShedRoofDirection = (layer.shedRoofDirection as string) ?? 'front';
+    if (shedDirSwitcherEl) {
+        shedDirSwitcherEl.querySelectorAll('.nr-seg-btn').forEach((b, i) =>
+            b.classList.toggle('nr-seg-btn--selected', ['front', 'right', 'back', 'left'][i] === selectedShedRoofDirection));
+    }
 
     // SVG footprint section: clear any stale parse error, then refresh
     svgParseError = '';
     syncSvgFootprintSection();
     updateDimensionLock();
     syncAllSliderFills();
+    // Icon entries are loaded before buildInspectorPanel in the layer click handler,
+    // so we only need to refresh the list if renderIconsListFn was just rebuilt.
+    if (renderIconsListFn) renderIconsListFn();
 }
 
 /** Called when offset/elevation sliders change */
@@ -3289,6 +5615,7 @@ function onOffsetChange() {
     if (!isComplexShape) return;
     const layer = layers[selectedLayerIndex];
     if (!layer) return;
+    markDirty();
 
     layer.offsetX       = parseFloat(offsetXInput.value);
     layer.offsetY       = parseFloat(offsetYInput.value);
@@ -3315,6 +5642,12 @@ function onOffsetChange() {
 }
 
 function onAddLayer() {
+    saveIconEntriesToLayer();
+    editingIconIndex = -1;
+    const edPopup = document.getElementById('nr-icon-editor-popup');
+    if (edPopup) edPopup.style.display = 'none';
+    const stackElevation = layers.reduce((sum, l) => sum + l.depth, 0);
+
     const newLayer: ShapeLayer = {
         id:            `layer-${Date.now()}`,
         name:          `Layer ${layers.length + 1}`,
@@ -3324,28 +5657,40 @@ function onAddLayer() {
         depth:         GRID_SIZE,
         offsetX:       0,
         offsetY:       0,
-        baseElevation: 0,
+        baseElevation: stackElevation,
         style:         {},
         cornerRadius:  0,
     };
     layers.push(newLayer);
     selectedLayerIndex = layers.length - 1;
+    selectedBaseShape = newLayer.baseShape;
+    iconEntries = [];
+    selectedIcon = null;
+    selectedIconBgEnabled = false;
     renderLayersOnCanvas();
     buildLayersPanel();
+    buildInspectorPanel();
     syncInspectorToLayer(selectedLayerIndex);
-    refreshIconAccordionContent();
 }
 
 function onDeleteLayer(index: number) {
-    if (layers.length <= 1) return; // always keep at least one layer
-    if (index === 0) return;        // main layer cannot be deleted
+    if (layers.length <= 1) return;
+    if (index === 0) return;
+    saveIconEntriesToLayer();
+    editingIconIndex = -1;
+    const edPopup = document.getElementById('nr-icon-editor-popup');
+    if (edPopup) edPopup.style.display = 'none';
     layers.splice(index, 1);
     if (selectedLayerIndex >= layers.length) selectedLayerIndex = layers.length - 1;
     if (iconLayerIndex    >= layers.length) iconLayerIndex    = 0;
+    selectedBaseShape = layers[selectedLayerIndex]?.baseShape ?? 'cuboid';
+    iconEntries = layers[selectedLayerIndex]?.icons?.map(e => ({ ...e })) ?? [];
+    selectedIcon = null;
+    selectedIconBgEnabled = false;
     renderLayersOnCanvas();
     buildLayersPanel();
+    buildInspectorPanel();
     syncInspectorToLayer(selectedLayerIndex);
-    refreshIconAccordionContent();
 }
 
 // "Up" in the list UI = higher array index = paints higher in the stack.
@@ -3401,9 +5746,6 @@ function onDuplicateLayer(index: number) {
 function updateSliderRangesForComplexMode(enabled: boolean) {
     if (!widthInput || !heightInput || !depthInput) return;
     if (enabled) {
-        widthInput.min  = '1';   widthInput.max  = '160'; widthInput.step = '1';
-        heightInput.min = '1';   heightInput.max = '160'; heightInput.step = '1';
-        depthInput.min  = '0';   depthInput.max  = '160'; depthInput.step = '1';
         if (offsetXInput) {
             offsetXInput.min  = '-160'; offsetXInput.max  = '160'; offsetXInput.step = '1';
         }
@@ -3413,27 +5755,27 @@ function updateSliderRangesForComplexMode(enabled: boolean) {
         if (baseElevationInput) {
             baseElevationInput.min  = '0'; baseElevationInput.max  = '320'; baseElevationInput.step = '1';
         }
-    } else {
-        widthInput.min  = '0.5'; widthInput.max  = '8'; widthInput.step = '0.5';
-        heightInput.min = '0.5'; heightInput.max = '8'; heightInput.step = '0.5';
-        depthInput.min  = '0';   depthInput.max  = '8'; depthInput.step = '0.5';
     }
 }
 
 function onComplexShapeToggle(enabled: boolean) {
     if (enabled) {
         // Read current single-shape dimensions from sliders (still in GU at this point)
-        const wGU = parseFloat(widthInput?.value  ?? '2');
-        const hGU = parseFloat(heightInput?.value ?? '2');
-        const dGU = parseFloat(depthInput?.value  ?? '1');
-        const w = (isNaN(wGU) ? 2 : wGU) * GRID_SIZE;
-        const h = (isNaN(hGU) ? 2 : hGU) * GRID_SIZE;
-        const d = (isNaN(dGU) ? 1 : dGU) * GRID_SIZE;
+        const w = parseFloat(widthInput?.value  ?? '40') || 40;
+        const h = parseFloat(heightInput?.value ?? '40') || 40;
+        const d = parseFloat(depthInput?.value  ?? '20') || 20;
 
         isComplexShape     = true;
         selectedLayerIndex = 0;
         layerShapes        = [];
         layerShapes2D      = [];
+        const customVerts = selectedBaseShape === 'custom' && currentShape
+            ? (currentShape.get('normalizedVerts') as [number, number][] | [number, number][][] | undefined)
+            : undefined;
+        const normVerts = customVerts
+            ? (Array.isArray(customVerts[0]?.[0]) ? (customVerts as [number, number][][])[0] : customVerts as [number, number][])
+            : undefined;
+
         layers = [{
             id:            'layer-1',
             name:          'Layer 1',
@@ -3446,6 +5788,8 @@ function onComplexShapeToggle(enabled: boolean) {
             baseElevation: 0,
             style:         { ...selectedStyle },
             cornerRadius:  selectedCornerRadius,
+            svgNormVerts:  normVerts,
+            icons:         iconEntries.length > 0 ? iconEntries.map(e => ({ ...e })) : undefined,
         }];
 
         paper.removeTools();
@@ -3592,6 +5936,7 @@ function onCreateShape(name: string, componentType?: string) {
     buildPalettePanel();
     buildInspectorPanel();
     loadShapeIntoCanvas(id);
+    syncEmptyState();
 }
 
 function onDuplicateShape(sourceId: string, newName: string) {
@@ -3609,6 +5954,7 @@ function onDuplicateShape(sourceId: string, newName: string) {
     buildPalettePanel();
     buildInspectorPanel();
     loadShapeIntoCanvas(newId);
+    syncEmptyState();
 }
 
 function showDuplicateShapeModal(sourceId: string) {
@@ -3806,41 +6152,6 @@ function showNewShapeModal() {
     formItem.appendChild(inputWrapper);
     bodyEl.appendChild(formItem);
 
-    // Component Type dropdown
-    const typeFormItem = document.createElement('div');
-    typeFormItem.className = 'cds--form-item';
-    typeFormItem.style.marginTop = '12px';
-
-    const typeWrapper = document.createElement('div');
-    typeWrapper.className = 'cds--select';
-
-    const typeLabel = document.createElement('label');
-    typeLabel.className = 'cds--label';
-    typeLabel.setAttribute('for', 'nr-cd-type-select');
-    typeLabel.textContent = 'Component Type';
-
-    const typeInputWrapper = document.createElement('div');
-    typeInputWrapper.className = 'cds--select-input-wrapper';
-
-    const typeSelect = document.createElement('select');
-    typeSelect.id = 'nr-cd-type-select';
-    typeSelect.className = 'cds--select-input';
-
-    for (const opt of ['', 'Server', 'Firewall', 'Switch', 'Storage', 'NIC', 'HSM', 'Custom']) {
-        const el = document.createElement('option');
-        el.value = opt;
-        el.textContent = opt || '— none —';
-        el.className = 'cds--select-option';
-        typeSelect.appendChild(el);
-    }
-
-    typeInputWrapper.appendChild(typeSelect);
-    typeInputWrapper.insertAdjacentHTML('beforeend', CDS_ICON_CHEVRON_DOWN);
-    typeWrapper.appendChild(typeLabel);
-    typeWrapper.appendChild(typeInputWrapper);
-    typeFormItem.appendChild(typeWrapper);
-    bodyEl.appendChild(typeFormItem);
-
     const footerEl = document.createElement('div');
     footerEl.className = 'cds--modal-footer';
 
@@ -3869,7 +6180,7 @@ function showNewShapeModal() {
             return;
         }
         modalEl.remove();
-        onCreateShape(name, typeSelect.value || undefined);
+        onCreateShape(name);
     });
 
     nameInput.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -3936,13 +6247,19 @@ async function inlineSvgImage(img: SVGImageElement, href: string): Promise<void>
 }
 
 function showToast(message: string): void {
-    const n = document.createElement('div');
-    n.className = 'cds--inline-notification cds--inline-notification--success';
-    n.setAttribute('role', 'status');
-    n.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:9000;min-width:260px;max-width:400px;';
-    n.innerHTML = `<div class="cds--inline-notification__details"><p class="cds--inline-notification__title">${message}</p></div>`;
-    document.body.appendChild(n);
-    setTimeout(() => n.remove(), 3000);
+    const existing = document.querySelector('.nr-toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'nr-toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    requestAnimationFrame(() => toast.classList.add('nr-toast--visible'));
+    setTimeout(() => {
+        toast.classList.remove('nr-toast--visible');
+        setTimeout(() => toast.remove(), 300);
+    }, 2000);
 }
 
 async function cloneShapeView(shape: IsometricShape): Promise<SVGGElement | null> {
@@ -4137,21 +6454,20 @@ function showDeleteConfirmModal(id: string) {
 
 function onDeleteShape(id: string) {
     deleteShape(id);
+    shapeStore.remove('general', id);
     saveRegistryToStorage();
     document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
-    const remaining = Object.keys(ShapeRegistry).filter(id => !BUILT_IN_SHAPE_IDS.has(id));
-    if (remaining.length === 0) {
-        paper.removeTools();
-        graph.clear();
-        graph2D.clear();
-        currentShape = null;
-        currentShape2D = null;
-    } else {
-        const next = remaining.includes(currentShapeId) ? currentShapeId : remaining[0];
-        currentShapeId = next;
-        loadShapeIntoCanvas(next);
-    }
+
+    currentShapeId = '';
+    paper.removeTools();
+    graph.clear();
+    graph2D.clear();
+    currentShape = null;
+    currentShape2D = null;
+
+    buildInspectorPanel();
     buildPalettePanel();
+    syncEmptyState();
 }
 
 
@@ -4176,20 +6492,30 @@ function buildPalettePanel() {
 
     for (const id of userIds) {
         const def = ShapeRegistry[id];
+        const iconEntry = def?.icon ? getIconById(def.icon) : undefined;
+        const isV = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
         items.push({
             id,
             label: def?.displayName ?? formatLabel(id),
-            iconSvg: def?.icon ? getIconById(def.icon)?.svg : undefined,
+            iconSvg: iconEntry?.svg,
+            iconSvgMono: isV ? iconEntry.svgMono : undefined,
+            iconBgColor: isV ? iconEntry.bgColor : undefined,
+            iconIsVendor: !!isV,
             collection: 'User Components',
         });
     }
 
     for (const collectionName of getComponentCollections()) {
         for (const s of (byCollection.get(collectionName) ?? [])) {
+            const iconEntry = s.definition.icon ? getIconById(s.definition.icon) : undefined;
+            const isV = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
             items.push({
                 id: s.id,
                 label: s.definition.displayName ?? formatLabel(s.id),
-                iconSvg: s.definition.icon ? getIconById(s.definition.icon)?.svg : undefined,
+                iconSvg: iconEntry?.svg,
+                iconSvgMono: isV ? iconEntry.svgMono : undefined,
+                iconBgColor: isV ? iconEntry.bgColor : undefined,
+                iconIsVendor: !!isV,
                 collection: collectionName,
                 data: s.definition,
             });
@@ -4205,7 +6531,11 @@ function buildPalettePanel() {
             b.classList.toggle('nr-palette-svg-card--selected', isMatch);
         });
         currentShapeId = id;
+        hasVariations = !!ShapeRegistry[id]?.hasVariations;
+        activeVariation = 'default';
+        buildInspectorPanel();
         loadShapeIntoCanvas(id);
+        syncEmptyState();
     };
 
     componentPanelHandle = buildComponentPanel(paletteEl, {
@@ -4228,7 +6558,6 @@ function loadShapeIntoCanvas(id: string) {
     layerShapes    = [];
     layerShapes2D  = [];
     currentZoom = 1;
-    // Reset the paper matrix so the viewport always returns to the centred baseline.
     paper.matrix(transformationMatrix(View.Isometric, CD_MARGIN, SIDEBAR_INSET, CD_GRID_COUNT));
 
     const savedDefaults = ShapeRegistry[id];
@@ -4237,6 +6566,12 @@ function loadShapeIntoCanvas(id: string) {
 
     // Restore icon/style/baseShape fields (common to both simple and complex paths)
     syncExtrasFromShape(id);
+    syncIconBgColorDisplay();
+    // Refresh icon list and close any open editor popup
+    editingIconIndex = -1;
+    const edPopup = document.getElementById('nr-icon-editor-popup');
+    if (edPopup) edPopup.style.display = 'none';
+    if (renderIconsListFn) renderIconsListFn();
 
     // Sync the complex toggle state in the inspector (it persists across palette switches)
     // #sd-complex-toggle is now a <button> inside an .nr-toggle wrapper div.
@@ -4258,6 +6593,8 @@ function loadShapeIntoCanvas(id: string) {
         isComplexShape     = true;
         layers             = savedDefaults.layers.map(l => ({ ...l, style: { ...l.style } }));
         selectedLayerIndex = 0;
+
+        iconEntries = layers[0]?.icons?.map(e => ({ ...e })) ?? [];
 
         if (complexToggleDiv) complexToggleDiv.classList.add('nr-toggle--checked');
         if (complexToggleBtn) complexToggleBtn.setAttribute('aria-checked', 'true');
@@ -4315,6 +6652,7 @@ function loadShapeIntoCanvas(id: string) {
         shape.set('scaleTopX', selectedScaleTopX);
         shape.set('scaleTopY', selectedScaleTopY);
         if (savedDefaults?.customVerts) shape.set('normalizedVerts', savedDefaults.customVerts);
+        shape.attr('label/text', displayName);
         shape.position(posX, posY);
         shape.toggleView(View.Isometric);
         graph.addCell(shape);
@@ -4333,26 +6671,18 @@ function loadShapeIntoCanvas(id: string) {
         shape2D.set('scaleTopX', selectedScaleTopX);
         shape2D.set('scaleTopY', selectedScaleTopY);
         if (savedDefaults?.customVerts) shape2D.set('normalizedVerts', savedDefaults.customVerts);
+        shape2D.attr('label/text', displayName);
         shape2D.position(posX, posY);
         shape2D.toggleView(View.TwoDimensional);
         graph2D.addCell(shape2D);
         currentShape2D = shape2D;
 
-        shape.attr('label/text', displayName);
-        shape2D.attr('label/text', displayName);
-
-        syncFormFromShape(shape);
+        syncAllInspectorFields();
 
         if (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || selectedStyle.strokeColor) {
             applyShapeStyle(shape,   selectedStyle);
             applyShapeStyle(shape2D, selectedStyle);
         }
-
-        if (cornerRadiusInput)   { cornerRadiusInput.value = String(selectedCornerRadius); setSliderFill(cornerRadiusInput); }
-        if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${selectedCornerRadius} px`;
-
-        if (chamferSizeInput)   { chamferSizeInput.value = String(selectedChamferSize); setSliderFill(chamferSizeInput); }
-        if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${selectedChamferSize} px`;
 
         applyCornerRadiusToCurrentShape();
         applyChamferSizeToCurrentShape();
@@ -4369,6 +6699,9 @@ function loadShapeIntoCanvas(id: string) {
 
         applyIconToCurrentShape();
     }
+
+    // Show resize handle for adjustable shapes
+    updateResizeTools();
 
     // Refresh the icon section's layer dropdown to match the loaded shape.
     refreshIconAccordionContent();
@@ -4388,7 +6721,21 @@ paper.on('element:pointerup', (elementView: dia.ElementView) => {
 // index.ts calls cdPanel.hide() when switching back to the System Designer.
 
 export const panel = {
-    hide: () => { /* nothing to collapse in the Shape Designer */ },
+    hide: () => {
+        const p = document.getElementById('nr-icon-editor-popup');
+        if (p) p.style.display = 'none';
+    },
+    resetSelection: () => {
+        currentShapeId = '';
+        paper.removeTools();
+        graph.clear();
+        graph2D.clear();
+        currentShape = null;
+        currentShape2D = null;
+        buildInspectorPanel();
+        buildPalettePanel();
+        syncEmptyState();
+    },
 };
 
 export function selectShape(id: string): void {
@@ -4399,6 +6746,14 @@ export function selectShape(id: string): void {
     buildPalettePanel();
     buildInspectorPanel();
     loadShapeIntoCanvas(id);
+    syncEmptyState();
+}
+
+function syncEmptyState(): void {
+    const el = document.getElementById('cd2-empty-state');
+    if (el) el.style.display = currentShapeId ? 'none' : '';
+    const vtEl = document.getElementById('cd2-view-toggle-container');
+    if (vtEl) vtEl.style.display = currentShapeId ? '' : 'none';
 }
 
 // ── Initialise ────────────────────────────────────────────────────────────────
@@ -4406,3 +6761,4 @@ export function selectShape(id: string): void {
 buildInspectorPanel();
 buildPalettePanel();
 if (currentShapeId) loadShapeIntoCanvas(currentShapeId);
+syncEmptyState();

@@ -1,0 +1,27 @@
+<g highlighter-selector="body">
+    <rect @selector="base"
+        width="calc(w)"
+        height="calc(h)"
+        fill="transparent"
+        stroke="none"
+    />
+    <path @selector="body"
+        :d="{{arrowPath([size, barRatio])}}"
+        fill="rgba(82, 82, 82, 0.06)"
+        stroke="#8d8d8d"
+        stroke-width="2"
+        stroke-linejoin="round"
+    />
+    <text @selector="label"
+        x="calc(0.5 * w)"
+        y="calc(0.5 * h)"
+        text-anchor="middle"
+        dominant-baseline="central"
+        font-family="IBM Plex Sans, sans-serif"
+        font-size="11"
+        font-weight="600"
+        fill="#8d8d8d"
+        text=""
+        display="none"
+    />
+</g>

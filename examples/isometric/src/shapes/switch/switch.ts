@@ -44,6 +44,11 @@ export class Switch extends ProportionalCuboidShape {
     }
 
     @Function()
+    baseCuboidPathIso(): string {
+        return super.baseCuboidPathIso();
+    }
+
+    @Function()
     topCuboidPath(): string {
         return super.topCuboidPath();
     }

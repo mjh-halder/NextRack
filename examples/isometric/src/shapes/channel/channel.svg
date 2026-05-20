@@ -50,7 +50,7 @@
         font-size="11"
         fill="#333"
         stroke="#fff"
-        stroke-width="3"
+        stroke-width="2"
         paint-order="stroke"
         y="calc(h + 10)"
         x="calc(w + 10)"

@@ -7,8 +7,27 @@ import { carbonIconToString, CarbonIcon } from './icons';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
 import Close20 from '@carbon/icons/es/close/20.js';
+import Upload16 from '@carbon/icons/es/upload/16.js';
+import Download16 from '@carbon/icons/es/download/16.js';
+import Search16 from '@carbon/icons/es/search/16.js';
+import Close16 from '@carbon/icons/es/close/16.js';
+import Filter16 from '@carbon/icons/es/filter/16.js';
+import FilterRemove16 from '@carbon/icons/es/filter--remove/16.js';
 import { hierarchy, treemap, treemapSquarify } from 'd3-hierarchy';
 import { showWorkloadImporter } from './workload-importer';
+import { getInstancesForWorkload, setInstanceStatus, InstanceRole } from './placement-store';
+import ChevronRight16 from '@carbon/icons/es/chevron--right/16.js';
+import SettingsAdjust16 from '@carbon/icons/es/settings--adjust/16.js';
+import * as XLSX from 'xlsx';
+
+const ICON_CHEVRON   = carbonIconToString(ChevronRight16 as CarbonIcon);
+const ICON_UPLOAD    = carbonIconToString(Upload16 as CarbonIcon);
+const ICON_DOWNLOAD  = carbonIconToString(Download16 as CarbonIcon);
+const ICON_SEARCH    = carbonIconToString(Search16 as CarbonIcon);
+const ICON_CLOSE_SM  = carbonIconToString(Close16 as CarbonIcon);
+const ICON_SETTINGS  = carbonIconToString(SettingsAdjust16 as CarbonIcon);
+const ICON_FILTER    = carbonIconToString(Filter16 as CarbonIcon);
+const ICON_FILTER_RM = carbonIconToString(FilterRemove16 as CarbonIcon);
 
 const ICON_TRASH = carbonIconToString(TrashCan16 as CarbonIcon);
 const ICON_COPY  = carbonIconToString(Copy16 as CarbonIcon);
@@ -16,7 +35,7 @@ const ICON_CLOSE = carbonIconToString(Close20 as CarbonIcon);
 
 // ── Treemap types & constants ──
 
-type TreemapMetric = 'vCpuCores' | 'ramGB' | 'storageCapacityGB';
+type TreemapMetric = 'vCpuCores' | 'ramGB' | 'storageCapacityGB' | 'bandwidthMbps';
 
 const TREEMAP_METRICS: { key: TreemapMetric; label: string; unit: string; colors: string[] }[] = [
     // IBM Design Language Blue 50–80
@@ -28,6 +47,9 @@ const TREEMAP_METRICS: { key: TreemapMetric; label: string; unit: string; colors
     // IBM Design Language Teal 50–80
     { key: 'storageCapacityGB', label: 'Storage', unit: 'GB',
       colors: ['#009d9a', '#007d79', '#005d5d', '#004144'] },
+    // IBM Design Language Cyan 50–80
+    { key: 'bandwidthMbps', label: 'Bandwidth', unit: 'Mbps',
+      colors: ['#1192e8', '#0072c3', '#00539a', '#003a6d'] },
 ];
 
 const CDS_ACCORDION_ARROW = `<svg focusable="false" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" fill="currentColor" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" class="cds--accordion__arrow"><path d="M11 8L6 13 5.3 12.3 9.6 8 5.3 3.7 6 3z"></path></svg>`;
@@ -54,12 +76,17 @@ let panelId: string | null = null;
 let sortKey: SortKey = 'name';
 let sortDir: SortDir = 'asc';
 let selectedIds = new Set<string>();
+let expandedIds = new Set<string>();
+let searchQuery = '';
+let searchOpen = false;
+let treemapFilterIds: Set<string> | null = null;
 
 let panelEl: HTMLDivElement | null = null;
 let overlayEl: HTMLDivElement | null = null;
 
 // Treemap state
 let activeMetric: TreemapMetric = 'vCpuCores';
+let considerReplication = false;
 let treemapChartEl: HTMLDivElement | null = null;
 let treemapEmptyEl: HTMLDivElement | null = null;
 let treemapTooltipEl: HTMLDivElement | null = null;
@@ -97,30 +124,86 @@ function initTreemap(): void {
     label.textContent = 'Resource Distribution';
     headerRow.appendChild(label);
 
+    const controls = document.createElement('div');
+    controls.className = 'nr-ad__treemap-controls';
+
+    const filterIndicator = document.createElement('button');
+    filterIndicator.type = 'button';
+    filterIndicator.className = 'nr-ad__treemap-filter-indicator';
+    filterIndicator.title = 'Clear treemap filter';
+    filterIndicator.innerHTML = ICON_FILTER_RM;
+    filterIndicator.addEventListener('click', () => {
+        treemapFilterIds = null;
+        updateTreemap();
+        render();
+    });
+    controls.appendChild(filterIndicator);
+
+    // Treemap settings icon + popup
+    const settingsWrap = document.createElement('div');
+    settingsWrap.className = 'nr-ad__treemap-settings';
+
+    const settingsBtn = document.createElement('button');
+    settingsBtn.type = 'button';
+    settingsBtn.className = 'nr-ad__treemap-settings-btn';
+    settingsBtn.title = 'Chart settings';
+    settingsBtn.innerHTML = ICON_SETTINGS;
+    if (considerReplication) settingsBtn.classList.add('nr-ad__treemap-settings-btn--active');
+
+    const settingsPopup = document.createElement('div');
+    settingsPopup.className = 'nr-ad__treemap-settings-popup';
+
+    const repLabel = document.createElement('label');
+    repLabel.className = 'nr-ad__treemap-settings-item';
+    const repCb = document.createElement('input');
+    repCb.type = 'checkbox';
+    repCb.checked = considerReplication;
+    repCb.addEventListener('change', () => {
+        considerReplication = repCb.checked;
+        settingsBtn.classList.toggle('nr-ad__treemap-settings-btn--active', considerReplication);
+        updateTreemap();
+    });
+    repLabel.appendChild(repCb);
+    const repText = document.createElement('span');
+    repText.textContent = 'Consider Replication';
+    repLabel.appendChild(repText);
+    settingsPopup.appendChild(repLabel);
+
+    settingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        settingsPopup.classList.toggle('nr-ad__treemap-settings-popup--open');
+    });
+    document.addEventListener('mousedown', (e) => {
+        if (!settingsWrap.contains(e.target as Node)) {
+            settingsPopup.classList.remove('nr-ad__treemap-settings-popup--open');
+        }
+    }, true);
+
+    settingsWrap.appendChild(settingsBtn);
+    settingsWrap.appendChild(settingsPopup);
+    controls.appendChild(settingsWrap);
+
+    // Metric switcher (seg-control style)
     const switcher = document.createElement('div');
-    switcher.className = 'cds--content-switcher cds--content-switcher--sm';
+    switcher.className = 'nr-seg-control';
     switcher.setAttribute('role', 'tablist');
 
     for (const metric of TREEMAP_METRICS) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'cds--content-switcher-btn';
-        if (metric.key === activeMetric) btn.classList.add('cds--content-switcher--selected');
+        btn.className = 'nr-seg-btn';
+        if (metric.key === activeMetric) btn.classList.add('nr-seg-btn--selected');
         btn.setAttribute('role', 'tab');
         btn.setAttribute('aria-selected', String(metric.key === activeMetric));
-
-        const span = document.createElement('span');
-        span.className = 'cds--content-switcher__label';
-        span.textContent = metric.label;
-        btn.appendChild(span);
+        btn.textContent = metric.label;
 
         btn.addEventListener('click', () => {
             activeMetric = metric.key;
-            switcher.querySelectorAll('.cds--content-switcher-btn').forEach(b => {
-                b.classList.remove('cds--content-switcher--selected');
+            switcher.querySelectorAll('.nr-seg-btn').forEach(b => {
+                b.classList.remove('nr-seg-btn--selected');
                 b.setAttribute('aria-selected', 'false');
             });
-            btn.classList.add('cds--content-switcher--selected');
+            btn.classList.add('nr-seg-btn--selected');
             btn.setAttribute('aria-selected', 'true');
             updateTreemap();
         });
@@ -128,7 +211,8 @@ function initTreemap(): void {
         switcher.appendChild(btn);
     }
 
-    headerRow.appendChild(switcher);
+    controls.appendChild(switcher);
+    headerRow.appendChild(controls);
     wrap.appendChild(headerRow);
 
     treemapChartEl = document.createElement('div');
@@ -157,17 +241,21 @@ function initTreemap(): void {
 function updateTreemap(): void {
     if (!treemapChartEl || !treemapEmptyEl) return;
 
-    const width = treemapChartEl.clientWidth;
-    const height = treemapChartEl.clientHeight;
-    if (width === 0 || height === 0) return;
+    const indicator = document.querySelector('.nr-ad__treemap-filter-indicator') as HTMLElement;
+    if (indicator) indicator.style.display = treemapFilterIds ? 'inline-flex' : 'none';
 
     const metricDef = TREEMAP_METRICS.find(m => m.key === activeMetric)!;
     const colors = metricDef.colors;
-    const items = listWorkloads()
-        .map(wl => ({
-            name: wl.name || wl.id,
-            value: parseMetricValue(wl[activeMetric]),
-        }))
+    const allWorkloads = listWorkloads();
+    const filteredWorkloads = treemapFilterIds
+        ? allWorkloads.filter(wl => treemapFilterIds!.has(wl.id))
+        : allWorkloads;
+    const items = filteredWorkloads
+        .map(wl => {
+            const base = parseMetricValue(wl[activeMetric]);
+            const rep = considerReplication ? Math.max(1, parseInt(wl.replicationLevel) || 1) : 1;
+            return { name: wl.name || wl.id, value: base * rep };
+        })
         .filter(d => d.value > 0);
 
     if (items.length === 0) {
@@ -179,13 +267,20 @@ function updateTreemap(): void {
     treemapChartEl.style.display = '';
     treemapEmptyEl.style.display = 'none';
 
+    const width = treemapChartEl.clientWidth;
+    const height = treemapChartEl.clientHeight;
+    if (width === 0 || height === 0) return;
+
     const vals = items.map(d => d.value);
     const min = Math.min(...vals);
     const max = Math.max(...vals);
     const range = max - min || 1;
 
+    items.sort((a, b) => b.value - a.value);
+
     const root = hierarchy({ children: items } as any)
-        .sum((d: any) => d.value || 0);
+        .sum((d: any) => d.value || 0)
+        .sort((a: any, b: any) => (b.value || 0) - (a.value || 0));
 
     treemap().size([width, height]).padding(1).tile(treemapSquarify)(root as any);
 
@@ -267,7 +362,13 @@ function positionTooltip(e: MouseEvent): void {
 // ── Sorting ──
 
 function getSorted(): WorkloadDefinition[] {
-    const items = listWorkloads();
+    let items = listWorkloads();
+    if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        items = items.filter(wl =>
+            COLUMNS.some(col => (wl[col.key] || '').toLowerCase().includes(q))
+        );
+    }
     if (sortDir === 'none') return items;
     return items.sort((a, b) => {
         const av = (a[sortKey] || '').toLowerCase();
@@ -275,6 +376,32 @@ function getSorted(): WorkloadDefinition[] {
         const cmp = av.localeCompare(bv, undefined, { numeric: true });
         return sortDir === 'desc' ? -cmp : cmp;
     });
+}
+
+function exportWorkloads(): void {
+    const workloads = getSorted();
+    const rows = workloads.map(wl => ({
+        'Name': wl.name,
+        'vCPU': wl.vCpuCores,
+        'RAM (GB)': wl.ramGB,
+        'Storage (GB)': wl.storageCapacityGB,
+        'Network (Mbps)': wl.bandwidthMbps,
+        'Type': wl.deploymentModel,
+        'Environment': wl.environment,
+        'OS': wl.operatingSystem,
+        'Application': wl.applicationServer,
+        'Database': wl.database,
+        'Replication': wl.replicationLevel,
+        'Criticality': wl.criticality,
+        'SLA Class': wl.slaClass,
+        'Storage Type': wl.storageType,
+        'Location': wl.location,
+        'Owner': wl.owner,
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Workloads');
+    XLSX.writeFile(wb, 'workloads.xlsx');
 }
 
 function toggleSort(key: SortKey): void {
@@ -471,15 +598,81 @@ function render(): void {
         openPanel(wl.id);
         render();
     });
+    // Search
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'nr-dt__search-wrap' + (searchOpen ? ' nr-dt__search-wrap--open' : '');
+
+    const searchBtn = document.createElement('button');
+    searchBtn.type = 'button';
+    searchBtn.className = 'nr-dt__toolbar-icon-btn';
+    searchBtn.title = 'Search';
+    searchBtn.innerHTML = ICON_SEARCH;
+    searchBtn.addEventListener('click', () => {
+        searchOpen = !searchOpen;
+        searchWrap.classList.toggle('nr-dt__search-wrap--open', searchOpen);
+        if (searchOpen) {
+            searchInput.focus();
+        } else {
+            searchQuery = '';
+            searchInput.value = '';
+            renderTableRows();
+        }
+    });
+    searchWrap.appendChild(searchBtn);
+
+    const searchInput = document.createElement('input');
+    searchInput.autocomplete = 'off';
+    searchInput.className = 'nr-dt__search-input';
+    searchInput.placeholder = 'Filter table';
+    searchInput.type = 'search';
+    searchInput.value = searchQuery;
+    searchInput.addEventListener('input', () => {
+        searchQuery = searchInput.value;
+        renderTableRows();
+    });
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeSearch();
+        }
+    });
+    searchInput.addEventListener('blur', () => {
+        if (searchOpen && !searchQuery) {
+            closeSearch();
+        }
+    });
+
+    function closeSearch() {
+        searchOpen = false;
+        searchQuery = '';
+        searchInput.value = '';
+        searchWrap.classList.remove('nr-dt__search-wrap--open');
+        renderTableRows();
+    }
+
+    searchWrap.appendChild(searchInput);
+
+    toolbarActions.appendChild(searchWrap);
+
+    // Export
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'nr-dt__toolbar-icon-btn';
+    exportBtn.title = 'Export Excel';
+    exportBtn.innerHTML = ICON_DOWNLOAD;
+    exportBtn.addEventListener('click', exportWorkloads);
+    toolbarActions.appendChild(exportBtn);
+
+    // Import
     const importBtn = document.createElement('button');
     importBtn.type = 'button';
-    importBtn.className = 'cds--btn cds--btn--tertiary nr-dt__add-btn';
-    importBtn.textContent = 'Import Excel';
+    importBtn.className = 'nr-dt__toolbar-icon-btn';
+    importBtn.title = 'Import Excel';
+    importBtn.innerHTML = ICON_UPLOAD;
     importBtn.addEventListener('click', () => {
         showWorkloadImporter(() => render());
     });
-
     toolbarActions.appendChild(importBtn);
+
     toolbarActions.appendChild(addBtn);
     toolbarEl.appendChild(toolbarActions);
 
@@ -518,12 +711,32 @@ function render(): void {
     });
     batchActions.appendChild(batchDeleteBtn);
 
+    const batchFilterBtn = document.createElement('button');
+    batchFilterBtn.type = 'button';
+    batchFilterBtn.className = 'nr-dt__batch-btn';
+    batchFilterBtn.innerHTML = treemapFilterIds
+        ? `Clear Filter<span class="nr-dt__batch-btn-icon">${ICON_FILTER_RM}</span>`
+        : `Filter Treemap<span class="nr-dt__batch-btn-icon">${ICON_FILTER}</span>`;
+    batchFilterBtn.addEventListener('click', () => {
+        if (treemapFilterIds) {
+            treemapFilterIds = null;
+        } else {
+            treemapFilterIds = new Set(selectedIds);
+        }
+        batchFilterBtn.innerHTML = treemapFilterIds
+            ? `Clear Filter<span class="nr-dt__batch-btn-icon">${ICON_FILTER_RM}</span>`
+            : `Filter Treemap<span class="nr-dt__batch-btn-icon">${ICON_FILTER}</span>`;
+        updateTreemap();
+    });
+    batchActions.appendChild(batchFilterBtn);
+
     const batchCancelBtn = document.createElement('button');
     batchCancelBtn.type = 'button';
     batchCancelBtn.className = 'nr-dt__batch-btn nr-dt__batch-btn--cancel';
     batchCancelBtn.textContent = 'Cancel';
     batchCancelBtn.addEventListener('click', () => {
         selectedIds.clear();
+        treemapFilterIds = null;
         syncSelection();
         renderTableRows();
     });
@@ -628,6 +841,10 @@ function renderTableRowsInto(tbody: HTMLTableSectionElement, workloads: Workload
     }
 
     for (const wl of workloads) {
+        const rep = Math.max(1, parseInt(wl.replicationLevel) || 1);
+        const expandable = rep > 1;
+        const expanded = expandedIds.has(wl.id);
+
         const tr = document.createElement('tr');
         tr.className = 'nr-dt__row';
         if (wl.id === panelId) tr.classList.add('nr-ad__row--active');
@@ -652,12 +869,38 @@ function renderTableRowsInto(tbody: HTMLTableSectionElement, workloads: Workload
         tr.appendChild(tdSelect);
 
         // Data cells
-        for (const col of COLUMNS) {
+        for (let ci = 0; ci < COLUMNS.length; ci++) {
+            const col = COLUMNS[ci];
             const td = document.createElement('td');
             td.className = 'nr-dt__cell';
-            td.textContent = wl[col.key] || '—';
-            td.style.cursor = 'pointer';
-            td.addEventListener('click', () => openPanel(wl.id));
+
+            if (ci === 0 && expandable) {
+                const expandBtn = document.createElement('button');
+                expandBtn.type = 'button';
+                expandBtn.className = 'nr-ad__expand-btn' + (expanded ? ' nr-ad__expand-btn--open' : '');
+                expandBtn.innerHTML = ICON_CHEVRON;
+                expandBtn.addEventListener('click', () => {
+                    if (expandedIds.has(wl.id)) expandedIds.delete(wl.id);
+                    else expandedIds.add(wl.id);
+                    renderTableRows();
+                });
+                td.appendChild(expandBtn);
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'nr-ad__name-link';
+                nameSpan.textContent = wl[col.key] || '—';
+                nameSpan.addEventListener('click', () => openPanel(wl.id));
+                td.appendChild(nameSpan);
+
+                const repBadge = document.createElement('span');
+                repBadge.className = 'nr-ad__rep-badge';
+                repBadge.textContent = `\u00d7${rep}`;
+                td.appendChild(repBadge);
+            } else {
+                td.textContent = wl[col.key] || '—';
+                td.style.cursor = 'pointer';
+                td.addEventListener('click', () => openPanel(wl.id));
+            }
             tr.appendChild(td);
         }
 
@@ -681,6 +924,78 @@ function renderTableRowsInto(tbody: HTMLTableSectionElement, workloads: Workload
         tr.appendChild(tdActions);
 
         tbody.appendChild(tr);
+
+        // Instance sub-rows
+        if (expandable && expanded) {
+            const instances = getInstancesForWorkload(wl.id);
+            for (const inst of instances) {
+                const itr = document.createElement('tr');
+                itr.className = 'nr-dt__row nr-ad__instance-row';
+
+                // Empty checkbox cell
+                const emptyTd = document.createElement('td');
+                emptyTd.className = 'nr-dt__cell';
+                itr.appendChild(emptyTd);
+
+                // Instance name + status
+                const nameTd = document.createElement('td');
+                nameTd.className = 'nr-dt__cell nr-ad__instance-name-cell';
+
+                const dot = document.createElement('span');
+                dot.className = `nr-ad__status-dot nr-ad__status-dot--${inst.role}`;
+                nameTd.appendChild(dot);
+
+                const statusBtn = document.createElement('button');
+                statusBtn.type = 'button';
+                statusBtn.className = `nr-ad__status-label nr-ad__status-label--${inst.role}`;
+                statusBtn.textContent = inst.role === 'active' ? 'Active' : 'Standby';
+                statusBtn.title = 'Click to toggle status';
+                statusBtn.addEventListener('click', () => {
+                    const next: InstanceRole = inst.role === 'active' ? 'standby' : 'active';
+                    setInstanceStatus(inst.id, next);
+                    renderTableRows();
+                });
+                nameTd.appendChild(statusBtn);
+
+                const instName = document.createElement('span');
+                instName.className = 'nr-ad__instance-label';
+                instName.textContent = `${inst.workloadName} #${inst.instanceIndex}`;
+                nameTd.appendChild(instName);
+
+                itr.appendChild(nameTd);
+
+                // vCPU
+                const cpuTd = document.createElement('td');
+                cpuTd.className = 'nr-dt__cell nr-ad__instance-cell';
+                cpuTd.textContent = inst.vCpu > 0 ? String(inst.vCpu) : '—';
+                itr.appendChild(cpuTd);
+
+                // RAM
+                const ramTd = document.createElement('td');
+                ramTd.className = 'nr-dt__cell nr-ad__instance-cell';
+                ramTd.textContent = inst.ramGB > 0 ? String(inst.ramGB) : '—';
+                itr.appendChild(ramTd);
+
+                // Storage
+                const storageTd = document.createElement('td');
+                storageTd.className = 'nr-dt__cell nr-ad__instance-cell';
+                storageTd.textContent = inst.storageGB > 0 ? String(inst.storageGB) : '—';
+                itr.appendChild(storageTd);
+
+                // Network (same as parent)
+                const netTd = document.createElement('td');
+                netTd.className = 'nr-dt__cell nr-ad__instance-cell';
+                netTd.textContent = '—';
+                itr.appendChild(netTd);
+
+                // Empty actions cell
+                const actTd = document.createElement('td');
+                actTd.className = 'nr-dt__cell';
+                itr.appendChild(actTd);
+
+                tbody.appendChild(itr);
+            }
+        }
     }
 }
 

@@ -15,6 +15,9 @@ export interface ComponentTreeItem {
     id: string;
     label: string;
     iconSvg?: string;
+    iconSvgMono?: string;
+    iconBgColor?: string;
+    iconIsVendor?: boolean;
     collection: string;
     data?: unknown;
 }
@@ -25,6 +28,7 @@ export interface ComponentTreeConfig {
     selectedId?: () => string | null;
     showCreateButton?: boolean;
     onCreateClick?: () => void;
+    hideSearch?: boolean;
 }
 
 export function formatLabel(id: string): string {
@@ -34,13 +38,34 @@ export function formatLabel(id: string): string {
 type ViewMode = 'list' | 'svg';
 let viewMode: ViewMode = 'list';
 
+export function setComponentViewMode(mode: 'list' | 'svg'): void {
+    viewMode = mode;
+}
+
+export function getComponentViewMode(): 'list' | 'svg' {
+    return viewMode;
+}
+
 export function buildComponentPanel(
     container: HTMLElement,
     config: ComponentTreeConfig,
-): { rebuild: () => void } {
-    const rebuild = () => renderPanel(container, config);
+): { rebuild: () => void; setSearchTerm: (term: string) => void } {
+    let scrollAreaRef: HTMLElement | null = null;
+    let searchInputRef: HTMLInputElement | null = null;
+
+    const rebuild = () => {
+        renderPanel(container, config);
+        scrollAreaRef = container.querySelector('.nr-palette-scroll');
+        searchInputRef = container.querySelector('.nr-palette-search-input');
+    };
     rebuild();
-    return { rebuild };
+    return {
+        rebuild,
+        setSearchTerm: (term: string) => {
+            if (searchInputRef) searchInputRef.value = term;
+            if (scrollAreaRef) filterTree(scrollAreaRef, term);
+        },
+    };
 }
 
 function renderPanel(container: HTMLElement, config: ComponentTreeConfig): void {
@@ -86,11 +111,13 @@ function renderPanel(container: HTMLElement, config: ComponentTreeConfig): void 
         header.appendChild(addBtn);
     }
 
+    if (config.hideSearch) header.classList.add('nr-palette-comp-header--no-border');
     container.appendChild(header);
 
     // Search
     const searchBox = document.createElement('div');
     searchBox.className = 'nr-palette-search';
+    if (config.hideSearch) searchBox.style.display = 'none';
     const searchIcon = document.createElement('span');
     searchIcon.className = 'nr-palette-search-icon';
     searchIcon.innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M15 14.3L10.7 10c1.9-2.3 1.6-5.8-.7-7.7S4.2.7 2.3 3 .7 8.8 3 10.7c2 1.7 5 1.7 7 0l4.3 4.3.7-.7zM2 6.5C2 4 4 2 6.5 2S11 4 11 6.5 9 11 6.5 11 2 9 2 6.5z"/></svg>';
@@ -191,9 +218,10 @@ function groupByCollection(items: ComponentTreeItem[]): Map<string, ComponentTre
 }
 
 function sortedCollections(groups: Map<string, ComponentTreeItem[]>): string[] {
+    const priority = (k: string) => k === 'User Components' ? 0 : k === 'General' ? 1 : 2;
     return Array.from(groups.keys()).sort((a, b) => {
-        if (a === 'General') return -1;
-        if (b === 'General') return 1;
+        const pa = priority(a), pb = priority(b);
+        if (pa !== pb) return pa - pb;
         return a.localeCompare(b);
     });
 }
@@ -284,7 +312,7 @@ function buildLeaf(
     if (item.iconSvg) {
         const iconSpan = document.createElement('span');
         iconSpan.className = 'nr-palette-item-icon';
-        iconSpan.innerHTML = item.iconSvg;
+        iconSpan.innerHTML = (item.iconIsVendor && item.iconSvgMono) ? item.iconSvgMono : item.iconSvg;
         iconSpan.setAttribute('aria-hidden', 'true');
         row.appendChild(iconSpan);
     }
@@ -295,6 +323,15 @@ function buildLeaf(
     row.appendChild(labelSpan);
 
     row.addEventListener('click', () => onSelect(item.id, item.data));
+
+    row.draggable = true;
+    row.addEventListener('dragstart', (e: DragEvent) => {
+        if (!e.dataTransfer) return;
+        e.stopPropagation();
+        e.dataTransfer.setData('application/x-nextrack-shape', item.id);
+        e.dataTransfer.setData('text/plain', item.label);
+        e.dataTransfer.effectAllowed = 'copyMove';
+    });
 
     li.appendChild(row);
     return li;
@@ -351,6 +388,16 @@ function buildSvgGrid(
 
         card.dataset.shapeId = item.id;
         card.addEventListener('click', () => onSelect(item.id, item.data));
+
+        card.draggable = true;
+        card.addEventListener('dragstart', (e: DragEvent) => {
+            if (!e.dataTransfer) return;
+            e.stopPropagation();
+            e.dataTransfer.setData('application/x-nextrack-shape', item.id);
+            e.dataTransfer.setData('text/plain', item.label);
+            e.dataTransfer.effectAllowed = 'copyMove';
+        });
+
         grid.appendChild(card);
     }
     return grid;
@@ -430,4 +477,22 @@ export function filterTree(root: HTMLElement, term: string): void {
             section.style.display = (!t || visibleCount > 0) ? '' : 'none';
         }
     });
+
+    // Show/hide empty message
+    let existing = root.querySelector('.nr-palette-empty-msg');
+    let anyVisible = false;
+    root.querySelectorAll<HTMLElement>('.nr-comp-tree__node--leaf, .nr-palette-svg-card').forEach(el => {
+        if (el.style.display !== 'none') anyVisible = true;
+    });
+    if (t && !anyVisible) {
+        if (!existing) {
+            existing = document.createElement('div');
+            existing.className = 'nr-palette-empty-msg';
+            existing.textContent = 'Keine Ergebnisse';
+            root.appendChild(existing);
+        }
+        (existing as HTMLElement).style.display = '';
+    } else if (existing) {
+        (existing as HTMLElement).style.display = 'none';
+    }
 }

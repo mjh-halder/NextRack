@@ -10,6 +10,7 @@ interface MenuItem {
     label: string;
     action: string;
     shortcut?: string;
+    canvasOnly?: boolean;
 }
 
 interface MenuGroup {
@@ -23,51 +24,54 @@ const MENUS: MenuGroup[] = [
         items: [
             { label: 'New',      action: 'file-new',     shortcut: '⌘N' },
             { label: 'Open…',    action: 'file-open',    shortcut: '⌘O' },
-            { label: 'Save',     action: 'file-save',    shortcut: '⌘S' },
-            { label: 'Save As…', action: 'file-save-as', shortcut: '⇧⌘S' }, // placeholder
-            { label: 'Export SVG', action: 'file-export-svg' },
+            { label: 'Save',     action: 'file-save',    shortcut: '⌘S', canvasOnly: true },
+            { label: 'Save As…', action: 'file-save-as', shortcut: '⇧⌘S', canvasOnly: true },
+            { label: 'Export SVG', action: 'file-export-svg', canvasOnly: true },
         ],
     },
     {
         label: 'Edit',
         items: [
-            { label: 'Undo',   action: 'edit-undo',   shortcut: '⌘Z' },
-            { label: 'Redo',   action: 'edit-redo',   shortcut: '⇧⌘Z' },
-            { label: 'Delete', action: 'edit-delete', shortcut: '⌦'  },
+            { label: 'Undo',   action: 'edit-undo',   shortcut: '⌘Z', canvasOnly: true },
+            { label: 'Redo',   action: 'edit-redo',   shortcut: '⇧⌘Z', canvasOnly: true },
+            { label: 'Delete', action: 'edit-delete', shortcut: '⌦', canvasOnly: true },
         ],
     },
     {
         label: 'View',
         items: [
-            { label: 'Zoom In',       action: 'view-zoom-in',     shortcut: '⌘+' }, // placeholder
-            { label: 'Zoom Out',      action: 'view-zoom-out',    shortcut: '⌘−' }, // placeholder
-            { label: 'Fit to Screen', action: 'view-fit',         shortcut: '⌘0' }, // placeholder
-            { label: 'Move to Center', action: 'view-center'                     },
-            { label: 'Toggle Grid',   action: 'view-toggle-grid'                 }, // placeholder
+            { label: 'Zoom In',       action: 'view-zoom-in',     shortcut: '⌘+', canvasOnly: true },
+            { label: 'Zoom Out',      action: 'view-zoom-out',    shortcut: '⌘−', canvasOnly: true },
+            { label: 'Fit to Screen', action: 'view-fit',         shortcut: '⌘0', canvasOnly: true },
+            { label: 'Move to Center', action: 'view-center', canvasOnly: true },
+            { label: 'Toggle Grid',   action: 'view-toggle-grid', canvasOnly: true },
         ],
     },
     {
         label: 'Model',
         items: [
-            { label: 'Adjust Grid Size', action: 'model-adjust-grid' },
-            { label: 'Add Zone',         action: 'model-add-zone'    }, // placeholder
-            { label: 'Validate',         action: 'model-validate'    }, // placeholder
+            { label: 'Adjust Grid Size', action: 'model-adjust-grid', canvasOnly: true },
+            { label: 'Add Zone',         action: 'model-add-zone', canvasOnly: true },
+            { label: 'Validate',         action: 'model-validate', canvasOnly: true },
         ],
     },
     {
         label: 'Help',
         items: [
-            { label: 'Shortcuts', action: 'help-shortcuts', shortcut: '?' }, // placeholder
-            { label: 'About',     action: 'help-about'                     }, // placeholder
+            { label: 'Shortcuts', action: 'help-shortcuts', shortcut: '?' },
+            { label: 'About',     action: 'help-about' },
         ],
     },
     {
         label: 'Admin',
         items: [
-            { label: 'Set as Default', action: 'admin-set-default' },
+            { label: 'Set as Default', action: 'admin-set-default', canvasOnly: true },
         ],
     },
 ];
+
+let canvasActive = false;
+const canvasOnlyButtons: HTMLButtonElement[] = [];
 
 function dispatchAction(action: string) {
     document.dispatchEvent(
@@ -138,7 +142,13 @@ function buildMenuBar(): HTMLElement {
                 actionBtn.appendChild(sc);
             }
 
+            if (entry.canvasOnly) {
+                actionBtn.disabled = !canvasActive;
+                canvasOnlyButtons.push(actionBtn);
+            }
+
             actionBtn.addEventListener('click', () => {
+                if (actionBtn.disabled) return;
                 closeActiveMenu();
                 dispatchAction(entry.action);
             });
@@ -259,4 +269,11 @@ export function initTopHeader(
         },
         true,
     );
+}
+
+export function setCanvasActive(active: boolean): void {
+    canvasActive = active;
+    for (const btn of canvasOnlyButtons) {
+        btn.disabled = !active;
+    }
 }

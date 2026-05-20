@@ -1,0 +1,18 @@
+<g highlighter-selector="body">
+    <path @selector="body"
+        d="M 0 0 H calc(w) V calc(h) H 0 Z"
+        fill="rgba(0, 67, 206, 0.5)"
+        stroke="none"
+        stroke-width="0"
+    />
+    <text @selector="label"
+        x="8"
+        y="16"
+        font-family="IBM Plex Sans, sans-serif"
+        font-size="11"
+        font-weight="600"
+        fill="#0043CE"
+        text=""
+        display="none"
+    />
+</g>

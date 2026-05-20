@@ -24,6 +24,11 @@ export class Firewall extends CuboidShape {
     }
 
     @Function()
+    baseCuboidPathIso(): string {
+        return super.baseCuboidPathIso();
+    }
+
+    @Function()
     topCuboidPath(): string {
         return super.topCuboidPath();
     }

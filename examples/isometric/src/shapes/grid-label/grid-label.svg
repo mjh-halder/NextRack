@@ -1,0 +1,24 @@
+<g>
+    <rect @selector="base"
+        width="calc(w)"
+        height="calc(h)"
+        fill="transparent"
+        stroke="none"
+    />
+    <rect @selector="body"
+        width="calc(w)"
+        height="calc(h)"
+        fill="transparent"
+        stroke="none"
+    />
+    <text @selector="label"
+        x="0"
+        y="calc(0.5*h)"
+        font-family="IBM Plex Sans, sans-serif"
+        font-size="14"
+        font-weight="600"
+        fill="#525252"
+        dominant-baseline="central"
+        text="Label"
+    />
+</g>

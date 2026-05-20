@@ -9,6 +9,9 @@ import Save16 from '@carbon/icons/es/save/16.js';
 import Download16 from '@carbon/icons/es/download/16.js';
 import Upload16 from '@carbon/icons/es/upload/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
+import Search16 from '@carbon/icons/es/search/16.js';
+
+const ICON_SEARCH = carbonIconToString(Search16 as CarbonIcon);
 
 const ICON_TRASH = carbonIconToString(TrashCan16 as CarbonIcon);
 const ICON_COPY  = carbonIconToString(Copy16 as CarbonIcon);
@@ -72,6 +75,7 @@ export function deleteProduct(id: string): void {
 let rootEl: HTMLDivElement | null = null;
 let selectedType: string = COMPONENT_TYPES[0];
 let searchTerm = '';
+let prodSearchOpen = false;
 let sortKey = '';
 let sortDir: 'asc' | 'desc' = 'asc';
 
@@ -177,17 +181,75 @@ function buildProductList(container: HTMLElement): void {
     const toolbarActions = document.createElement('div');
     toolbarActions.className = 'nr-dt__toolbar-actions';
 
+    // Search
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'nr-dt__search-wrap' + (prodSearchOpen ? ' nr-dt__search-wrap--open' : '');
+
+    const searchBtn = document.createElement('button');
+    searchBtn.type = 'button';
+    searchBtn.className = 'nr-dt__toolbar-icon-btn';
+    searchBtn.title = 'Search';
+    searchBtn.innerHTML = ICON_SEARCH;
+    searchBtn.addEventListener('click', () => {
+        prodSearchOpen = !prodSearchOpen;
+        searchWrap.classList.toggle('nr-dt__search-wrap--open', prodSearchOpen);
+        if (prodSearchOpen) {
+            searchInput.focus();
+        } else {
+            searchTerm = '';
+            searchInput.value = '';
+            render();
+        }
+    });
+    searchWrap.appendChild(searchBtn);
+
     const searchInput = document.createElement('input');
+    searchInput.autocomplete = 'off';
+    searchInput.className = 'nr-dt__search-input';
+    searchInput.placeholder = 'Filter table';
     searchInput.type = 'search';
-    searchInput.className = 'nr-dt__search';
-    searchInput.placeholder = 'Filter...';
     searchInput.value = searchTerm;
     searchInput.addEventListener('input', () => {
         searchTerm = searchInput.value;
         render();
     });
-    toolbarActions.appendChild(searchInput);
+    searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            prodSearchOpen = false;
+            searchTerm = '';
+            searchInput.value = '';
+            searchWrap.classList.remove('nr-dt__search-wrap--open');
+            render();
+        }
+    });
+    searchInput.addEventListener('blur', () => {
+        if (prodSearchOpen && !searchTerm) {
+            prodSearchOpen = false;
+            searchWrap.classList.remove('nr-dt__search-wrap--open');
+        }
+    });
+    searchWrap.appendChild(searchInput);
+    toolbarActions.appendChild(searchWrap);
 
+    // Export
+    const exportAllBtn = document.createElement('button');
+    exportAllBtn.type = 'button';
+    exportAllBtn.className = 'nr-dt__toolbar-icon-btn';
+    exportAllBtn.title = 'Export CSV';
+    exportAllBtn.innerHTML = ICON_DOWNLOAD;
+    exportAllBtn.addEventListener('click', () => exportProductCSV(selectedType, null));
+    toolbarActions.appendChild(exportAllBtn);
+
+    // Import
+    const importBtn = document.createElement('button');
+    importBtn.type = 'button';
+    importBtn.className = 'nr-dt__toolbar-icon-btn';
+    importBtn.title = 'Import CSV';
+    importBtn.innerHTML = ICON_UPLOAD;
+    importBtn.addEventListener('click', () => importProductCSV(selectedType));
+    toolbarActions.appendChild(importBtn);
+
+    // Add new
     const newBtn = document.createElement('button');
     newBtn.type = 'button';
     newBtn.className = 'cds--btn cds--btn--primary nr-dt__add-btn';
@@ -200,20 +262,6 @@ function buildProductList(container: HTMLElement): void {
         render();
     });
     toolbarActions.appendChild(newBtn);
-
-    const exportAllBtn = document.createElement('button');
-    exportAllBtn.type = 'button';
-    exportAllBtn.className = 'cds--btn cds--btn--tertiary nr-dt__add-btn';
-    exportAllBtn.innerHTML = `Export CSV<span style="margin-left:6px;display:inline-flex">${ICON_DOWNLOAD}</span>`;
-    exportAllBtn.addEventListener('click', () => exportProductCSV(selectedType, null));
-    toolbarActions.appendChild(exportAllBtn);
-
-    const importBtn = document.createElement('button');
-    importBtn.type = 'button';
-    importBtn.className = 'cds--btn cds--btn--tertiary nr-dt__add-btn';
-    importBtn.innerHTML = `Import CSV<span style="margin-left:6px;display:inline-flex">${ICON_UPLOAD}</span>`;
-    importBtn.addEventListener('click', () => importProductCSV(selectedType));
-    toolbarActions.appendChild(importBtn);
 
     toolbar.appendChild(toolbarActions);
 

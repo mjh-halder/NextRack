@@ -59,16 +59,19 @@ export class AreaSelect {
     }
 
     toggle(cell: dia.Cell): void {
-        if (cell.isLink()) return;
-        const resolved = this.resolveComponentBase(cell as dia.Element);
-        if (this.selected.has(resolved)) {
-            this.selected.delete(resolved);
-            const view = this.paper.findViewByModel(resolved);
-            if (view) clearSelectFor(view);
+        const target = cell.isLink() ? cell : this.resolveComponentBase(cell as dia.Element);
+        if (this.selected.has(target)) {
+            this.selected.delete(target);
+            if (!target.isLink()) {
+                const view = this.paper.findViewByModel(target);
+                if (view) clearSelectFor(view);
+            }
         } else {
-            this.selected.add(resolved);
-            const view = this.paper.findViewByModel(resolved);
-            if (view) applySelectRing(view);
+            this.selected.add(target);
+            if (!target.isLink()) {
+                const view = this.paper.findViewByModel(target);
+                if (view) applySelectRing(view);
+            }
         }
         this.onSelectionChange(this.selection);
     }
@@ -87,8 +90,10 @@ export class AreaSelect {
         this.clear();
         cells.forEach(cell => {
             if (cell.graph) {
-                const embedded = (cell as dia.Element).getEmbeddedCells();
-                if (embedded) embedded.forEach(c => c.remove());
+                if (!cell.isLink()) {
+                    const embedded = (cell as dia.Element).getEmbeddedCells();
+                    if (embedded) embedded.forEach(c => c.remove());
+                }
                 cell.remove();
             }
         });

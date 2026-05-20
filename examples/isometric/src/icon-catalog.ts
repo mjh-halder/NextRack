@@ -36,7 +36,7 @@ import k8sWorkerNodeSvg from '../assets/kubernetes--worker-node.svg';
 
 import { getCarbonIcons } from './carbon-icons-all';
 
-export type IconSource = 'custom' | 'carbon' | 'uploaded' | 'aws' | 'gcp' | 'azure';
+export type IconSource = 'custom' | 'carbon' | 'uploaded' | 'aws' | 'gcp' | 'azure' | 'grid-icon';
 
 export interface IconCatalogEntry {
     id: string;
@@ -44,6 +44,7 @@ export interface IconCatalogEntry {
     svg: string;
     source: IconSource;
     bgColor?: string;
+    svgMono?: string;
 }
 
 const CUSTOM_ICONS: ReadonlyArray<IconCatalogEntry> = [
@@ -128,6 +129,63 @@ function writeUploadedIcons(icons: StoredUploadedIcon[]): void {
     } catch (e) {
         console.error('[nextrack] Failed to save uploaded icons:', e);
     }
+}
+
+// ── Grid Icons (persisted in localStorage, used in system-designer Icon element) ──
+
+const GRID_ICON_STORAGE_KEY = 'nr-grid-icons-v1';
+
+interface StoredGridIcon {
+    id: string;
+    label: string;
+    svg: string;
+}
+
+function readGridIcons(): StoredGridIcon[] {
+    try {
+        const raw = localStorage.getItem(GRID_ICON_STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeGridIcons(icons: StoredGridIcon[]): void {
+    try {
+        localStorage.setItem(GRID_ICON_STORAGE_KEY, JSON.stringify(icons));
+    } catch (e) {
+        console.error('[nextrack] Failed to save grid icons:', e);
+    }
+}
+
+export function addGridIcon(label: string, svg: string): string {
+    const id = `grid-icon:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const stored = readGridIcons();
+    stored.push({ id, label, svg });
+    writeGridIcons(stored);
+    rebuildCatalog();
+    return id;
+}
+
+export function removeGridIcon(id: string): void {
+    const stored = readGridIcons().filter(u => u.id !== id);
+    writeGridIcons(stored);
+    rebuildCatalog();
+}
+
+export function getGridIconCount(): number {
+    return readGridIcons().length;
+}
+
+export function getGridIconEntries(): IconCatalogEntry[] {
+    return readGridIcons().map(u => ({
+        id: u.id,
+        label: u.label,
+        svg: u.svg,
+        source: 'grid-icon' as const,
+    }));
 }
 
 // ── SVG minification for storage ─────────────────────────────────────────────
@@ -316,16 +374,12 @@ function sanitizeAwsSvg(svg: string): string {
         styleEl.remove();
     });
 
-    // Remove background rects (common AWS pattern: full-size rect as first child)
+    // Keep the background intact — stripping is done separately in stripAwsBackground/buildMonoSvg.
+    // Only remove rects explicitly marked as transparent (helper rects, not the colored bg).
     el.querySelectorAll('rect').forEach(r => {
         const id = (r.getAttribute('id') || '').toLowerCase();
         const dn = (r.getAttribute('data-name') || '').toLowerCase();
-        const w = r.getAttribute('width') || '';
-        const h = r.getAttribute('height') || '';
-        const isFullSize = (w === '80' && h === '80') ||
-                           (w === '48' && h === '48') ||
-                           (w === '32' && h === '32');
-        if (id.includes('transparent') || dn.includes('transparent') || isFullSize) {
+        if (id.includes('transparent') || dn.includes('transparent')) {
             r.remove();
         }
     });
@@ -343,18 +397,127 @@ export function stripAwsBackground(svg: string): string {
     const vbMatch = vb?.match(/[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)/);
     const svgW = vbMatch ? parseFloat(vbMatch[1]) : 80;
     const svgH = vbMatch ? parseFloat(vbMatch[2]) : 80;
-    // Remove rects and paths that cover the full viewBox (the category background)
-    el.querySelectorAll('rect, path').forEach(node => {
-        if (node.tagName === 'rect') {
-            const w = parseFloat(node.getAttribute('width') || '0');
-            const h = parseFloat(node.getAttribute('height') || '0');
-            if (w >= svgW && h >= svgH) node.remove();
-        } else {
-            const d = node.getAttribute('d') || '';
-            // Simple heuristic: full-coverage paths like "M0,0H80V80H0Z"
-            if (/^M\s*0[\s,]+0[\s,]*[HhVv]/.test(d) && d.length < 40) node.remove();
+    const threshold = svgW * 0.8;
+
+    // Remove rects that cover most of the viewBox (background panels)
+    el.querySelectorAll('rect').forEach(node => {
+        const w = parseFloat(node.getAttribute('width') || '0');
+        const h = parseFloat(node.getAttribute('height') || '0');
+        if (w >= threshold && h >= threshold) node.remove();
+    });
+
+    // Remove paths that are full-coverage rectangles (various formats)
+    el.querySelectorAll('path').forEach(node => {
+        const d = (node.getAttribute('d') || '').trim();
+        if (d.length > 80) return;
+        if (/^M[\s,]*0[\s,]+0/i.test(d) && /[Zz]\s*$/.test(d)) {
+            node.remove();
         }
     });
+
+    // Remove <g> elements that have a fill/gradient but no visible shape children
+    el.querySelectorAll('g').forEach(g => {
+        const fill = g.getAttribute('fill') || g.getAttribute('style') || '';
+        if (!fill || fill === 'none') return;
+        if (fill.includes('url(') || /^#[0-9a-fA-F]/.test(fill)) {
+            const hasVisibleChildren = g.querySelector('rect, path, circle, ellipse, polygon, polyline, line, text, image');
+            if (!hasVisibleChildren) g.remove();
+        }
+    });
+
+    // Second pass: remove any remaining large rects inside groups (rounded bg rects)
+    el.querySelectorAll('g > rect:first-child').forEach(node => {
+        const w = parseFloat(node.getAttribute('width') || '0');
+        const h = parseFloat(node.getAttribute('height') || '0');
+        if (w >= threshold && h >= threshold) {
+            const parent = node.parentElement!;
+            const fill = node.getAttribute('fill') || parent.getAttribute('fill') || '';
+            // Only remove if it has a non-white, non-none fill (it's a background)
+            if (fill && fill !== 'none' && fill !== '#FFFFFF' && fill !== '#ffffff' && fill !== '#FFF' && fill !== 'white') {
+                node.remove();
+            }
+        }
+    });
+
+    return new XMLSerializer().serializeToString(el);
+}
+
+/** Builds a monochrome version of an AWS SVG: background removed, all fills replaced with currentColor. */
+export function buildMonoSvg(svg: string): string {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(svg, 'image/svg+xml');
+    const el = doc.querySelector('svg');
+    if (!el) return svg;
+
+    const vb = el.getAttribute('viewBox');
+    const vbMatch = vb?.match(/[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)/);
+    const svgW = vbMatch ? parseFloat(vbMatch[1]) : 80;
+    const svgH = vbMatch ? parseFloat(vbMatch[2]) : 80;
+    const threshold = svgW * 0.75;
+
+    // Remove all large background elements (rects that cover most of the viewBox)
+    el.querySelectorAll('rect').forEach(node => {
+        const w = parseFloat(node.getAttribute('width') || '0');
+        const h = parseFloat(node.getAttribute('height') || '0');
+        if (w >= threshold && h >= threshold) node.remove();
+    });
+
+    // Remove polygons that form a full-size rectangle (background panels)
+    el.querySelectorAll('polygon').forEach(node => {
+        const pts = node.getAttribute('points') || '';
+        const nums = pts.match(/[\d.]+/g)?.map(Number) || [];
+        if (nums.length < 8) return;
+        const xs = nums.filter((_, i) => i % 2 === 0);
+        const ys = nums.filter((_, i) => i % 2 === 1);
+        const w = Math.max(...xs) - Math.min(...xs);
+        const h = Math.max(...ys) - Math.min(...ys);
+        if (w >= threshold && h >= threshold) node.remove();
+    });
+
+    // Remove short paths that are clearly rectangle backgrounds
+    el.querySelectorAll('path').forEach(node => {
+        const d = (node.getAttribute('d') || '').trim();
+        if (d.length > 80) return;
+        if (/^M[\s,]*0[\s,]*[\d,.\s]*[Zz]\s*$/.test(d) && (d.match(/[MLHVCSQTAZmlhvcsqtaz]/g) || []).length <= 6) {
+            node.remove();
+        }
+    });
+
+    // Remove empty <g> groups (leftover after removing bg rect)
+    el.querySelectorAll('g').forEach(g => {
+        if (g.children.length === 0 && !g.textContent?.trim()) g.remove();
+    });
+
+    // Remove <defs> containing only gradients (bg gradients, no longer referenced)
+    el.querySelectorAll('defs').forEach(defs => {
+        const nonGrad = Array.from(defs.children).find(c =>
+            c.tagName !== 'linearGradient' && c.tagName !== 'radialGradient'
+        );
+        if (!nonGrad) defs.remove();
+    });
+
+    // Set all remaining fills/strokes to currentColor
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_ELEMENT);
+    let n: Node | null = walker.currentNode;
+    while (n) {
+        if (n instanceof Element && n.tagName !== 'svg') {
+            if (n.hasAttribute('fill') && n.getAttribute('fill') !== 'none') {
+                n.setAttribute('fill', 'currentColor');
+            }
+            if (n.hasAttribute('stroke') && n.getAttribute('stroke') !== 'none') {
+                n.setAttribute('stroke', 'currentColor');
+            }
+            const style = n.getAttribute('style');
+            if (style) {
+                let updated = style;
+                updated = updated.replace(/fill:\s*(?!none)[^;"}]+/g, 'fill: currentColor');
+                updated = updated.replace(/stroke:\s*(?!none)[^;"}]+/g, 'stroke: currentColor');
+                n.setAttribute('style', updated);
+            }
+        }
+        n = walker.nextNode();
+    }
+
     return new XMLSerializer().serializeToString(el);
 }
 
@@ -456,8 +619,8 @@ export function extractAwsBgColor(svg: string): string | null {
             }
         }
     }
-    // Fallback: first non-white, non-none fill found on any large element
-    for (const node of Array.from(el.querySelectorAll('rect, path, polygon, circle'))) {
+    // Fallback: first non-white, non-none fill found on any element
+    for (const node of Array.from(el.querySelectorAll('g, rect, path, polygon, circle'))) {
         const c = getFillFromElement(node);
         if (c && c !== '#fff' && c !== '#FFF' && c !== '#ffffff' && c !== '#FFFFFF' && c !== 'white') return c;
     }
@@ -548,14 +711,15 @@ type CatalogListener = () => void;
 const catalogListeners = new Set<CatalogListener>();
 
 // Cache sanitized SVGs so we don't re-parse on every rebuild
-const sanitizeCache = new Map<string, { svg: string; bgColor?: string }>();
+const sanitizeCache = new Map<string, { svg: string; bgColor?: string; svgMono?: string }>();
 
-function getSanitized(rec: VendorIconRecord): { svg: string; bgColor?: string } {
+function getSanitized(rec: VendorIconRecord): { svg: string; bgColor?: string; svgMono?: string } {
     let cached = sanitizeCache.get(rec.id);
     if (!cached) {
         const svg = sanitizeAwsSvg(rec.svg);
         const bgColor = rec.source === 'aws' ? (rec.bgColor || extractAwsBgColor(rec.svg) || undefined) : undefined;
-        cached = { svg, bgColor };
+        const svgMono = rec.source === 'aws' ? buildMonoSvg(svg) : undefined;
+        cached = { svg, bgColor, svgMono };
         sanitizeCache.set(rec.id, cached);
     }
     return cached;
@@ -616,19 +780,27 @@ function rebuildCatalog(): void {
                 });
                 continue;
             }
-            const { svg, bgColor } = getSanitized(rec);
+            const { svg, bgColor, svgMono } = getSanitized(rec);
             vendorEntries.push({
                 id: rec.id,
                 label: rec.label,
                 svg,
                 source: source as IconSource,
                 bgColor,
+                svgMono,
             });
         }
     });
 
+    const gridIcons: IconCatalogEntry[] = readGridIcons().map(u => ({
+        id: u.id,
+        label: u.label,
+        svg: u.svg,
+        source: 'grid-icon' as const,
+    }));
+
     ICON_CATALOG.length = 0;
-    ICON_CATALOG.push(...STATIC_CATALOG, ...uploaded, ...vendorEntries);
+    ICON_CATALOG.push(...STATIC_CATALOG, ...uploaded, ...gridIcons, ...vendorEntries);
     if (carbonEntriesCache) ICON_CATALOG.push(...carbonEntriesCache);
     ICON_BY_ID.clear();
     for (const i of ICON_CATALOG) ICON_BY_ID.set(i.id, i);
