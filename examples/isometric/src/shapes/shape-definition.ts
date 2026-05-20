@@ -8,4 +8,5 @@ export type BaseShape =
     | 'pyramid'
     | 'octagon'
     | 'hexahedron'
-    | 'custom';
+    | 'custom'
+    | 'svgPolygon';

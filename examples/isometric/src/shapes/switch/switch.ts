@@ -5,7 +5,9 @@ import { ShapeRegistry } from '../shape-registry';
 
 const _switchEntry = ShapeRegistry['switch'];
 if (!_switchEntry) throw new Error('[nextrack] Built-in registry entry "switch" is missing at startup — check module initialization order');
-const { defaultSize, defaultIsometricHeight } = _switchEntry;
+const _layer0 = _switchEntry.layers[0];
+const defaultSize = { width: _layer0.width, height: _layer0.height };
+const defaultIsometricHeight = _layer0.depth;
 
 @Model({
     attributes: {

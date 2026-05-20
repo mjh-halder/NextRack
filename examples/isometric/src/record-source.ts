@@ -1,7 +1,7 @@
 import { dia } from '@joint/core';
 import { graph } from './system-designer';
 import { Computer, Frame } from './shapes';
-import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, addShape, deleteShape, saveRegistryToStorage } from './shapes/shape-registry';
+import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, addShape, deleteShape, saveRegistryToStorage, defaultShapeLayer } from './shapes/shape-registry';
 import { componentStore, ComponentDefinition } from './component-store';
 import { listCanvases, createCanvas, CanvasRecord } from './canvas-store';
 import { getDataType } from './schema-registry';
@@ -146,9 +146,12 @@ function shapeAdapter(): RecordAdapter {
                 .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
                 + '-' + Date.now().toString(36);
             const def: ShapeDefinition = {
-                defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
-                defaultIsometricHeight: GRID_SIZE,
                 displayName: String(values.displayName || 'New Shape'),
+                layers: [defaultShapeLayer({
+                    width: GRID_SIZE * 2,
+                    height: GRID_SIZE * 2,
+                    depth: GRID_SIZE,
+                })],
             };
             addShape(id, def);
             saveRegistryToStorage();
@@ -166,22 +169,24 @@ function shapeAdapter(): RecordAdapter {
 }
 
 function flattenShapeDef(id: string, def: ShapeDefinition): Record<string, unknown> {
+    const layer0 = def.layers?.[0];
+    const icon0 = layer0?.icons?.[0];
     return {
         id,
         displayName: def.displayName ?? '',
-        baseShape: def.baseShape ?? '',
-        'defaultSize.width': def.defaultSize.width,
-        'defaultSize.height': def.defaultSize.height,
-        defaultIsometricHeight: def.defaultIsometricHeight,
+        baseShape: layer0?.baseShape ?? '',
+        'defaultSize.width': layer0?.width ?? 0,
+        'defaultSize.height': layer0?.height ?? 0,
+        defaultIsometricHeight: layer0?.depth ?? 0,
         collection: def.collection ?? '',
-        icon: def.icon ?? '',
-        iconFace: def.iconFace ?? '',
-        iconSize: def.iconSize ?? '',
-        iconBgColor: def.iconBgColor ?? '',
-        iconBgShape: def.iconBgShape ?? '',
-        complexShape: def.complexShape ?? false,
-        cornerRadius: def.cornerRadius ?? '',
-        chamferSize: def.chamferSize ?? '',
+        icon: icon0?.iconId ?? '',
+        iconFace: icon0?.face ?? '',
+        iconSize: icon0?.size ?? '',
+        iconBgColor: icon0?.bgColor ?? '',
+        iconBgShape: icon0?.bgShape ?? '',
+        complexShape: (def.layers?.length ?? 0) > 1,
+        cornerRadius: layer0?.cornerRadius ?? '',
+        chamferSize: layer0?.chamferSize ?? '',
     };
 }
 

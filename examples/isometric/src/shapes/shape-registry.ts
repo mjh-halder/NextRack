@@ -9,12 +9,53 @@ export interface ShapeStyle {
 }
 
 /**
- * One visual building block inside a Complex Shape component.
+ * One icon placed on a layer. A layer can carry zero or more.
+ * `id` is the stable entry identity (survives reorders).
+ * `iconId` is the catalog reference.
+ */
+export interface IconEntry {
+    /** Stable entry identity. Used by editor chokepoints to address this entry. */
+    id: string;
+    /** Catalog icon id from the asset library. Empty string = background-only entry. */
+    iconId: string;
+    /** Display name shown in the icon list, defaulting to catalog label. */
+    name?: string;
+    face: 'top' | 'front' | 'side';
+    size: number;
+    offsetX: number;
+    offsetY: number;
+    skewX: number;
+    skewY: number;
+    bgEnabled: boolean;
+    bgColor: string;
+    bgShape: 'circle' | 'square' | 'octagon';
+    bgSize: number;
+    bgRadius: number;
+    bgChamfer: number;
+    monochrome: boolean;
+    adaptive: boolean;
+    /** Override icon color (when no background). */
+    iconColor?: string;
+    /** When true, this is the canonical icon shown in 2D view. Only one per layer. */
+    isMain?: boolean;
+    /** Pre-rendered composite href cached for instance-spawn. */
+    href?: string;
+    iconOpacity?: number;
+    bgOpacity?: number;
+}
+
+/**
+ * One visual building block inside a shape. Every shape has at least one layer.
  * All dimensional values are in pixels.
  */
 export interface ShapeLayer {
     id: string;
     name: string;
+    /**
+     * Geometric form. 'custom' = user-drawn polygon; 'svgPolygon' = uploaded SVG.
+     * For both, vertices are in `normalizedVerts`. For 'svgPolygon', the raw SVG
+     * source is also kept in `svgFootprint` for re-parsing and billboard mode.
+     */
     baseShape: BaseShape;
     width: number;
     height: number;
@@ -34,134 +75,151 @@ export interface ShapeLayer {
     scaleTopY?: number;
     shedRoofDrop?: number;
     shedRoofDirection?: string;
-    /** Raw uploaded SVG string, stored for re-processing and serialization. */
+
+    /** Normalized [0..1] vertices. Present iff baseShape === 'custom' || 'svgPolygon'. */
+    normalizedVerts?: [number, number][];
+    /** Raw uploaded SVG source. Present iff baseShape === 'svgPolygon'. */
     svgFootprint?: string;
-    /** Normalized [0..1] vertices derived from svgFootprint. Scaled to layer size at render time. */
-    svgNormVerts?: [number, number][];
-    /** Original filename of the uploaded SVG, shown in the inspector. */
+    /** Original filename of uploaded SVG. Present iff baseShape === 'svgPolygon'. */
     svgFootprintName?: string;
-    /** When true, SVG footprint renders as a standing billboard instead of top-down extrusion. */
+    /** When true, SVG renders as a standing billboard. Only used iff baseShape === 'svgPolygon'. */
     svgBillboard?: boolean;
-    /** Per-layer icon entries for multi-layer shapes. */
-    icons?: IconEntry[];
+
+    /** Icon entries on this layer. Always present, may be empty. */
+    icons: IconEntry[];
 }
 
-export interface IconEntry {
-    id: string;
-    face: 'top' | 'front' | 'side';
-    size: number;
-    offsetX: number;
-    offsetY: number;
-    skewX: number;
-    skewY: number;
-    bgEnabled: boolean;
-    bgColor: string;
-    bgShape: 'circle' | 'square' | 'octagon';
-    bgSize: number;
-    bgRadius: number;
-    bgChamfer: number;
-    monochrome: boolean;
-    adaptive: boolean;
-    isMain?: boolean;
-    href?: string;
-    iconOpacity?: number;
-    bgOpacity?: number;
-}
-
+/**
+ * A component definition. Every shape has one or more layers — there is no
+ * "simple vs. complex" distinction. A single-layer shape is the natural minimum;
+ * multi-layer shapes stack additional layers above the main one.
+ */
 export interface ShapeDefinition {
-    defaultSize: { width: number; height: number };
-    defaultIsometricHeight: number;
-    baseShape?: BaseShape;
-    /** Whether Dimension Y is adjustable in the grid for tube/duct shapes */
-    dimYAdjustable?: boolean;
-    /** Human-readable display name shown as the shape label */
-    displayName?: string;
-    /** Which face the icon is placed on in isometric view */
-    iconFace?: 'top' | 'front' | 'side';
-    /** ID of the selected icon from the asset library */
-    icon?: string;
-    /** Icon size in grid units (default 1 = GRID_SIZE px) */
-    iconSize?: number;
-    /** Whether the icon background is enabled */
-    iconBgEnabled?: boolean;
-    /** Background color of the icon badge */
-    iconBgColor?: string;
-    /** Background shape of the icon badge */
-    iconBgShape?: 'circle' | 'square' | 'octagon';
-    iconBgRadius?: number;
-    /** Background size in grid units (default = same as iconSize) */
-    iconBgSize?: number;
-    /** Octagon corner cut depth as fraction of size (0–0.45, default 0.18) */
-    iconBgChamfer?: number;
-    /**
-     * Pre-computed composite icon data URI (icon + coloured background).
-     * Computed by the component designer at save time so the system designer
-     * can apply it without rebuilding the SVG composite itself.
-     */
-    iconHref?: string;
-    /**
-     * For complex shapes only: which layer (by index into `layers`) carries
-     * the icon. Defaults to 0 (main layer) for backwards compatibility.
-     */
-    iconLayerIndex?: number;
-    /** Multi-icon entries (new format, replaces individual icon* fields) */
-    icons?: IconEntry[];
-    /** Infrastructure component type this shape represents */
+    /** Human-readable display name. */
+    displayName: string;
+    /** Infrastructure component type (e.g., "Firewall", "Switch"). */
     componentType?: string;
-    /** Optional color overrides applied when a new instance is created */
-    style?: ShapeStyle;
-    /** When true, the component is composed of multiple layers instead of a single shape */
-    complexShape?: boolean;
-    /** Layer definitions for complex shapes; empty for simple shapes */
-    layers?: ShapeLayer[];
-    cornerRadius?: number;
-    chamferSize?: number;
-    chamferStart?: number;
+    /** Palette grouping. */
     collection?: string;
-    customVerts?: [number, number][] | [number, number][][];
-    rotation?: number;
-    hasVariations?: boolean;
-    turned90?: ShapeDefinition;
+    /** Whether Dimension Y is adjustable in the grid (tube/duct/pipe shapes). */
+    dimYAdjustable?: boolean;
+    /** Optional hit-area override (larger than layered bbox) for placement collision. */
     hitAreaSize?: { width: number; height: number };
-    taper?: number;
-    twist?: number;
-    scaleTopX?: number;
-    scaleTopY?: number;
+    /** Whether this shape has a 90°-rotated variation. */
+    hasVariations?: boolean;
+    /** Alternate definition for the 90°-rotated variation. */
+    turned90?: ShapeDefinition;
+    /** Default rotation applied at instance-spawn. */
+    defaultRotation?: number;
+    /** One or more layers. Always at least one. layers[0] is the "main" layer. */
+    layers: ShapeLayer[];
+}
+
+/** Helper: make a new ShapeLayer with sensible defaults and a fresh stable id. */
+export function defaultShapeLayer(partial: Partial<ShapeLayer> = {}): ShapeLayer {
+    return {
+        id: `layer-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+        name: 'Main',
+        baseShape: 'cuboid',
+        width: GRID_SIZE * 2,
+        height: GRID_SIZE * 2,
+        depth: GRID_SIZE,
+        offsetX: 0,
+        offsetY: 0,
+        baseElevation: 0,
+        style: {},
+        icons: [],
+        ...partial,
+    };
+}
+
+/** Helper: make a new IconEntry with default settings and a fresh stable id. */
+export function defaultIconEntry(partial: Partial<IconEntry> = {}): IconEntry {
+    return {
+        id: `icon-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+        iconId: '',
+        face: 'top',
+        size: 1.5,
+        offsetX: 0,
+        offsetY: 0,
+        skewX: 0,
+        skewY: 0,
+        bgEnabled: false,
+        bgColor: '#525252',
+        bgShape: 'circle',
+        bgSize: 1.5,
+        bgRadius: 6,
+        bgChamfer: 0.18,
+        monochrome: false,
+        adaptive: false,
+        ...partial,
+    };
 }
 
 /**
  * Canonical defaults for all built-in shapes.
- * This is the single source of truth — used to initialize the registry
- * and to re-hydrate it after localStorage is loaded (defensive).
+ * Built-ins are registry entries that legacy code paths may look up by id,
+ * but they are NOT exposed in the palette (the user-facing list comes from
+ * the shape store).
  */
 const BUILT_IN_DEFAULTS: Record<string, ShapeDefinition> = {
     'firewall': {
-        defaultSize: { width: GRID_SIZE * 3, height: GRID_SIZE },
-        defaultIsometricHeight: GRID_SIZE * 2,
+        displayName: 'Firewall',
         componentType: 'Firewall',
+        layers: [defaultShapeLayer({
+            id: 'layer-firewall-main',
+            width: GRID_SIZE * 3,
+            height: GRID_SIZE,
+            depth: GRID_SIZE * 2,
+        })],
     },
     'switch': {
-        defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
-        defaultIsometricHeight: GRID_SIZE / 2,
+        displayName: 'Switch',
         componentType: 'Switch',
+        layers: [defaultShapeLayer({
+            id: 'layer-switch-main',
+            width: GRID_SIZE * 2,
+            height: GRID_SIZE * 2,
+            depth: GRID_SIZE / 2,
+        })],
     },
     'router': {
-        defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
-        defaultIsometricHeight: GRID_SIZE / 2,
+        displayName: 'Router',
+        layers: [defaultShapeLayer({
+            id: 'layer-router-main',
+            width: GRID_SIZE * 2,
+            height: GRID_SIZE * 2,
+            depth: GRID_SIZE / 2,
+        })],
     },
     'computer': {
-        defaultSize: { width: GRID_SIZE, height: GRID_SIZE * 2 },
-        defaultIsometricHeight: GRID_SIZE * 2,
+        displayName: 'Server',
         componentType: 'Server',
+        layers: [defaultShapeLayer({
+            id: 'layer-computer-main',
+            width: GRID_SIZE,
+            height: GRID_SIZE * 2,
+            depth: GRID_SIZE * 2,
+        })],
     },
     'database': {
-        defaultSize: { width: GRID_SIZE, height: GRID_SIZE },
-        defaultIsometricHeight: GRID_SIZE,
+        displayName: 'Storage',
         componentType: 'Storage',
+        layers: [defaultShapeLayer({
+            id: 'layer-database-main',
+            width: GRID_SIZE,
+            height: GRID_SIZE,
+            depth: GRID_SIZE,
+        })],
     },
     'kubernetes-worker-node': {
-        defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
-        defaultIsometricHeight: GRID_SIZE / 2,
+        displayName: 'Worker Node',
+        layers: [defaultShapeLayer({
+            id: 'layer-k8s-main',
+            width: GRID_SIZE * 2,
+            height: GRID_SIZE * 2,
+            depth: GRID_SIZE / 2,
+        })],
     },
 };
 
@@ -203,16 +261,11 @@ export function addShape(id: string, defaults: ShapeDefinition): void {
 
 export function updateShapeDefinition(id: string, patch: Partial<ShapeDefinition>): void {
     if (!ShapeRegistry[id]) return;
-    const { style, ...rest } = patch;
-    Object.assign(ShapeRegistry[id], rest);
-    if (style) {
-        if (!ShapeRegistry[id].style) ShapeRegistry[id].style = {};
-        Object.assign(ShapeRegistry[id].style, style);
-    }
+    Object.assign(ShapeRegistry[id], patch);
 }
 
-const REGISTRY_STORAGE_KEY = 'nextrack-shape-registry-v1';
-const DELETED_STORAGE_KEY = 'nextrack-deleted-shapes-v1';
+const REGISTRY_STORAGE_KEY = 'nextrack-shape-registry-v2';
+const DELETED_STORAGE_KEY = 'nextrack-deleted-shapes-v2';
 
 export function saveRegistryToStorage(): void {
     try {
@@ -263,51 +316,6 @@ export function loadRegistryFromStorage(): void {
     } catch (e) {
         console.error('[nextrack] Failed to load shape registry:', e);
     }
-}
-
-/** Migrate old single-icon properties to the new icons array format. */
-export function migrateIconDef(def: ShapeDefinition): IconEntry[] {
-    if (def.icons) return def.icons;
-    if (!def.icon) return [];
-    return [{
-        id: def.icon,
-        face: def.iconFace || 'top',
-        size: def.iconSize || 1.5,
-        offsetX: 0,
-        offsetY: 0,
-        skewX: 0,
-        skewY: 0,
-        bgEnabled: def.iconBgEnabled || false,
-        bgColor: def.iconBgColor || '#525252',
-        bgShape: def.iconBgShape || 'circle',
-        bgSize: def.iconBgSize || 1.5,
-        bgRadius: def.iconBgRadius || 6,
-        bgChamfer: def.iconBgChamfer || 0.18,
-        monochrome: false,
-        adaptive: false,
-        href: def.iconHref,
-    }];
-}
-
-export function defaultIconEntry(isMain = false): IconEntry {
-    return {
-        id: '',
-        face: 'top',
-        size: 1.5,
-        offsetX: 0,
-        offsetY: 0,
-        skewX: 0,
-        skewY: 0,
-        bgEnabled: false,
-        bgColor: '#525252',
-        bgShape: 'circle',
-        bgSize: 1.5,
-        bgRadius: 6,
-        bgChamfer: 0.18,
-        monochrome: false,
-        adaptive: false,
-        isMain,
-    };
 }
 
 // Populated with built-in defaults, then immediately hydrated from localStorage.

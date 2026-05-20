@@ -5,7 +5,9 @@ import { ShapeRegistry } from '../shape-registry';
 
 const _routerEntry = ShapeRegistry['router'];
 if (!_routerEntry) throw new Error('[nextrack] Built-in registry entry "router" is missing at startup — check module initialization order');
-const { defaultSize, defaultIsometricHeight } = _routerEntry;
+const _layer0 = _routerEntry.layers[0];
+const defaultSize = { width: _layer0.width, height: _layer0.height };
+const defaultIsometricHeight = _layer0.depth;
 
 @Model({
     attributes: {

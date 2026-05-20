@@ -5,7 +5,9 @@ import { ShapeRegistry } from '../shape-registry';
 
 const _firewallEntry = ShapeRegistry['firewall'];
 if (!_firewallEntry) throw new Error('[nextrack] Built-in registry entry "firewall" is missing at startup — check module initialization order');
-const { defaultSize, defaultIsometricHeight } = _firewallEntry;
+const _layer0 = _firewallEntry.layers[0];
+const defaultSize = { width: _layer0.width, height: _layer0.height };
+const defaultIsometricHeight = _layer0.depth;
 
 @Model({
     attributes: {

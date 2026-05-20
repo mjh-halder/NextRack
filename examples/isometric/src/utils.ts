@@ -227,72 +227,64 @@ export function applyRegistryDefaults(
     defaults: ShapeDefinition,
     paper?: dia.Paper
 ): void {
+    const layer0 = defaults.layers?.[0];
+    const icon0 = layer0?.icons?.[0];
+
     // ── Dimensions ───────────────────────────────────────────────────────────
-    if (defaults.defaultSize) {
-        shape.resize(defaults.defaultSize.width, defaults.defaultSize.height);
+    if (layer0) {
+        shape.resize(layer0.width, layer0.height);
+        shape.set('isometricHeight', layer0.depth);
+        if (layer0.cornerRadius != null) shape.set('cornerRadius', layer0.cornerRadius);
+        if (layer0.chamferSize != null) shape.set('chamferSize', layer0.chamferSize);
+        if (layer0.chamferStart != null) shape.set('chamferStart', layer0.chamferStart);
+        if (layer0.normalizedVerts) shape.set('normalizedVerts', layer0.normalizedVerts);
+        if (layer0.taper != null) shape.set('taper', layer0.taper);
+        if (layer0.twist != null) shape.set('twist', layer0.twist);
+        if (layer0.scaleTopX != null) shape.set('scaleTopX', layer0.scaleTopX);
+        if (layer0.scaleTopY != null) shape.set('scaleTopY', layer0.scaleTopY);
     }
-    if (defaults.defaultIsometricHeight != null) {
-        shape.set('isometricHeight', defaults.defaultIsometricHeight);
-    }
-    if (defaults.cornerRadius != null) {
-        shape.set('cornerRadius', defaults.cornerRadius);
-    }
-    if (defaults.chamferSize != null) {
-        shape.set('chamferSize', defaults.chamferSize);
-    }
-    if (defaults.chamferStart != null) {
-        shape.set('chamferStart', defaults.chamferStart);
-    }
-    if (defaults.customVerts) {
-        shape.set('normalizedVerts', defaults.customVerts);
-    }
-    if (defaults.rotation) shape.set('shapeRotation', defaults.rotation);
-    if (defaults.taper != null) shape.set('taper', defaults.taper);
-    if (defaults.twist != null) shape.set('twist', defaults.twist);
-    if (defaults.scaleTopX != null) shape.set('scaleTopX', defaults.scaleTopX);
-    if (defaults.scaleTopY != null) shape.set('scaleTopY', defaults.scaleTopY);
+    if (defaults.defaultRotation) shape.set('shapeRotation', defaults.defaultRotation);
 
     // ── Label ────────────────────────────────────────────────────────────────
-    // Do not overwrite a user-set name with the registry default.
     if (defaults.displayName && !(shape.get('meta') as { name?: string } | undefined)?.name?.trim()) {
         shape.attr('label/text', defaults.displayName);
     }
 
     // ── Colors ───────────────────────────────────────────────────────────────
-    if (defaults.style) {
-        applyShapeStyle(shape, defaults.style);
+    if (layer0?.style) {
+        applyShapeStyle(shape, layer0.style);
     }
 
     // ── Icon ─────────────────────────────────────────────────────────────────
-    if (defaults.iconHref) {
-        const iconPx = (defaults.iconSize ?? 1) * GRID_SIZE;
-        const w = defaults.defaultSize?.width  ?? GRID_SIZE;
-        const h = defaults.defaultSize?.height ?? GRID_SIZE;
-        const iH = defaults.defaultIsometricHeight ?? 0;
+    if (icon0?.href) {
+        const iconPx = (icon0.size ?? 1) * GRID_SIZE;
+        const w = layer0?.width  ?? GRID_SIZE;
+        const h = layer0?.height ?? GRID_SIZE;
+        const iH = layer0?.depth ?? 0;
         const x2D = (w - iconPx) / 2;
         const y2D = (h - iconPx) / 2;
 
         let topIconAttrs: Record<string, unknown>;
-        if (defaults.iconFace === 'front') {
+        if (icon0.face === 'front') {
             const localX = (w - iconPx) / 2;
             const localY = (iH - iconPx) / 2;
             const cx = localX + iconPx / 2;
             const cy = localY + iconPx / 2;
             topIconAttrs = {
-                href:      defaults.iconHref,
+                href:      icon0.href,
                 x:         localX,
                 y:         localY,
                 width:     iconPx,
                 height:    iconPx,
                 transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`,
             };
-        } else if (defaults.iconFace === 'side') {
+        } else if (icon0.face === 'side') {
             const localX = (h - iconPx) / 2;
             const localY = (iH - iconPx) / 2;
             const cx = localX + iconPx / 2;
             const cy = localY + iconPx / 2;
             topIconAttrs = {
-                href:      defaults.iconHref,
+                href:      icon0.href,
                 x:         localX,
                 y:         localY,
                 width:     iconPx,
@@ -301,7 +293,7 @@ export function applyRegistryDefaults(
             };
         } else {
             topIconAttrs = {
-                href:      defaults.iconHref,
+                href:      icon0.href,
                 x:         -iH + (w - iconPx) / 2,
                 y:         -iH + (h - iconPx) / 2,
                 width:     iconPx,
@@ -310,10 +302,10 @@ export function applyRegistryDefaults(
             };
         }
 
-        shape.set('effectiveIconFace', defaults.iconFace ?? 'top');
+        shape.set('effectiveIconFace', icon0.face ?? 'top');
         shape.attr({
             topIcon:   topIconAttrs,
-            topIcon2D: { href: defaults.iconHref, x: x2D, y: y2D, width: iconPx, height: iconPx },
+            topIcon2D: { href: icon0.href, x: x2D, y: y2D, width: iconPx, height: iconPx },
         });
 
         if (paper) {
@@ -352,12 +344,14 @@ export function createComplexLayers(
 
     const shapes: IsometricShape[] = [];
     for (const layer of layers) {
-        const isSvg = !!(layer.svgNormVerts && layer.svgNormVerts.length >= 3);
+        // Polygon-backed layers ('custom' or 'svgPolygon') render via SvgPolygonShape.
+        const isSvg = (layer.baseShape === 'custom' || layer.baseShape === 'svgPolygon')
+            && !!(layer.normalizedVerts && layer.normalizedVerts.length >= 3);
         const shape: IsometricShape = isSvg
             ? new SvgPolygonShape()
             : (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['cuboid'])();
-        if (isSvg && layer.svgNormVerts) {
-            (shape as SvgPolygonShape).set('normalizedVerts', layer.svgNormVerts);
+        if (isSvg && layer.normalizedVerts) {
+            (shape as SvgPolygonShape).set('normalizedVerts', layer.normalizedVerts);
         }
         shape.resize(layer.width, layer.height);
         shape.set('isometricHeight',        layer.depth);

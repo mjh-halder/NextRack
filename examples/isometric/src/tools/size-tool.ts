@@ -45,7 +45,7 @@ export class SizeControl extends elementTools.Control {
         const meta = element.get('meta') as { shapeType?: string } | undefined;
         const shapeKey = meta?.shapeType || '';
         const def = shapeKey ? ShapeRegistry[shapeKey] : undefined;
-        const bs = (element.get('currentBaseShape') as string) || def?.baseShape || '';
+        const bs = (element.get('currentBaseShape') as string) || def?.layers?.[0]?.baseShape || '';
 
         let newWidth: number;
         let newHeight: number;

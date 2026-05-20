@@ -2243,34 +2243,37 @@ export class PropertyPanel {
         const def = ShapeRegistry[shapeKey] as ShapeDefinition | undefined;
         if (!def) return;
 
-        const effectiveColor = color || def.iconBgColor || '';
+        const entry0 = def.layers?.[0]?.icons?.[0];
+        const defBgColor = entry0?.bgColor || '';
+        const defHref = entry0?.href;
+        const effectiveColor = color || defBgColor || '';
 
-        if (def.iconHref) {
+        if (defHref) {
             if (color) {
                 const prefix = 'data:image/svg+xml;charset=utf-8,';
-                let svgStr = decodeURIComponent(def.iconHref.slice(prefix.length));
+                let svgStr = decodeURIComponent(defHref.slice(prefix.length));
 
-                if (def.iconBgColor && svgStr.includes(`fill="${def.iconBgColor}"`)) {
+                if (defBgColor && svgStr.includes(`fill="${defBgColor}"`)) {
                     svgStr = svgStr.replace(
-                        `fill="${def.iconBgColor}"`,
+                        `fill="${defBgColor}"`,
                         `fill="${color}"`
                     );
-                } else {
+                } else if (entry0) {
                     // Background element not present — insert one before
                     // the first <image or closing tag.
-                    const bgShape = def.iconBgShape ?? 'circle';
-                    const iconSizePx = (def.iconSize ?? 1) * GRID_SIZE;
-                    const bgSizePx = (def.iconBgSize ?? def.iconSize ?? 1) * GRID_SIZE;
+                    const bgShape = entry0.bgShape ?? 'circle';
+                    const iconSizePx = (entry0.size ?? 1) * GRID_SIZE;
+                    const bgSizePx = (entry0.bgSize ?? entry0.size ?? 1) * GRID_SIZE;
                     const canvasPx = Math.max(iconSizePx, bgSizePx);
                     const off = (canvasPx - bgSizePx) / 2;
                     let bgEl: string;
                     if (bgShape === 'circle') {
                         bgEl = `<circle cx="${off + bgSizePx / 2}" cy="${off + bgSizePx / 2}" r="${bgSizePx / 2}" fill="${color}"/>`;
                     } else if (bgShape === 'octagon') {
-                        const c = bgSizePx * (def.iconBgChamfer ?? 0.18);
+                        const c = bgSizePx * (entry0.bgChamfer ?? 0.18);
                         bgEl = `<polygon points="${off + c},${off} ${off + bgSizePx - c},${off} ${off + bgSizePx},${off + c} ${off + bgSizePx},${off + bgSizePx - c} ${off + bgSizePx - c},${off + bgSizePx} ${off + c},${off + bgSizePx} ${off},${off + bgSizePx - c} ${off},${off + c}" fill="${color}"/>`;
                     } else {
-                        const rx = def.iconBgRadius ?? 6;
+                        const rx = entry0.bgRadius ?? 6;
                         bgEl = `<rect x="${off}" y="${off}" width="${bgSizePx}" height="${bgSizePx}" rx="${rx}" fill="${color}"/>`;
                     }
                     const insertPos = svgStr.indexOf('><') + 1;
@@ -2281,25 +2284,25 @@ export class PropertyPanel {
                 const newHref = prefix + encodeURIComponent(svgStr);
                 cell.attr('topIcon/href', newHref);
                 cell.attr('topIcon2D/href', newHref);
-            } else if (def.iconBgColor) {
+            } else if (defBgColor && entry0) {
                 // Reset to default: ensure the definition's bg color is present.
                 const prefix = 'data:image/svg+xml;charset=utf-8,';
-                let svgStr = decodeURIComponent(def.iconHref.slice(prefix.length));
-                if (!svgStr.includes(`fill="${def.iconBgColor}"`)) {
-                    const bgShape = def.iconBgShape ?? 'circle';
-                    const iconSizePx = (def.iconSize ?? 1) * GRID_SIZE;
-                    const bgSizePx = (def.iconBgSize ?? def.iconSize ?? 1) * GRID_SIZE;
+                let svgStr = decodeURIComponent(defHref.slice(prefix.length));
+                if (!svgStr.includes(`fill="${defBgColor}"`)) {
+                    const bgShape = entry0.bgShape ?? 'circle';
+                    const iconSizePx = (entry0.size ?? 1) * GRID_SIZE;
+                    const bgSizePx = (entry0.bgSize ?? entry0.size ?? 1) * GRID_SIZE;
                     const canvasPx = Math.max(iconSizePx, bgSizePx);
                     const off = (canvasPx - bgSizePx) / 2;
                     let bgEl: string;
                     if (bgShape === 'circle') {
-                        bgEl = `<circle cx="${off + bgSizePx / 2}" cy="${off + bgSizePx / 2}" r="${bgSizePx / 2}" fill="${def.iconBgColor}"/>`;
+                        bgEl = `<circle cx="${off + bgSizePx / 2}" cy="${off + bgSizePx / 2}" r="${bgSizePx / 2}" fill="${defBgColor}"/>`;
                     } else if (bgShape === 'octagon') {
-                        const c = bgSizePx * (def.iconBgChamfer ?? 0.18);
-                        bgEl = `<polygon points="${off + c},${off} ${off + bgSizePx - c},${off} ${off + bgSizePx},${off + c} ${off + bgSizePx},${off + bgSizePx - c} ${off + bgSizePx - c},${off + bgSizePx} ${off + c},${off + bgSizePx} ${off},${off + bgSizePx - c} ${off},${off + c}" fill="${def.iconBgColor}"/>`;
+                        const c = bgSizePx * (entry0.bgChamfer ?? 0.18);
+                        bgEl = `<polygon points="${off + c},${off} ${off + bgSizePx - c},${off} ${off + bgSizePx},${off + c} ${off + bgSizePx},${off + bgSizePx - c} ${off + bgSizePx - c},${off + bgSizePx} ${off + c},${off + bgSizePx} ${off},${off + bgSizePx - c} ${off},${off + c}" fill="${defBgColor}"/>`;
                     } else {
-                        const rx = def.iconBgRadius ?? 6;
-                        bgEl = `<rect x="${off}" y="${off}" width="${bgSizePx}" height="${bgSizePx}" rx="${rx}" fill="${def.iconBgColor}"/>`;
+                        const rx = entry0.bgRadius ?? 6;
+                        bgEl = `<rect x="${off}" y="${off}" width="${bgSizePx}" height="${bgSizePx}" rx="${rx}" fill="${defBgColor}"/>`;
                     }
                     const insertPos = svgStr.indexOf('><') + 1;
                     if (insertPos > 0) {
@@ -2310,12 +2313,12 @@ export class PropertyPanel {
                 cell.attr('topIcon/href', restoredHref);
                 cell.attr('topIcon2D/href', restoredHref);
             } else {
-                cell.attr('topIcon/href', def.iconHref);
-                cell.attr('topIcon2D/href', def.iconHref);
+                cell.attr('topIcon/href', defHref);
+                cell.attr('topIcon2D/href', defHref);
             }
         }
 
-        if (def.complexShape && def.layers) {
+        if ((def.layers?.length ?? 0) > 1) {
             const children = cell.getEmbeddedCells();
             for (const child of children) {
                 if (child.get('componentRole') === 'child') {

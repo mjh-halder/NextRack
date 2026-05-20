@@ -265,8 +265,9 @@ function buildShapeRow(
 
     const tdThumb = document.createElement('td');
     tdThumb.className = 'nr-admin__table-thumb';
-    if (def.icon) {
-        const entry = getIconById(def.icon);
+    const catId = def.layers?.[0]?.icons?.[0]?.iconId;
+    if (catId) {
+        const entry = getIconById(catId);
         if (entry) tdThumb.innerHTML = entry.svg;
     }
     tr.appendChild(tdThumb);
@@ -298,22 +299,25 @@ function buildShapeRow(
     }
     tr.appendChild(tdCollection);
 
+    const layer0 = def.layers?.[0];
+
     const tdBase = document.createElement('td');
-    tdBase.textContent = def.baseShape || '—';
+    tdBase.textContent = layer0?.baseShape || '—';
     tr.appendChild(tdBase);
 
     const tdSize = document.createElement('td');
-    const w = Math.round(def.defaultSize.width);
-    const h = Math.round(def.defaultSize.height);
+    const w = Math.round(layer0?.width ?? 0);
+    const h = Math.round(layer0?.height ?? 0);
     tdSize.textContent = `${w}×${h}`;
     tr.appendChild(tdSize);
 
     const tdDepth = document.createElement('td');
-    tdDepth.textContent = String(Math.round(def.defaultIsometricHeight));
+    tdDepth.textContent = String(Math.round(layer0?.depth ?? 0));
     tr.appendChild(tdDepth);
 
     const tdComplex = document.createElement('td');
-    tdComplex.textContent = def.complexShape ? `Yes (${def.layers?.length ?? 0} layers)` : 'No';
+    const layerCount = def.layers?.length ?? 0;
+    tdComplex.textContent = layerCount > 1 ? `Yes (${layerCount} layers)` : 'No';
     tr.appendChild(tdComplex);
 
     const tdActions = document.createElement('td');
@@ -736,7 +740,11 @@ function renderIconConfig(container: HTMLElement): void {
 function getUsedIconIds(): Set<string> {
     const used = new Set<string>();
     for (const def of Object.values(ShapeRegistry)) {
-        if (def.icon) used.add(def.icon);
+        for (const layer of def.layers ?? []) {
+            for (const ie of layer.icons ?? []) {
+                if (ie.iconId) used.add(ie.iconId);
+            }
+        }
     }
     return used;
 }
@@ -786,7 +794,9 @@ function buildSections(host: HTMLElement): void {
         const grid = document.createElement('div');
         grid.className = 'nr-admin__icon-compact-grid';
         for (const icon of used) {
-            const shapeName = Object.values(ShapeRegistry).find(d => d.icon === icon.id)?.displayName ?? '';
+            const shapeName = Object.values(ShapeRegistry).find(d =>
+                d.layers?.some(l => l.icons?.some(ie => ie.iconId === icon.id))
+            )?.displayName ?? '';
             grid.appendChild(buildTile(icon, {
                 titleAction: shapeName ? `Used by ${shapeName}` : icon.label,
                 onClick: null,

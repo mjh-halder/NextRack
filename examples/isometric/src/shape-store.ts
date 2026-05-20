@@ -1,27 +1,33 @@
-import { ShapeDefinition, addShape, ShapeRegistry } from './shapes/shape-registry';
+import { ShapeDefinition, IconEntry, addShape, ShapeRegistry, defaultShapeLayer, defaultIconEntry } from './shapes/shape-registry';
 import { getIconById } from './icon-catalog';
 
 export type ShapeCategory = 'general' | 'user';
 
-function bakeIconHref(def: ShapeDefinition): string | undefined {
-    if (!def.icon) return undefined;
-    const entry = getIconById(def.icon);
-    if (!entry) return undefined;
+/**
+ * Bake a 64x64 composite preview href from an IconEntry.
+ * Used for palette tiles and admin previews — a cheap "snapshot" of how the
+ * icon looks with its background applied. The editor uses its own composite
+ * builder (`buildCompositeIconSvg`) for live rendering.
+ */
+export function bakeIconHref(entry: IconEntry | undefined): string | undefined {
+    if (!entry || !entry.iconId) return undefined;
+    const cat = getIconById(entry.iconId);
+    if (!cat) return undefined;
     const S = 64;
-    const isVendor = entry.source === 'aws' || entry.source === 'gcp' || entry.source === 'azure';
+    const isVendor = cat.source === 'aws' || cat.source === 'gcp' || cat.source === 'azure';
     const pad = isVendor ? 3 : 13;
     const inner = S - 2 * pad;
-    const bgColor = def.iconBgColor ?? null;
-    const bgShape = def.iconBgShape ?? 'circle';
-    const bgRadius = def.iconBgRadius ?? 6;
-    const bgChamfer = def.iconBgChamfer ?? 0.18;
+    const bgColor = entry.bgEnabled ? entry.bgColor : null;
+    const bgShape = entry.bgShape;
+    const bgRadius = entry.bgRadius;
+    const bgChamfer = entry.bgChamfer;
     let bgEl = '';
     if (bgColor) {
         if (bgShape === 'circle') bgEl = `<circle cx="${S / 2}" cy="${S / 2}" r="${S / 2}" fill="${bgColor}"/>`;
         else if (bgShape === 'octagon') { const c = Math.round(S * bgChamfer); bgEl = `<polygon points="${c},0 ${S - c},0 ${S},${c} ${S},${S - c} ${S - c},${S} ${c},${S} 0,${S - c} 0,${c}" fill="${bgColor}"/>`; }
         else bgEl = `<rect width="${S}" height="${S}" rx="${bgRadius}" fill="${bgColor}"/>`;
     }
-    const iconDataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(entry.svg)}`;
+    const iconDataUri = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(cat.svg)}`;
     const applyWhite = !isVendor;
     const filter = applyWhite ? `<defs><filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter></defs>` : '';
     const filterAttr = applyWhite ? ' filter="url(#nr-white)"' : '';
@@ -42,8 +48,8 @@ interface ShapeStore {
 }
 
 const STORAGE_KEYS: Record<ShapeCategory, string> = {
-    general: 'nextrack-shapes-general-v1',
-    user: 'nextrack-shapes-user-v1',
+    general: 'nextrack-shapes-general-v2',
+    user: 'nextrack-shapes-user-v2',
 };
 
 function readCollection(category: ShapeCategory): StoredShape[] {
@@ -85,31 +91,39 @@ function remove(category: ShapeCategory, id: string): void {
 
 function ensureDefaults(): void {
     const existing = readCollection('general');
-    const ids = new Set(existing.map(s => s.id));
     const defaults: StoredShape[] = [
         {
             id: 'hsm',
             definition: {
-                defaultSize: { width: 40, height: 40 },
-                defaultIsometricHeight: 20,
                 displayName: 'HSM Appliance',
                 componentType: 'HSM',
-                baseShape: 'cuboid',
-                chamferSize: 4,
-                chamferStart: 0.6,
-                icon: 'security',
-                iconSize: 1,
-                iconBgColor: '#161616',
-                iconBgShape: 'square',
-                iconBgRadius: 2,
                 collection: 'General',
+                layers: [defaultShapeLayer({
+                    id: 'layer-hsm-main',
+                    width: 40,
+                    height: 40,
+                    depth: 20,
+                    chamferSize: 4,
+                    chamferStart: 0.6,
+                    icons: [defaultIconEntry({
+                        id: 'icon-hsm-main',
+                        iconId: 'security',
+                        size: 1,
+                        bgEnabled: true,
+                        bgColor: '#161616',
+                        bgShape: 'square',
+                        bgRadius: 2,
+                        isMain: true,
+                    })],
+                })],
             },
         },
     ];
     let changed = false;
     for (const d of defaults) {
-        if (!d.definition.iconHref) {
-            d.definition.iconHref = bakeIconHref(d.definition);
+        const entry = d.definition.layers[0]?.icons[0];
+        if (entry && !entry.href) {
+            entry.href = bakeIconHref(entry);
         }
         const idx = existing.findIndex(s => s.id === d.id);
         if (idx < 0) {

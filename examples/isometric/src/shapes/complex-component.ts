@@ -67,11 +67,14 @@ interface FaceDesc {
  * compute SVG path strings.
  */
 function makeProxy(layer: ShapeLayer): IsometricShape {
-    const isSvg = !!(layer.svgNormVerts && layer.svgNormVerts.length >= 3);
+    // Polygon-backed layers (drawn 'custom' or uploaded 'svgPolygon') render via
+    // SvgPolygonShape, which consumes normalizedVerts.
+    const isSvg = (layer.baseShape === 'custom' || layer.baseShape === 'svgPolygon')
+        && !!(layer.normalizedVerts && layer.normalizedVerts.length >= 3);
     let proxy: IsometricShape;
     if (isSvg) {
         proxy = new SvgPolygonShape();
-        (proxy as SvgPolygonShape).set('normalizedVerts', layer.svgNormVerts!);
+        (proxy as SvgPolygonShape).set('normalizedVerts', layer.normalizedVerts!);
     } else {
         // Matches the mapping used by `createComplexLayers` for consistency.
         switch (layer.baseShape) {

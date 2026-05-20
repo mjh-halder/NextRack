@@ -841,7 +841,7 @@ export class ComponentPalette {
             || shapeKey
             || 'Element';
         const iconId = (cell.prop('meta/icon') as string | undefined)
-            || (shapeKey ? ShapeRegistry[shapeKey]?.icon : undefined);
+            || (shapeKey ? ShapeRegistry[shapeKey]?.layers?.[0]?.icons?.[0]?.iconId : undefined);
         const iconEntry = iconId ? getIconById(iconId) : undefined;
 
         const li = document.createElement('li');
@@ -1043,12 +1043,14 @@ export class ComponentPalette {
         const items: ComponentTreeItem[] = Object.entries(ShapeRegistry)
             .filter(([id]) => !BUILT_IN_SHAPE_IDS.has(id))
             .map(([id, defaults]) => {
-                const iconEntry = defaults.icon ? getIconById(defaults.icon) : undefined;
+                const layer0 = defaults.layers?.[0];
+                const catIconId = layer0?.icons?.[0]?.iconId;
+                const iconEntry = catIconId ? getIconById(catIconId) : undefined;
                 const isVendorIcon = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
                 const paletteItem: PaletteItem = {
                     label: defaults.displayName ?? formatLabel(id),
                     kind: id,
-                    create: () => getPreviewFactory(id, defaults.baseShape ?? 'cuboid')(),
+                    create: () => getPreviewFactory(id, layer0?.baseShape ?? 'cuboid')(),
                     iconSvg: iconEntry?.svg || undefined,
                     iconSvgMono: isVendorIcon ? iconEntry.svgMono : undefined,
                     iconBgColor: isVendorIcon ? iconEntry.bgColor : undefined,
@@ -1133,27 +1135,27 @@ export class ComponentPalette {
         // Complex shape: one cell (ComplexComponent) that renders all layers
         // internally. One bbox, one z, one drag target — no embedding, no
         // sibling-layer painter ambiguity.
-        if (defaults?.complexShape && defaults.layers?.length) {
-            const baseLayer = defaults.layers[0];
+        const baseLayer = defaults?.layers?.[0];
+        if ((defaults?.layers?.length ?? 0) > 1 && baseLayer) {
             const cc = new ComplexComponent();
-            const haSize = defaults.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
+            const haSize = defaults!.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
             cc.resize(haSize.width, haSize.height);
             cc.set('isometricHeight',        baseLayer.depth);
             cc.set('defaultIsometricHeight', baseLayer.depth);
             cc.set('defaultSize',            { width: baseLayer.width, height: baseLayer.height });
             // Copy the layer definitions into the cell — deep-clone so edits to
             // the registry later don't mutate placed instances.
-            cc.set('layers', defaults.layers.map(l => ({ ...l, style: { ...l.style } })));
+            cc.set('layers', defaults!.layers!.map(l => ({ ...l, style: { ...l.style } })));
 
             cc.position(x, y);
             cc.set(META_KEY, meta);
 
             // Label — standard attr pipeline.
-            const displayLabel = defaults.displayName && !meta.name.trim()
-                ? defaults.displayName : '';
+            const displayLabel = defaults!.displayName && !meta.name.trim()
+                ? defaults!.displayName : '';
             if (displayLabel) cc.attr('label/text', displayLabel);
 
-            if (defaults.rotation) cc.set('shapeRotation', defaults.rotation);
+            if (defaults!.defaultRotation) cc.set('shapeRotation', defaults!.defaultRotation);
 
             cc.toggleView(view);
             this.graph.addCell(cc);
@@ -1162,7 +1164,7 @@ export class ComponentPalette {
             return;
         }
 
-        // Simple shape (unchanged).
+        // Single-layer shape.
         const shape = item.create();
         if (defaults) {
             applyRegistryDefaults(shape, defaults);
@@ -1177,7 +1179,7 @@ export class ComponentPalette {
             const count = this.graph.getElements().filter(e => e.get('isArea') && !e.get('isDoubleArrow')).length;
             shape.attr('label/text', `Area ${count + 1}`);
         }
-        if (defaults?.baseShape) shape.set('currentBaseShape', defaults.baseShape);
+        if (baseLayer?.baseShape) shape.set('currentBaseShape', baseLayer.baseShape);
         shape.toggleView(view);
 
         this.graph.addCell(shape);

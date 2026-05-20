@@ -727,13 +727,14 @@ graph.on('change:size', (cell: dia.Cell) => {
     const meta = cell.get(META_KEY) as Record<string, unknown> | undefined;
     const shapeKey = (meta?.shapeType as string) || '';
     const def = shapeKey ? ShapeRegistry[shapeKey] : undefined;
-    if (def?.iconHref) {
+    const icon0 = def?.layers?.[0]?.icons?.[0];
+    if (icon0?.href) {
         const shape = cell as IsometricShape;
         const { width: w, height: h } = shape.size();
         const iH = (shape.get('isometricHeight') as number) ?? 0;
-        const face = (shape.get('effectiveIconFace') as string) || def.iconFace || 'top';
-        const iconPx = (def.iconSize ?? 1.5) * GRID_SIZE;
-        applyIconAttrsToShape(shape, def.iconHref, iconPx, w, h, iH, face);
+        const face = (shape.get('effectiveIconFace') as string) || icon0.face || 'top';
+        const iconPx = (icon0.size ?? 1.5) * GRID_SIZE;
+        applyIconAttrsToShape(shape, icon0.href, iconPx, w, h, iH, face);
     }
     refreshSelect(cell);
     syncCalloutLabel(cell as dia.Element);
@@ -1972,16 +1973,16 @@ canvasDropTarget.addEventListener('drop', (e: DragEvent) => {
     const meta: NodeMeta = { name: '', shapeType: shapeId, serverId: '', notes: '' };
 
     let placed: IsometricShape;
-    if (def.complexShape && def.layers?.length) {
+    const baseLayer = def.layers?.[0];
+    if ((def.layers?.length ?? 0) > 1 && baseLayer) {
         const { ComplexComponent } = require('./shapes/complex-component');
-        const baseLayer = def.layers[0];
         const haSize = def.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
         const cc = new ComplexComponent();
         cc.resize(haSize.width, haSize.height);
         cc.set('isometricHeight', baseLayer.depth);
         cc.set('defaultIsometricHeight', baseLayer.depth);
         cc.set('defaultSize', haSize);
-        cc.set('layers', def.layers.map((l: any) => ({ ...l, style: { ...l.style } })));
+        cc.set('layers', def.layers!.map((l: any) => ({ ...l, style: { ...l.style } })));
         cc.position(modelX - haSize.width / 2, modelY - haSize.height / 2);
         cc.set(META_KEY, meta);
         if (def.displayName) cc.attr('label/text', def.displayName);
@@ -1990,13 +1991,14 @@ canvasDropTarget.addEventListener('drop', (e: DragEvent) => {
         graph.addCell(cc);
         placed = cc;
     } else {
-        const factory = getPreviewFactory(shapeId, def.baseShape ?? 'cuboid');
+        const baseShape = baseLayer?.baseShape ?? 'cuboid';
+        const factory = getPreviewFactory(shapeId, baseShape);
         const shape = factory();
         applyRegistryDefaults(shape, def, paper);
         const { width, height } = shape.size();
         shape.position(modelX - width / 2, modelY - height / 2);
         shape.set(META_KEY, meta);
-        if (def.baseShape) shape.set('currentBaseShape', def.baseShape);
+        shape.set('currentBaseShape', baseShape);
         shape.toggleView(currentView);
         graph.addCell(shape);
         placed = shape;
@@ -2704,7 +2706,8 @@ function rotateShapeInGrid(cell: IsometricShape): void {
     const def = ShapeRegistry[shapeKey];
     if (!def) return;
     // Use the actual current base shape on the canvas, not the registry default
-    const currentBase = (cell.get('currentBaseShape') as string) || def.baseShape || 'cuboid';
+    const defBaseShape = def.layers?.[0]?.baseShape;
+    const currentBase = (cell.get('currentBaseShape') as string) || defBaseShape || 'cuboid';
     const pairedBase = SD_ROTATE_PAIR[currentBase];
     if (!pairedBase) return;
 
@@ -2726,16 +2729,21 @@ function rotateShapeInGrid(cell: IsometricShape): void {
     newShape.set('currentBaseShape', pairedBase);
     newShape.toggleView(currentView);
     // Swap icon face based on current effective face
-    const currentFace = (cell.get('effectiveIconFace') as string) || def.iconFace || 'top';
+    const defIcon0 = def.layers?.[0]?.icons?.[0];
+    const currentFace = (cell.get('effectiveIconFace') as string) || defIcon0?.face || 'top';
     let rotatedFace: string = currentFace;
     if (currentFace === 'front') rotatedFace = 'side';
     else if (currentFace === 'side') rotatedFace = 'front';
-    applyRegistryDefaults(newShape, {
+    // Construct a rotated definition: swap layer width/height and update icon face
+    const rotDef: ShapeDefinition = {
         ...def,
-        baseShape: pairedBase as any,
-        defaultSize: { width: height, height: width },
-        iconFace: rotatedFace as 'top' | 'front' | 'side',
-    }, paper);
+        layers: def.layers?.map((l, i) => i === 0
+            ? { ...l, baseShape: pairedBase as any, width: height, height: width,
+                icons: l.icons.map((e, j) => j === 0 ? { ...e, face: rotatedFace as 'top' | 'front' | 'side' } : { ...e }) }
+            : { ...l, style: { ...l.style }, icons: l.icons.map(e => ({ ...e })) }
+        ) ?? [],
+    };
+    applyRegistryDefaults(newShape, rotDef, paper);
 
     const links = graph.getConnectedLinks(cell);
     for (const link of links) {
@@ -2776,20 +2784,20 @@ function switchShapeVariation(cell: IsometricShape): void {
     graph.startBatch('switch-variation');
 
     let newShape: IsometricShape;
-    if (targetDef.complexShape && targetDef.layers?.length) {
-        const baseLayer = targetDef.layers[0];
-        const haSize2 = targetDef.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
+    const targetBaseLayer = targetDef.layers?.[0];
+    if ((targetDef.layers?.length ?? 0) > 1 && targetBaseLayer) {
+        const haSize2 = targetDef.hitAreaSize ?? { width: targetBaseLayer.width, height: targetBaseLayer.height };
         const cc = new ComplexComponent();
         cc.resize(haSize2.width, haSize2.height);
-        cc.set('isometricHeight', baseLayer.depth);
-        cc.set('defaultIsometricHeight', baseLayer.depth);
+        cc.set('isometricHeight', targetBaseLayer.depth);
+        cc.set('defaultIsometricHeight', targetBaseLayer.depth);
         cc.set('defaultSize', haSize2);
-        cc.set('layers', targetDef.layers.map(l => ({ ...l, style: { ...l.style } })));
+        cc.set('layers', targetDef.layers!.map(l => ({ ...l, style: { ...l.style } })));
         if (targetDef.displayName) cc.attr('label/text', targetDef.displayName);
-        if (targetDef.rotation) cc.set('shapeRotation', targetDef.rotation);
+        if (targetDef.defaultRotation) cc.set('shapeRotation', targetDef.defaultRotation);
         newShape = cc;
     } else {
-        const factory = getPreviewFactory(shapeKey, targetDef.baseShape ?? 'cuboid');
+        const factory = getPreviewFactory(shapeKey, targetBaseLayer?.baseShape ?? 'cuboid');
         newShape = factory();
         applyRegistryDefaults(newShape, targetDef, paper);
     }
@@ -2871,7 +2879,7 @@ function buildActionsForCurrentSelection(): CtxAction[] {
                 { label: `Switch to ${targetLabel}`, icon: CTX_ICON_ROTATE, run: () => switchShapeVariation(cell) },
             );
         }
-        if (shapeDef && SD_ROTATE_PAIR[shapeDef.baseShape ?? '']) {
+        if (shapeDef && SD_ROTATE_PAIR[shapeDef.layers?.[0]?.baseShape ?? '']) {
             actions.push(
                 { label: 'Rotate', icon: CTX_ICON_ROTATE, run: () => rotateShapeInGrid(cell) },
             );

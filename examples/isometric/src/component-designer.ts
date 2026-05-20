@@ -12,7 +12,7 @@ import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE } from './theme';
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
 const CD_GRID_COUNT = 10;
-import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, updateShapeDefinition, deleteShape, addShape, saveRegistryToStorage, ShapeLayer, IconEntry, migrateIconDef, defaultIconEntry } from './shapes/shape-registry';
+import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, updateShapeDefinition, deleteShape, addShape, saveRegistryToStorage, ShapeLayer, IconEntry, defaultIconEntry, defaultShapeLayer } from './shapes/shape-registry';
 import { BaseShape } from './shapes/shape-definition';
 import { PRIMARY_COLORS } from './colors';
 import { carbonIconToString, CarbonIcon } from './icons';
@@ -144,16 +144,10 @@ function getBaseShapeDefault(baseShape: string): BaseShapeDefaults {
 
 function applyBaseShapeDefaults(baseShape: string): void {
     const defs = getBaseShapeDefault(baseShape);
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        widthInput.value  = String(layer?.width  ?? 40);
-        heightInput.value = String(layer?.height ?? 40);
-        depthInput.value  = String(layer?.depth  ?? 20);
-    } else {
-        widthInput.value  = String((defs.width ?? 2) * GRID_SIZE);
-        heightInput.value = String((defs.height ?? 2) * GRID_SIZE);
-        depthInput.value  = String((defs.isometricHeight ?? 0.5) * GRID_SIZE);
-    }
+    const layer = layers[selectedLayerIndex];
+    widthInput.value  = String(layer?.width  ?? 40);
+    heightInput.value = String(layer?.height ?? 40);
+    depthInput.value  = String(layer?.depth  ?? 20);
     selectedCornerRadius = defs.cornerRadius ?? 0;
     selectedChamferSize  = defs.chamferSize ?? 0;
     selectedChamferStart = defs.chamferStart ?? 0;
@@ -242,8 +236,7 @@ let hasVariations = false;
 let activeVariation: 'default' | 'turned90' = 'default';
 let rebuildVariationButtons: () => void = () => {};
 
-// ── Complex Shape state ────────────────────────────────────────────────────────
-let isComplexShape = false;
+// ── Layer state ────────────────────────────────────────────────────────────────
 let layers: ShapeLayer[] = [];
 let selectedLayerIndex = 0;
 let layerShapes: IsometricShape[]   = [];  // ISO canvas shapes, one per layer
@@ -404,6 +397,125 @@ function clearDirty() {
         headerSaveBtn.classList.add('nr-save-btn--disabled');
         headerSaveBtn.classList.remove('nr-save-btn--active');
     }
+}
+
+// ── Mutation chokepoints ─────────────────────────────────────────────────────
+// All icon and layer mutations MUST flow through these functions. They
+// atomically mutate the data, mark the inspector dirty (Save button active),
+// and trigger the render. Outside callers should never mutate
+// layers[i].* or iconEntries[i].* directly — call one of these instead.
+
+/**
+ * Set the Shape's label, anchored to the floor plane even when Layer 0 floats.
+ *
+ * The label is conceptually a Shape-level property, not a per-Layer one. In
+ * the current implementation it hangs visually on `layerShapes[0]`, but to
+ * keep it at the floor plane (where the Hit Area sits) we compensate the
+ * label's transform for Layer 0's baseElevation in the ISO view. In the 2D
+ * view no elevation offset is applied, so no compensation is needed.
+ */
+function setShapeLabel(text: string): void {
+    const elev = layers[0]?.baseElevation ?? 0;
+    layerShapes[0]?.attr('label/text', text);
+    // Push the label diagonally down-right by `elev` to counter the iso
+    // projection's up-left shift caused by layer-0 elevation.
+    layerShapes[0]?.attr('label/transform', elev ? `translate(${elev} ${elev})` : '');
+    layerShapes2D[0]?.attr('label/text', text);
+}
+
+/**
+ * The IconEntry currently being edited in the inspector. Null when no entry
+ * is open (editingIconIndex === -1 or out of range).
+ */
+function currentEditingEntry(): IconEntry | null {
+    if (editingIconIndex < 0 || editingIconIndex >= iconEntries.length) return null;
+    return iconEntries[editingIconIndex];
+}
+
+/**
+ * Lookup helper: find an IconEntry by stable id within the active editing
+ * context (the selected layer's icons).
+ */
+function findIconEntry(entryId: string): IconEntry | undefined {
+    return layers[selectedLayerIndex]?.icons?.find(e => e.id === entryId);
+}
+
+/**
+ * Get the current editing context's icon array (live reference, not a copy).
+ * Mutations here will affect the persisted data.
+ */
+function currentIconsArray(): IconEntry[] {
+    return layers[selectedLayerIndex]?.icons ?? [];
+}
+
+/**
+ * Update one icon entry. Returns true on success.
+ * This is the single chokepoint that guarantees:
+ *   1. The data is mutated.
+ *   2. markDirty() fires (Save button activates).
+ *   3. The canvas re-renders.
+ */
+function updateIcon(entryId: string, patch: Partial<IconEntry>): boolean {
+    const entry = findIconEntry(entryId);
+    if (!entry) return false;
+    Object.assign(entry, patch);
+    markDirty();
+    applyIconToCurrentShape();
+    return true;
+}
+
+/** Add a new icon entry to the current layer. Returns the new entry. */
+function addIcon(partial: Partial<IconEntry> = {}): IconEntry {
+    const arr = currentIconsArray();
+    const isFirst = arr.length === 0;
+    const entry = defaultIconEntry({ isMain: isFirst, ...partial });
+    arr.push(entry);
+    markDirty();
+    applyIconToCurrentShape();
+    return entry;
+}
+
+/** Remove an icon entry by stable id. Returns true on success. */
+function removeIcon(entryId: string): boolean {
+    const arr = currentIconsArray();
+    const idx = arr.findIndex(e => e.id === entryId);
+    if (idx < 0) return false;
+    arr.splice(idx, 1);
+    markDirty();
+    applyIconToCurrentShape();
+    return true;
+}
+
+/** Mark one icon as the Main icon (exclusive — clears the flag on others). */
+function setMainIcon(entryId: string): boolean {
+    const arr = currentIconsArray();
+    const target = arr.find(e => e.id === entryId);
+    if (!target) return false;
+    for (const e of arr) e.isMain = (e === target);
+    markDirty();
+    applyIconToCurrentShape();
+    return true;
+}
+
+/** Reorder icons within the current layer. */
+function reorderIcons(fromIdx: number, toIdx: number): boolean {
+    const arr = currentIconsArray();
+    if (fromIdx < 0 || fromIdx >= arr.length || toIdx < 0 || toIdx >= arr.length) return false;
+    const [moved] = arr.splice(fromIdx, 1);
+    arr.splice(toIdx, 0, moved);
+    markDirty();
+    applyIconToCurrentShape();
+    return true;
+}
+
+/** Update a Layer's geometric/style properties. */
+function updateLayer(layerId: string, patch: Partial<ShapeLayer>): boolean {
+    const layer = layers.find(l => l.id === layerId);
+    if (!layer) return false;
+    Object.assign(layer, patch);
+    markDirty();
+    renderLayersOnCanvas();
+    return true;
 }
 let widthInput:   HTMLInputElement;
 let heightInput:  HTMLInputElement;
@@ -661,12 +773,13 @@ function currentDimensionsPx(): { wPx: number; hPx: number; dPx: number } {
         return { wPx: swapped ? height : width, hPx: swapped ? width : height, dPx: (currentShape.get('isometricHeight') ?? 0) };
     }
     const reg = ShapeRegistry[currentShapeId];
-    const rawW = reg?.defaultSize?.width ?? GRID_SIZE * 2;
-    const rawH = reg?.defaultSize?.height ?? GRID_SIZE * 2;
+    const layer0 = reg?.layers?.[0];
+    const rawW = layer0?.width ?? GRID_SIZE * 2;
+    const rawH = layer0?.height ?? GRID_SIZE * 2;
     return {
         wPx: swapped ? rawH : rawW,
         hPx: swapped ? rawW : rawH,
-        dPx: reg?.defaultIsometricHeight ?? GRID_SIZE * 0.5,
+        dPx: layer0?.depth ?? GRID_SIZE * 0.5,
     };
 }
 
@@ -978,12 +1091,8 @@ function buildModifiersContent(container: HTMLElement) {
             const v = parseInt(shapeOpacityInput.value, 10) / 100;
             const faces = ['front', 'side', 'top', 'base', 'baseIso', 'cornerV1', 'cornerV2', 'cornerV3'];
             const apply = (s: any) => { if (!s) return; for (const f of faces) s.attr(`${f}/fillOpacity`, v); };
-            apply(currentShape);
-            apply(currentShape2D);
-            if (isComplexShape) {
-                apply(layerShapes[selectedLayerIndex]);
-                apply(layerShapes2D[selectedLayerIndex]);
-            }
+            apply(layerShapes[selectedLayerIndex]);
+            apply(layerShapes2D[selectedLayerIndex]);
         },
         opacityRow, '%');
     container.appendChild(opacityRow);
@@ -991,7 +1100,7 @@ function buildModifiersContent(container: HTMLElement) {
 }
 
 function buildPositionContent(container: HTMLElement) {
-    const layer = isComplexShape ? layers[selectedLayerIndex] : null;
+    const layer = layers[selectedLayerIndex] ?? null;
     const ox = layer?.offsetX ?? 0;
     const oy = layer?.offsetY ?? 0;
     const elev = layer?.baseElevation ?? 0;
@@ -1359,12 +1468,10 @@ function buildFormFactorContent(container: HTMLElement) {
         const allPaths = customPaths.map(path => path.map(v => [...v] as [number, number]));
         currentShape.set('normalizedVerts', allPaths);
         if (currentShape2D) currentShape2D.set('normalizedVerts', allPaths);
-        if (isComplexShape) {
-            const layer = layers[selectedLayerIndex];
-            if (layer) {
-                layer.svgNormVerts = allPaths[0];
-                layer.baseShape = 'custom';
-            }
+        const layer = layers[selectedLayerIndex];
+        if (layer) {
+            layer.normalizedVerts = allPaths[0];
+            layer.baseShape = 'custom';
         }
         markDirty();
     }
@@ -1525,37 +1632,7 @@ function raiseToFront(viewEl: Element, selector: string): void {
     }
 }
 
-/** Sync legacy state variables back into the active IconEntry. */
-function syncLegacyStateToIconEntry(): void {
-    if (applyingAllLayerIcons) return;
-    if (editingIconIndex < 0 || editingIconIndex >= iconEntries.length) return;
-    const e = iconEntries[editingIconIndex];
-    const prevId = e.id;
-    if (selectedIcon !== null) e.id = selectedIcon;
-    // Auto-update name from catalog when icon changes and no custom name was set
-    if (e.id && e.id !== prevId) {
-        const catalogEntry = getIconById(e.id);
-        if (catalogEntry && (!(e as any).name || (e as any).name === `Icon ${editingIconIndex + 1}` || (e as any).name === (prevId ? getIconById(prevId)?.label : ''))) {
-            (e as any).name = catalogEntry.label;
-        }
-    }
-    e.face = selectedIconFace;
-    e.size = selectedIconSize;
-    e.offsetX = selectedIconOffsetX;
-    e.offsetY = selectedIconOffsetY;
-    e.skewX = selectedIconSkewX;
-    e.skewY = selectedIconSkewY;
-    e.bgEnabled = selectedIconBgEnabled;
-    e.bgColor = selectedIconBgColor;
-    e.bgShape = selectedIconBgShape;
-    e.bgSize = selectedIconBgSize;
-    e.bgRadius = selectedIconBgRadius;
-    e.bgChamfer = selectedIconBgChamfer;
-    e.monochrome = selectedIconMonochrome;
-}
-
 function applyIconToCurrentShape() {
-    syncLegacyStateToIconEntry();
     if (!applyingAllLayerIcons) markDirty();
     const iconShape   = currentShape;
     const iconShape2D = currentShape2D;
@@ -1563,7 +1640,7 @@ function applyIconToCurrentShape() {
 
     // If no entries and no legacy icon, clear
     const hasLegacyIcon = !!selectedIcon;
-    const hasEntries = iconEntries.some(e => !!e.id);
+    const hasEntries = iconEntries.some(e => !!e.iconId);
     if (!hasLegacyIcon && !hasEntries && !selectedIconBgEnabled) {
         const noIconAttrs = {
             topIcon:   { href: '', width: 0, height: 0 },
@@ -1575,7 +1652,7 @@ function applyIconToCurrentShape() {
     }
 
     // Multi-icon rendering: each icon gets its own face transform baked into the SVG
-    if (iconEntries.length > 0 && iconEntries.some(e => !!e.id || e.bgEnabled)) {
+    if (iconEntries.length > 0 && iconEntries.some(e => !!e.iconId || e.bgEnabled)) {
         const { width: shapeW, height: shapeH } = iconShape.size();
         const iH = iconShape.isometricHeight;
 
@@ -1584,8 +1661,8 @@ function applyIconToCurrentShape() {
         const twoDParts: string[] = [];
 
         for (const ie of iconEntries) {
-            if (!ie.id && !ie.bgEnabled) continue;
-            const ieIcon = ie.id ? getIconById(ie.id) : undefined;
+            if (!ie.iconId && !ie.bgEnabled) continue;
+            const ieIcon = ie.iconId ? getIconById(ie.iconId) : undefined;
             const ieBgSize = ie.bgSize;
             const ieCanvasGU = Math.max(ie.size, ieBgSize);
             const ieCanvasPx = ieCanvasGU * GRID_SIZE;
@@ -1596,7 +1673,7 @@ function applyIconToCurrentShape() {
             const isVendorColor = ieIcon?.source === 'azure' || ieIcon?.source === 'gcp' || (isAws && !ie.monochrome);
             const ieMono = isAws && ie.monochrome;
             const ieSvgStr = ieMono ? (ieIcon?.svgMono || ieIcon?.svg || '') : (ieIcon?.svg || '');
-            const ieIconColor = (ie as any).iconColor as string || '';
+            const ieIconColor = ie.iconColor || '';
             const ieWhite = isVendorColor ? false : (ieIconColor ? false : (ie.bgEnabled ? true : isDarkMode()));
             const ieSvg = buildCompositeIconSvg(
                 ieSvgStr || null, ieBg, ie.bgShape, ieSvgStr ? ieWhite : false,
@@ -1660,154 +1737,15 @@ function applyIconToCurrentShape() {
         }
     }
 
-    const icon = selectedIcon ? getIconById(selectedIcon) : undefined;
-    const hasIcon = !!icon;
-    const hasBg = selectedIconBgEnabled;
-
-    if (!hasIcon && !hasBg) {
-        const noIconAttrs = {
-            topIcon:   { href: '', width: 0, height: 0 },
-            topIcon2D: { href: '', width: 0, height: 0 },
-        };
-        iconShape.attr(noIconAttrs);
-        iconShape2D?.attr(noIconAttrs);
-        return;
-    }
-
-    const isAdaptive = selectedIconAdaptive && !selectedIconBgEnabled;
-    const entry = hasIcon ? (icon as IconCatalogEntry) : null;
-    const isAws = entry?.source === 'aws';
-    const monoAws = isAws && selectedIconMonochrome;
-    let iconSvg: string | null;
-    let bgColor: string | null;
-    let applyWhite: boolean;
-    let iconPad: 'normal' | 'compact' | 'tight' | 'none';
-    let clipIcon: boolean;
-
-    if (!hasIcon) {
-        // Background only, no icon
-        iconSvg = null;
-        bgColor = selectedIconBgColor;
-        applyWhite = false;
-        iconPad = 'none';
-        clipIcon = false;
-    } else if (isAws && !monoAws) {
-        // AWS Color: use original full-color SVG directly, independent of icon background
-        iconSvg = entry!.svg;
-        bgColor = hasBg ? selectedIconBgColor : null;
-        applyWhite = false;
-        iconPad = 'normal';
-        clipIcon = false;
-    } else if (monoAws) {
-        iconSvg = entry!.svgMono || entry!.svg;
-        bgColor = hasBg ? selectedIconBgColor : null;
-        applyWhite = hasBg ? !isAdaptive : isDarkMode();
-        iconPad = 'compact';
-        clipIcon = false;
-    } else if (entry!.source === 'azure' || entry!.source === 'gcp') {
-        iconSvg = entry!.svg;
-        bgColor = hasBg ? selectedIconBgColor : null;
-        applyWhite = false;
-        iconPad = 'normal';
-        clipIcon = false;
-    } else {
-        iconSvg = entry!.svg;
-        bgColor = hasBg ? selectedIconBgColor : null;
-        applyWhite = hasBg ? !isAdaptive : isDarkMode();
-        iconPad = 'normal';
-        clipIcon = false;
-    }
-
-    const canvasGU = hasIcon ? Math.max(selectedIconSize, selectedIconBgSize) : selectedIconBgSize;
-    const canvasPx = canvasGU * GRID_SIZE;
-    const iConPx = selectedIconSize * GRID_SIZE;
-    const bgPx = selectedIconBgSize * GRID_SIZE;
-    const svgSource = buildCompositeIconSvg(
-        iconSvg,
-        bgColor,
-        selectedIconBgShape,
-        applyWhite,
-        selectedIconBgRadius,
-        selectedIconBgChamfer,
-        iconPad,
-        clipIcon,
-        canvasPx,
-        iConPx,
-        bgPx,
-    );
-    const adaptiveClass = isAdaptive ? 'nr-icon-adaptive' : '';
-    const iconPx = canvasPx;
-    const { width: w, height: h } = iconShape.size();
-    const iH = iconShape.isometricHeight;
-    const href = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgSource)}`;
-    // 2D: centered in the shape's own bounding box
-    const oxPx = selectedIconOffsetX * GRID_SIZE;
-    const oyPx = selectedIconOffsetY * GRID_SIZE;
-    const x2D = (w - iconPx) / 2 + oxPx;
-    const y2D = (h - iconPx) / 2 + oyPx;
-
-    let topIconAttrs: Record<string, unknown>;
-
-    const skewTx = (selectedIconSkewX !== 0 || selectedIconSkewY !== 0)
-        ? `skewX(${selectedIconSkewX}) skewY(${selectedIconSkewY})`
-        : '';
-
-    if (selectedIconFace === 'front') {
-        const localX = (w - iconPx) / 2 + oxPx;
-        const localY = (iH - iconPx) / 2 + oyPx;
-        const cx = localX + iconPx / 2;
-        const cy = localY + iconPx / 2;
-        topIconAttrs = {
-            href,
-            x: localX,
-            y: localY,
-            width:  iconPx,
-            height: iconPx,
-            transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy}) ${skewTx}`.trim(),
-        };
-    } else if (selectedIconFace === 'side') {
-        const localX = (h - iconPx) / 2 + oxPx;
-        const localY = (iH - iconPx) / 2 + oyPx;
-        const cx = localX + iconPx / 2;
-        const cy = localY + iconPx / 2;
-        topIconAttrs = {
-            href,
-            x: localX,
-            y: localY,
-            width:  iconPx,
-            height: iconPx,
-            transform: `matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy}) ${skewTx}`.trim(),
-        };
-    } else {
-        const isoX = -iH + (w - iconPx) / 2 + oxPx;
-        const isoY = -iH + (h - iconPx) / 2 + oyPx;
-        topIconAttrs = {
-            href,
-            x: isoX,
-            y: isoY,
-            width:  iconPx,
-            height: iconPx,
-            transform: skewTx || null,
-        };
-    }
-
-    // Do NOT set display here — group selectors iso/2d control visibility via toggleView().
-    const iconAttrs = {
-        topIcon:   { ...topIconAttrs, class: adaptiveClass },
-        topIcon2D: { href, x: x2D, y: y2D, width: iconPx, height: iconPx, class: adaptiveClass },
+    // Legacy single-icon path removed — every Shape is now layered, and the
+    // multi-entry path above handles all rendering. If we reach this point with
+    // no entries to render, clear the icon and return.
+    const noIconAttrs = {
+        topIcon:   { href: '', width: 0, height: 0 },
+        topIcon2D: { href: '', width: 0, height: 0 },
     };
-    iconShape.attr(iconAttrs);
-    iconShape2D?.attr(iconAttrs);
-
-    // Guarantee the icon element is rendered above all face paths.
-    // JointJS attr() never reorders DOM nodes, so this DOM move persists.
-    const isoView = paper.findViewByModel(iconShape);
-    if (isoView) raiseToFront(isoView.el, 'topIcon');
-    if (iconShape2D) {
-        const view2D = paper2D.findViewByModel(iconShape2D);
-        if (view2D) raiseToFront(view2D.el, 'topIcon2D');
-    }
-    if (isComplexShape && !applyingAllLayerIcons) saveIconEntriesToLayer();
+    iconShape.attr(noIconAttrs);
+    iconShape2D?.attr(noIconAttrs);
 }
 
 // Re-render the Icon accordion content in place. Called when the layer set
@@ -1819,7 +1757,7 @@ function refreshIconAccordionContent(): void {
 }
 
 function updateAdaptiveToggleVisibility() {
-    const show = isComplexShape && !selectedIconBgEnabled;
+    const show = !selectedIconBgEnabled;
     if (iconAdaptiveToggleRowEl) iconAdaptiveToggleRowEl.style.display = show ? '' : 'none';
     // When hidden, reset adaptive so icons render correctly on bg re-enable
     if (!show && selectedIconAdaptive) {
@@ -1841,7 +1779,7 @@ function buildIconContent(container: HTMLElement) {
 
     ensureFullCatalog();
 
-    const getVisible = () => getVisibleIcons(isComplexShape ? 'complexShape' : 'componentEditor');
+    const getVisible = () => getVisibleIcons('complexShape');
 
     // Icon source tabs
     let iconSourceTab: 'common' | 'aws' | 'gcp' | 'azure' = 'common';
@@ -1937,7 +1875,9 @@ function buildIconContent(container: HTMLElement) {
                     b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
                 );
                 syncIconControlVisibility();
-                applyIconToCurrentShape();
+                const entry = currentEditingEntry();
+                if (entry) updateIcon(entry.id, { iconId: icon.id! });
+                else        applyIconToCurrentShape();
                 if (iconsSectionBodyEl) {
                     const listEl = iconsSectionBodyEl.querySelector('div');
                     if (listEl) renderIconsListFn?.();
@@ -2023,7 +1963,7 @@ function buildIconContent(container: HTMLElement) {
     // Uses nr-toggle: button-based, ::before thumb, no cds-- conflict.
     const adaptiveRow = document.createElement('div');
     adaptiveRow.className = 'nr-toggle' + (selectedIconAdaptive ? ' nr-toggle--checked' : '');
-    adaptiveRow.style.display = (isComplexShape && !selectedIconBgEnabled) ? '' : 'none';
+    adaptiveRow.style.display = selectedIconBgEnabled ? 'none' : '';
     iconAdaptiveToggleRowEl = adaptiveRow;
 
     const adaptiveLabelText = document.createElement('span');
@@ -2043,7 +1983,9 @@ function buildIconContent(container: HTMLElement) {
         adaptiveRow.classList.toggle('nr-toggle--checked', next);
         adaptiveTrack.setAttribute('aria-checked', next ? 'true' : 'false');
         selectedIconAdaptive = next;
-        applyIconToCurrentShape();
+        const entry = currentEditingEntry();
+        if (entry) updateIcon(entry.id, { adaptive: next });
+        else        applyIconToCurrentShape();
     });
 
     adaptiveRow.appendChild(adaptiveLabelText);
@@ -2075,7 +2017,9 @@ function buildIconContent(container: HTMLElement) {
             );
             renderGrid();
             syncIconControlVisibility();
-            applyIconToCurrentShape();
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { monochrome: selectedIconMonochrome });
+            else        applyIconToCurrentShape();
         });
         modeSwitcher.appendChild(btn);
     }
@@ -2129,7 +2073,9 @@ function buildIconContent(container: HTMLElement) {
             faceSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
                 b.classList.toggle('nr-seg-btn--selected', b === btn)
             );
-            applyIconToCurrentShape();
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { face: selectedIconFace });
+            else        applyIconToCurrentShape();
         });
         faceSwitcher.appendChild(btn);
     }
@@ -2141,11 +2087,14 @@ function buildIconContent(container: HTMLElement) {
     // Size — in pixels (1 GU = GRID_SIZE px)
     let iconSizeInputRef: HTMLInputElement;
     buildSliderField('Size', 'sd-icon-size', 0.5, 4, 0.1,
-        (el) => { iconSizeInputRef = el; el.value = String(selectedIconSize); },
+        (el) => { iconSizeInputRef = el; el.value = String(currentEditingEntry()?.size ?? selectedIconSize); },
         (el) => { el.id = 'sd-icon-size-value'; },
         () => {
-            selectedIconSize = parseFloat(iconSizeInputRef.value);
-            applyIconToCurrentShape();
+            const v = parseFloat(iconSizeInputRef.value);
+            selectedIconSize = v;
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { size: v });
+            else        applyIconToCurrentShape();
         },
         container, 'px');
 
@@ -2216,14 +2165,35 @@ function buildIconContent(container: HTMLElement) {
     };
 
     // Offset
-    buildDualRow('Offset', selectedIconOffsetX, selectedIconOffsetY, -1, 1, 0.05, '',
-        (v) => { selectedIconOffsetX = v; applyIconToCurrentShape(); },
-        (v) => { selectedIconOffsetY = v; applyIconToCurrentShape(); });
+    const editEntry0 = currentEditingEntry();
+    buildDualRow('Offset', editEntry0?.offsetX ?? selectedIconOffsetX, editEntry0?.offsetY ?? selectedIconOffsetY, -1, 1, 0.05, '',
+        (v) => {
+            selectedIconOffsetX = v;
+            const e = currentEditingEntry();
+            if (e) updateIcon(e.id, { offsetX: v });
+            else    applyIconToCurrentShape();
+        },
+        (v) => {
+            selectedIconOffsetY = v;
+            const e = currentEditingEntry();
+            if (e) updateIcon(e.id, { offsetY: v });
+            else    applyIconToCurrentShape();
+        });
 
     // Skew
-    buildDualRow('Skew', selectedIconSkewX, selectedIconSkewY, -30, 30, 1, '°',
-        (v) => { selectedIconSkewX = v; applyIconToCurrentShape(); },
-        (v) => { selectedIconSkewY = v; applyIconToCurrentShape(); });
+    buildDualRow('Skew', editEntry0?.skewX ?? selectedIconSkewX, editEntry0?.skewY ?? selectedIconSkewY, -30, 30, 1, '°',
+        (v) => {
+            selectedIconSkewX = v;
+            const e = currentEditingEntry();
+            if (e) updateIcon(e.id, { skewX: v });
+            else    applyIconToCurrentShape();
+        },
+        (v) => {
+            selectedIconSkewY = v;
+            const e = currentEditingEntry();
+            if (e) updateIcon(e.id, { skewY: v });
+            else    applyIconToCurrentShape();
+        });
 
     // Icon Color — same swatch popup pattern as background color
     const iconColorRow = document.createElement('div');
@@ -2256,11 +2226,15 @@ function buildIconContent(container: HTMLElement) {
     const setIconColor = (c: string) => {
         icHexInput.value = c || 'None';
         icColorBtn.style.backgroundColor = c || 'transparent';
-        if (editingIconIndex >= 0 && iconEntries[editingIconIndex]) {
-            (iconEntries[editingIconIndex] as any).iconColor = c;
+        const arr = currentIconsArray();
+        const entry = arr[editingIconIndex];
+        if (entry) {
+            updateIcon(entry.id, { iconColor: c });
+        } else {
+            // No entry selected — fall back to legacy apply + dirty.
+            applyIconToCurrentShape();
+            markDirty();
         }
-        applyIconToCurrentShape();
-        markDirty();
     };
 
     // "None" button
@@ -2326,9 +2300,10 @@ function buildIconContent(container: HTMLElement) {
         (el) => { iconOpacityInputRef = el; el.value = String(curIconOpacity); },
         () => {},
         () => {
-            if (editingIconIndex >= 0 && iconEntries[editingIconIndex]) {
-                iconEntries[editingIconIndex].iconOpacity = parseFloat(iconOpacityInputRef.value);
-                applyIconToCurrentShape();
+            const arr = currentIconsArray();
+            const entry = arr[editingIconIndex];
+            if (entry) {
+                updateIcon(entry.id, { iconOpacity: parseFloat(iconOpacityInputRef.value) });
             }
         },
         container, '%');
@@ -2412,8 +2387,9 @@ function buildIconBackgroundContent(container: HTMLElement) {
         popup.style.display = 'none';
         syncIconBgColorDisplay();
         updateAdaptiveToggleVisibility();
-        applyIconToCurrentShape();
-        markDirty();
+        const entry = currentEditingEntry();
+        if (entry) updateIcon(entry.id, { bgEnabled: false });
+        else        { applyIconToCurrentShape(); markDirty(); }
     });
     popup.appendChild(noColorBtn);
 
@@ -2431,8 +2407,9 @@ function buildIconBackgroundContent(container: HTMLElement) {
             popup.style.display = 'none';
             syncIconBgColorDisplay();
             updateAdaptiveToggleVisibility();
-            applyIconToCurrentShape();
-            markDirty();
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { bgEnabled: true, bgColor: color.base });
+            else        { applyIconToCurrentShape(); markDirty(); }
         });
         popup.appendChild(swatch);
     }
@@ -2471,8 +2448,9 @@ function buildIconBackgroundContent(container: HTMLElement) {
         selectedIconBgColor = hiddenPicker.value;
         syncIconBgColorDisplay();
         updateAdaptiveToggleVisibility();
-        applyIconToCurrentShape();
-        markDirty();
+        const entry = currentEditingEntry();
+        if (entry) updateIcon(entry.id, { bgEnabled: true, bgColor: hiddenPicker.value });
+        else        { applyIconToCurrentShape(); markDirty(); }
     });
 
     hexInput.readOnly = true;
@@ -2497,11 +2475,14 @@ function buildIconBackgroundContent(container: HTMLElement) {
 
     let bgSizeInputRef: HTMLInputElement;
     buildSliderField('Bg Size', 'sd-icon-bg-size', 0.5, 4, 0.1,
-        (el) => { bgSizeInputRef = el; el.value = String(selectedIconBgSize); },
+        (el) => { bgSizeInputRef = el; el.value = String(currentEditingEntry()?.bgSize ?? selectedIconBgSize); },
         (el) => { el.id = 'sd-icon-bg-size-value'; },
         () => {
-            selectedIconBgSize = parseFloat(bgSizeInputRef.value);
-            applyIconToCurrentShape();
+            const v = parseFloat(bgSizeInputRef.value);
+            selectedIconBgSize = v;
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { bgSize: v });
+            else        applyIconToCurrentShape();
         },
         bgSettingsWrap, 'px');
 
@@ -2533,7 +2514,9 @@ function buildIconBackgroundContent(container: HTMLElement) {
             if (iconBgChamferRowEl) {
                 iconBgChamferRowEl.style.display = opt.value === 'octagon' ? '' : 'none';
             }
-            applyIconToCurrentShape();
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { bgShape: opt.value });
+            else        applyIconToCurrentShape();
         });
         shapeSwitcher.appendChild(btn);
     }
@@ -2547,11 +2530,14 @@ function buildIconBackgroundContent(container: HTMLElement) {
     crWrap.style.display = selectedIconBgShape === 'square' ? '' : 'none';
     iconBgCornerRadiusRowEl = crWrap;
     buildSliderField('Bg Corner Radius', 'sd-icon-bg-radius', 0, 32, 1,
-        (el) => { el.value = String(selectedIconBgRadius); iconBgCornerRadiusInputRef = el; },
+        (el) => { el.value = String(currentEditingEntry()?.bgRadius ?? selectedIconBgRadius); iconBgCornerRadiusInputRef = el; },
         (el) => { el.id = 'sd-icon-bg-radius-value'; },
         () => {
-            selectedIconBgRadius = parseInt(iconBgCornerRadiusInputRef!.value, 10);
-            applyIconToCurrentShape();
+            const v = parseInt(iconBgCornerRadiusInputRef!.value, 10);
+            selectedIconBgRadius = v;
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { bgRadius: v });
+            else        applyIconToCurrentShape();
         },
         crWrap, 'px');
     bgSettingsWrap.appendChild(crWrap);
@@ -2561,11 +2547,14 @@ function buildIconBackgroundContent(container: HTMLElement) {
     ocWrap.style.display = selectedIconBgShape === 'octagon' ? '' : 'none';
     iconBgChamferRowEl = ocWrap;
     buildSliderField('Bg Depth', 'sd-icon-bg-chamfer', 0.05, 0.45, 0.01,
-        (el) => { el.value = String(selectedIconBgChamfer); iconBgChamferInputRef = el; },
+        (el) => { el.value = String(currentEditingEntry()?.bgChamfer ?? selectedIconBgChamfer); iconBgChamferInputRef = el; },
         (el) => { el.id = 'sd-icon-bg-chamfer-value'; },
         () => {
-            selectedIconBgChamfer = parseFloat(iconBgChamferInputRef.value);
-            applyIconToCurrentShape();
+            const v = parseFloat(iconBgChamferInputRef.value);
+            selectedIconBgChamfer = v;
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { bgChamfer: v });
+            else        applyIconToCurrentShape();
         },
         ocWrap, '%');
     bgSettingsWrap.appendChild(ocWrap);
@@ -2578,9 +2567,10 @@ function buildIconBackgroundContent(container: HTMLElement) {
         (el) => { bgOpacityInputRef = el; el.value = String(curBgOpacity); },
         () => {},
         () => {
-            if (editingIconIndex >= 0 && iconEntries[editingIconIndex]) {
-                iconEntries[editingIconIndex].bgOpacity = parseFloat(bgOpacityInputRef.value);
-                applyIconToCurrentShape();
+            const arr = currentIconsArray();
+            const entry = arr[editingIconIndex];
+            if (entry) {
+                updateIcon(entry.id, { bgOpacity: parseFloat(bgOpacityInputRef.value) });
             }
         },
         bgSettingsWrap, '%');
@@ -2597,16 +2587,11 @@ function buildColorContent(container: HTMLElement) {
         selectedStyle.topColor   = val;
         selectedStyle.frontColor = val;
         selectedStyle.sideColor  = val;
-        if (isComplexShape) {
-            const layer = layers[selectedLayerIndex];
-            if (layer) { layer.style.topColor = val; layer.style.frontColor = val; layer.style.sideColor = val; }
-            const s = layerShapes[selectedLayerIndex], s2D = layerShapes2D[selectedLayerIndex];
-            if (s)   applyShapeStyle(s,   layer?.style ?? {});
-            if (s2D) applyShapeStyle(s2D, layer?.style ?? {});
-            return;
-        }
-        if (currentShape)   applyShapeStyle(currentShape,   selectedStyle);
-        if (currentShape2D) applyShapeStyle(currentShape2D, selectedStyle);
+        const layer = layers[selectedLayerIndex];
+        if (layer) { layer.style.topColor = val; layer.style.frontColor = val; layer.style.sideColor = val; }
+        const s = layerShapes[selectedLayerIndex], s2D = layerShapes2D[selectedLayerIndex];
+        if (s)   applyShapeStyle(s,   layer?.style ?? {});
+        if (s2D) applyShapeStyle(s2D, layer?.style ?? {});
     }
 
     function buildHexColorRow(label: string, id: string, value: string | null, onChange: (val: string) => void, onClear?: () => void): HTMLElement {
@@ -2917,15 +2902,7 @@ function buildInspectorPanel() {
     shapeNameInput.className = 'cds--text-input cds--text-input--sm';
     shapeNameInput.value = ShapeRegistry[currentShapeId]?.displayName ?? formatLabel(currentShapeId);
     shapeNameInput.addEventListener('input', () => {
-        const name = shapeNameInput.value;
-        if (isComplexShape) {
-            // In complex shapes, only the first layer carries the label.
-            layerShapes[0]?.attr('label/text', name);
-            layerShapes2D[0]?.attr('label/text', name);
-        } else if (currentShape) {
-            currentShape.attr('label/text', name);
-            currentShape2D?.attr('label/text', name);
-        }
+        setShapeLabel(shapeNameInput.value);
     });
 
     // Component Type dropdown
@@ -2953,8 +2930,7 @@ function buildInspectorPanel() {
     });
 
     // Hide label toggle — shown directly below the name input
-    const labelHidden = currentShape?.attr('label/display') === 'none'
-        || (isComplexShape && layerShapes[0]?.attr('label/display') === 'none');
+    const labelHidden = layerShapes[0]?.attr('label/display') === 'none';
     const hideLabelWrapper = document.createElement('div');
     hideLabelWrapper.className = 'nr-toggle' + (labelHidden ? ' nr-toggle--checked' : '');
 
@@ -2973,22 +2949,21 @@ function buildInspectorPanel() {
         hideLabelWrapper.classList.toggle('nr-toggle--checked', next);
         hideLabelTrack.setAttribute('aria-checked', next ? 'true' : 'false');
         const display = next ? 'none' : null;
-        if (isComplexShape) {
-            layerShapes[0]?.attr('label/display', display);
-            layerShapes2D[0]?.attr('label/display', display);
-        } else if (currentShape) {
-            currentShape.attr('label/display', display);
-            currentShape2D?.attr('label/display', display);
-        }
+        layerShapes[0]?.attr('label/display', display);
+        layerShapes2D[0]?.attr('label/display', display);
     });
 
     hideLabelWrapper.appendChild(hideLabelText);
     hideLabelWrapper.appendChild(hideLabelTrack);
 
-    // Complex Shape toggle — shown directly below the name input
-    // Uses nr-toggle: button-based, ::before thumb, no cds-- conflict.
+    // Complex Shape toggle — OBSOLETE.
+    // Every Shape is now layered; the toggle's mode-flip no longer represents
+    // anything meaningful. The DOM element is kept (some code still references
+    // it via `inspectorEl.querySelector('#sd-complex-toggle')`) but it's hidden
+    // from the user. To add layers, use the "Add Layer" button.
     const complexToggleWrapper = document.createElement('div');
-    complexToggleWrapper.className = 'nr-toggle' + (isComplexShape ? ' nr-toggle--checked' : '');
+    complexToggleWrapper.className = 'nr-toggle nr-toggle--checked';
+    complexToggleWrapper.style.display = 'none';
 
     const toggleText = document.createElement('span');
     toggleText.className = 'nr-toggle__label-text';
@@ -2999,14 +2974,9 @@ function buildInspectorPanel() {
     toggleTrack.id = 'sd-complex-toggle';
     toggleTrack.className = 'nr-toggle__track';
     toggleTrack.setAttribute('role', 'switch');
-    toggleTrack.setAttribute('aria-checked', isComplexShape ? 'true' : 'false');
-    toggleTrack.setAttribute('aria-label', 'Complex Shape');
-    toggleTrack.addEventListener('click', () => {
-        const next = !complexToggleWrapper.classList.contains('nr-toggle--checked');
-        complexToggleWrapper.classList.toggle('nr-toggle--checked', next);
-        toggleTrack.setAttribute('aria-checked', next ? 'true' : 'false');
-        onComplexShapeToggle(next);
-    });
+    toggleTrack.setAttribute('aria-checked', 'true');
+    toggleTrack.setAttribute('aria-label', 'Complex Shape (obsolete)');
+    // Click handler removed — toggle is hidden and obsolete (every Shape is layered).
 
     complexToggleWrapper.appendChild(toggleText);
     complexToggleWrapper.appendChild(toggleTrack);
@@ -3061,8 +3031,7 @@ function buildInspectorPanel() {
         variationsWrapper.classList.toggle('nr-toggle--checked', hasVariations);
         variationsTrack.setAttribute('aria-checked', hasVariations ? 'true' : 'false');
         variationSwitcher.style.display = hasVariations ? '' : 'none';
-        if (hasVariations && isComplexShape && !ShapeRegistry[currentShapeId]?.turned90) {
-            saveIconEntriesToLayer();
+        if (hasVariations && !ShapeRegistry[currentShapeId]?.turned90) {
             const currentDef = collectCurrentDef();
             updateShapeDefinition(currentShapeId, {
                 ...currentDef,
@@ -3178,8 +3147,7 @@ function buildInspectorPanel() {
 
     rotationAccordionLi = null;
 
-    positionAccordionLi = buildAccordionItem('Position', isComplexShape, buildPositionContent);
-    positionAccordionLi.style.display = isComplexShape ? '' : 'none';
+    positionAccordionLi = buildAccordionItem('Position', true, buildPositionContent);
     positionAccordionLi.setAttribute('data-design-only', 'true');
     accordion.appendChild(positionAccordionLi);
 
@@ -3282,7 +3250,6 @@ function buildInspectorPanel() {
             closeBtn.title = 'Close';
             closeBtn.innerHTML = carbonIconToString(CloseLarge16 as CarbonIcon);
             closeBtn.addEventListener('click', () => {
-                syncLegacyStateToIconEntry();
                 popupEl.style.display = 'none';
                 editingIconIndex = -1;
                 renderIconsList();
@@ -3296,7 +3263,7 @@ function buildInspectorPanel() {
             popupEl.appendChild(iconContentWrap);
 
             // Sync the legacy icon state from this entry so the existing controls work
-            selectedIcon = entry.id || null;
+            selectedIcon = entry.iconId || null;
             selectedIconFace = entry.face;
             selectedIconSize = entry.size;
             selectedIconOffsetX = entry.offsetX;
@@ -3358,9 +3325,8 @@ function buildInspectorPanel() {
                 e.preventDefault();
                 listEl.querySelectorAll('.nr-icon-entry-row--drop, .nr-icon-entry-row--drop-after').forEach(r => r.classList.remove('nr-icon-entry-row--drop', 'nr-icon-entry-row--drop-after'));
                 if (dragSrcIdx < 0 || dropTargetIdx < 0 || dragSrcIdx === dropTargetIdx) { dragSrcIdx = -1; dropTargetIdx = -1; return; }
-                const [moved] = iconEntries.splice(dragSrcIdx, 1);
                 const insertAt = dropTargetIdx > dragSrcIdx ? dropTargetIdx - 1 : dropTargetIdx;
-                iconEntries.splice(insertAt, 0, moved);
+                reorderIcons(dragSrcIdx, insertAt);
                 if (editingIconIndex === dragSrcIdx) editingIconIndex = insertAt;
                 else if (editingIconIndex >= Math.min(dragSrcIdx, insertAt) && editingIconIndex <= Math.max(dragSrcIdx, insertAt)) {
                     editingIconIndex += dragSrcIdx < insertAt ? -1 : 1;
@@ -3368,8 +3334,6 @@ function buildInspectorPanel() {
                 dragSrcIdx = -1;
                 dropTargetIdx = -1;
                 renderIconsList();
-                applyIconToCurrentShape();
-                markDirty();
             });
 
             for (let idx = 0; idx < iconEntries.length; idx++) {
@@ -3401,8 +3365,8 @@ function buildInspectorPanel() {
                 // Preview thumbnail
                 const preview = document.createElement('div');
                 preview.className = 'nr-icon-entry-preview';
-                if (entry.id) {
-                    const iconData = getIconById(entry.id);
+                if (entry.iconId) {
+                    const iconData = getIconById(entry.iconId);
                     if (iconData) {
                         preview.innerHTML = iconData.svg;
                         const isColor = iconData.source === 'aws' && !entry.monochrome
@@ -3417,8 +3381,8 @@ function buildInspectorPanel() {
                 nameWrap.className = 'nr-icon-entry-name-wrap';
                 const nameEl = document.createElement('span');
                 nameEl.className = 'nr-icon-entry-name';
-                const catalogLabel = entry.id ? (getIconById(entry.id)?.label || '') : '';
-                nameEl.textContent = (entry as any).name || catalogLabel || `Icon ${idx + 1}`;
+                const catalogLabel = entry.iconId ? (getIconById(entry.iconId)?.label || '') : '';
+                nameEl.textContent = entry.name || catalogLabel || `Icon ${idx + 1}`;
                 nameWrap.appendChild(nameEl);
                 if (entry.isMain) {
                     const mainTag = document.createElement('span');
@@ -3444,12 +3408,9 @@ function buildInspectorPanel() {
                     item.className = 'nr-icon-ctx-menu__item';
                     item.textContent = 'Make Main';
                     item.addEventListener('click', () => {
-                        iconEntries.forEach(ie => ie.isMain = false);
-                        entry.isMain = true;
+                        setMainIcon(entry.id);
                         menu.remove();
                         renderIconsList();
-                        applyIconToCurrentShape();
-                        markDirty();
                     });
                     menu.appendChild(item);
                     document.body.appendChild(menu);
@@ -3483,13 +3444,12 @@ function buildInspectorPanel() {
                 removeBtn.title = 'Remove icon';
                 removeBtn.innerHTML = carbonIconToString(Subtract16 as CarbonIcon);
                 removeBtn.addEventListener('click', () => {
-                    iconEntries.splice(idx, 1);
+                    removeIcon(entry.id);
                     if (editingIconIndex === idx) { popupEl.style.display = 'none'; editingIconIndex = -1; }
                     else if (editingIconIndex > idx) editingIconIndex--;
-                    if (iconEntries.length === 0) { selectedIcon = null; selectedIconBgEnabled = false; }
+                    const arr = currentIconsArray();
+                    if (arr.length === 0) { selectedIcon = null; selectedIconBgEnabled = false; }
                     renderIconsList();
-                    applyIconToCurrentShape();
-                    markDirty();
                 });
                 row.appendChild(removeBtn);
 
@@ -3499,9 +3459,9 @@ function buildInspectorPanel() {
 
         // Wire + button now that openIconEditor exists
         iconsAddBtn.addEventListener('click', () => {
-            const entry = defaultIconEntry(iconEntries.length === 0);
-            iconEntries.push(entry);
-            editingIconIndex = iconEntries.length - 1;
+            addIcon();
+            const arr = currentIconsArray();
+            editingIconIndex = arr.length - 1;
             renderIconsList();
             openIconEditor(editingIconIndex);
         });
@@ -3521,7 +3481,6 @@ function buildInspectorPanel() {
         svgFootprintAccordionContent = contentEl;
         syncSvgFootprintSection();
     });
-    svgFootprintAccordionLi.style.display = isComplexShape ? '' : 'none';
     svgFootprintAccordionLi.setAttribute('data-design-only', 'true');
     accordion.appendChild(svgFootprintAccordionLi);
 
@@ -3615,7 +3574,7 @@ function buildInspectorPanel() {
         const pos = labelPositions.find(p => p.value === val);
         hudLabelTrigger.innerHTML = `${pos ? pos.icon : HIDE_ICON}<span style="font-size:0.75rem">${pos ? pos.label : 'Hidden'}</span>`;
         hudLabelPopup.style.display = 'none';
-        const targets = isComplexShape ? [layerShapes[0], layerShapes2D[0]] : [currentShape, currentShape2D];
+        const targets = [layerShapes[0], layerShapes2D[0]];
         for (const s of targets) {
             if (!s) continue;
             if (val === 'none') { s.attr('label/display', 'none'); continue; }
@@ -3714,8 +3673,9 @@ function buildInspectorPanel() {
     hudRotateItem.appendChild(hudRotateText);
     hudRotateItem.appendChild(hudRotateTrack);
     hudRotateItemEl = hudRotateItem;
-    const hasRotatePair = !!ROTATE_PAIR[selectedBaseShape];
-    hudRotateItem.style.display = (hasRotatePair && !isComplexShape) ? '' : 'none';
+    // Rotate HUD is hidden in the layered editor — rotation is now applied
+    // per-layer via the inspector, not via a global swap on the canvas shape.
+    hudRotateItem.style.display = 'none';
     hud.appendChild(hudRotateItem);
 
     // ── Opacity (reuses buildSliderField for drag-to-scrub + ±) ─────────
@@ -3726,13 +3686,8 @@ function buildInspectorPanel() {
             const el = hud.querySelector<HTMLInputElement>('#sd-hud-opacity');
             if (!el) return;
             const op = parseFloat(el.value) / 100;
-            if (isComplexShape) {
-                for (const s of layerShapes) { const v = paper.findViewByModel(s); if (v) v.el.style.opacity = String(op); }
-                for (const s of layerShapes2D) { const v = paper2D.findViewByModel(s); if (v) v.el.style.opacity = String(op); }
-            } else {
-                if (currentShape) { const v = paper.findViewByModel(currentShape); if (v) v.el.style.opacity = String(op); }
-                if (currentShape2D) { const v = paper2D.findViewByModel(currentShape2D); if (v) v.el.style.opacity = String(op); }
-            }
+            for (const s of layerShapes) { const v = paper.findViewByModel(s); if (v) v.el.style.opacity = String(op); }
+            for (const s of layerShapes2D) { const v = paper2D.findViewByModel(s); if (v) v.el.style.opacity = String(op); }
         },
         hud, '%');
 
@@ -3788,9 +3743,8 @@ function buildInspectorPanel() {
     hudThemeItem.appendChild(themeSwitcher);
     hud.appendChild(hudThemeItem);
 
-    // ── Hit Area controls (complex shapes only) ─────────────────────────
-    const isOrWillBeComplex = isComplexShape || !!ShapeRegistry[currentShapeId]?.complexShape;
-    if (isOrWillBeComplex) {
+    // ── Hit Area controls — always available (every Shape is layered) ──
+    {
         const hudHitAreaItem = document.createElement('div');
         hudHitAreaItem.className = 'nr-cd-hud-item';
         const hudHitAreaText = document.createElement('span');
@@ -3854,98 +3808,63 @@ function supportsCornerRadius(baseShape: string): boolean {
     return baseShape === 'cuboid';
 }
 
-// Returns true when a layer uses a custom SVG footprint for rendering.
+// Returns true when a layer is rendered from an uploaded SVG.
+// Discriminated by baseShape — no longer by "is normalizedVerts populated".
 function isLayerSvg(layer: ShapeLayer): boolean {
-    return !!(layer.svgNormVerts && layer.svgNormVerts.length >= 3 && layer.baseShape !== 'custom');
+    return layer.baseShape === 'svgPolygon';
 }
 
+// Returns true when a layer's geometry comes from a polygon (drawn or uploaded).
+// Both 'custom' (in-app drawer) and 'svgPolygon' (uploaded) store verts in normalizedVerts.
 function isLayerCustomVerts(layer: ShapeLayer): boolean {
-    return !!(layer.svgNormVerts && layer.svgNormVerts.length >= 3);
+    return layer.baseShape === 'custom' || layer.baseShape === 'svgPolygon';
 }
 
 function applyCornerRadiusToCurrentShape() {
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        if (layer) layer.cornerRadius = selectedCornerRadius;
-        layerShapes[selectedLayerIndex]?.set('cornerRadius', selectedCornerRadius);
-        layerShapes2D[selectedLayerIndex]?.set('cornerRadius', selectedCornerRadius);
-        return;
-    }
-    if (!currentShape) return;
-    currentShape.set('cornerRadius', selectedCornerRadius);
-    currentShape2D?.set('cornerRadius', selectedCornerRadius);
+    const layer = layers[selectedLayerIndex];
+    if (layer) layer.cornerRadius = selectedCornerRadius;
+    layerShapes[selectedLayerIndex]?.set('cornerRadius', selectedCornerRadius);
+    layerShapes2D[selectedLayerIndex]?.set('cornerRadius', selectedCornerRadius);
 }
 
 function applyChamferSizeToCurrentShape() {
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        if (layer) layer.chamferSize = selectedChamferSize;
-        layerShapes[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
-        layerShapes2D[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
-        return;
-    }
-    if (!currentShape) return;
-    currentShape.set('chamferSize', selectedChamferSize);
-    currentShape2D?.set('chamferSize', selectedChamferSize);
+    const layer = layers[selectedLayerIndex];
+    if (layer) layer.chamferSize = selectedChamferSize;
+    layerShapes[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
+    layerShapes2D[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
 }
 
 function applyChamferStartToCurrentShape() {
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        if (layer) layer.chamferStart = selectedChamferStart;
-        layerShapes[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
-        layerShapes2D[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
-        return;
-    }
-    if (!currentShape) return;
-    currentShape.set('chamferStart', selectedChamferStart);
-    currentShape2D?.set('chamferStart', selectedChamferStart);
+    const layer = layers[selectedLayerIndex];
+    if (layer) layer.chamferStart = selectedChamferStart;
+    layerShapes[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
+    layerShapes2D[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
 }
 
 function applyChamferBottomSizeToCurrentShape() {
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        if (layer) layer.chamferBottomSize = selectedChamferBottomSize;
-        layerShapes[selectedLayerIndex]?.set('chamferBottomSize', selectedChamferBottomSize);
-        layerShapes2D[selectedLayerIndex]?.set('chamferBottomSize', selectedChamferBottomSize);
-        return;
-    }
-    if (!currentShape) return;
-    currentShape.set('chamferBottomSize', selectedChamferBottomSize);
-    currentShape2D?.set('chamferBottomSize', selectedChamferBottomSize);
+    const layer = layers[selectedLayerIndex];
+    if (layer) layer.chamferBottomSize = selectedChamferBottomSize;
+    layerShapes[selectedLayerIndex]?.set('chamferBottomSize', selectedChamferBottomSize);
+    layerShapes2D[selectedLayerIndex]?.set('chamferBottomSize', selectedChamferBottomSize);
 }
 
 function applyChamferBottomStartToCurrentShape() {
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        if (layer) layer.chamferBottomStart = selectedChamferBottomStart;
-        layerShapes[selectedLayerIndex]?.set('chamferBottomStart', selectedChamferBottomStart);
-        layerShapes2D[selectedLayerIndex]?.set('chamferBottomStart', selectedChamferBottomStart);
-        return;
-    }
-    if (!currentShape) return;
-    currentShape.set('chamferBottomStart', selectedChamferBottomStart);
-    currentShape2D?.set('chamferBottomStart', selectedChamferBottomStart);
+    const layer = layers[selectedLayerIndex];
+    if (layer) layer.chamferBottomStart = selectedChamferBottomStart;
+    layerShapes[selectedLayerIndex]?.set('chamferBottomStart', selectedChamferBottomStart);
+    layerShapes2D[selectedLayerIndex]?.set('chamferBottomStart', selectedChamferBottomStart);
 }
 
 function applyShedRoofToCurrentShape() {
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        if (layer) {
-            layer.shedRoofDrop = selectedShedRoofDrop;
-            layer.shedRoofDirection = selectedShedRoofDirection;
-        }
-        layerShapes[selectedLayerIndex]?.set('shedRoofDrop', selectedShedRoofDrop);
-        layerShapes[selectedLayerIndex]?.set('shedRoofDirection', selectedShedRoofDirection);
-        layerShapes2D[selectedLayerIndex]?.set('shedRoofDrop', selectedShedRoofDrop);
-        layerShapes2D[selectedLayerIndex]?.set('shedRoofDirection', selectedShedRoofDirection);
-        return;
+    const layer = layers[selectedLayerIndex];
+    if (layer) {
+        layer.shedRoofDrop = selectedShedRoofDrop;
+        layer.shedRoofDirection = selectedShedRoofDirection;
     }
-    if (!currentShape) return;
-    currentShape.set('shedRoofDrop', selectedShedRoofDrop);
-    currentShape.set('shedRoofDirection', selectedShedRoofDirection);
-    currentShape2D?.set('shedRoofDrop', selectedShedRoofDrop);
-    currentShape2D?.set('shedRoofDirection', selectedShedRoofDirection);
+    layerShapes[selectedLayerIndex]?.set('shedRoofDrop', selectedShedRoofDrop);
+    layerShapes[selectedLayerIndex]?.set('shedRoofDirection', selectedShedRoofDirection);
+    layerShapes2D[selectedLayerIndex]?.set('shedRoofDrop', selectedShedRoofDrop);
+    layerShapes2D[selectedLayerIndex]?.set('shedRoofDirection', selectedShedRoofDirection);
 }
 
 const ALL_MODIFIERS = new Set(['cornerRadius', 'chamfer', 'chamferHeight', 'chamferBottom', 'chamferBottomHeight', 'taper', 'twist', 'scaleTopX', 'scaleTopY', 'shedRoof', 'shedRoofDir']);
@@ -3982,36 +3901,14 @@ function updateResizeTools() {
 }
 
 function rotateShape90() {
-    if (!currentShape || isComplexShape) return;
-
-    const pairedShape = ROTATE_PAIR[selectedBaseShape];
-    if (!pairedShape) return;
-
-    // Capture real canvas dimensions and swap for the new extrusion axis
-    const { width: realW, height: realH } = currentShape.size();
-
-    if (selectedIconFace === 'front') selectedIconFace = 'side';
-    else if (selectedIconFace === 'side') selectedIconFace = 'front';
-
-    selectedBaseShape = pairedShape as BaseShape;
-
-    widthInput.value = String(realH);
-    heightInput.value = String(realW);
-
-    applyFormFactorToCanvas();
-    if (currentShape) centerShapeOnCanvas(currentShape, currentShape2D ?? null);
-    buildInspectorPanel();
-    updateResizeTools();
+    // Legacy single-shape rotate is no-op in the layered model.
+    // Per-layer rotation is set via the layer's modifier sliders.
+    return;
 }
 
 function applyRotation() {
-    if (isComplexShape) {
-        for (const s of layerShapes) s?.set('shapeRotation', selectedRotation);
-        for (const s of layerShapes2D) s?.set('shapeRotation', selectedRotation);
-        return;
-    }
-    currentShape?.set('shapeRotation', selectedRotation);
-    currentShape2D?.set('shapeRotation', selectedRotation);
+    for (const s of layerShapes) s?.set('shapeRotation', selectedRotation);
+    for (const s of layerShapes2D) s?.set('shapeRotation', selectedRotation);
 }
 
 function apply3DModifiers() {
@@ -4019,25 +3916,17 @@ function apply3DModifiers() {
         taper: selectedTaper, twist: selectedTwist,
         scaleTopX: selectedScaleTopX, scaleTopY: selectedScaleTopY,
     };
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        if (layer) {
-            layer.taper = selectedTaper;
-            layer.twist = selectedTwist;
-            layer.scaleTopX = selectedScaleTopX;
-            layer.scaleTopY = selectedScaleTopY;
-        }
-        const s = layerShapes[selectedLayerIndex];
-        const s2 = layerShapes2D[selectedLayerIndex];
-        if (s) for (const [k, v] of Object.entries(attrs)) s.set(k, v);
-        if (s2) for (const [k, v] of Object.entries(attrs)) s2.set(k, v);
-        return;
+    const layer = layers[selectedLayerIndex];
+    if (layer) {
+        layer.taper = selectedTaper;
+        layer.twist = selectedTwist;
+        layer.scaleTopX = selectedScaleTopX;
+        layer.scaleTopY = selectedScaleTopY;
     }
-    if (!currentShape) return;
-    for (const [k, v] of Object.entries(attrs)) {
-        currentShape.set(k, v);
-        currentShape2D?.set(k, v);
-    }
+    const s = layerShapes[selectedLayerIndex];
+    const s2 = layerShapes2D[selectedLayerIndex];
+    if (s) for (const [k, v] of Object.entries(attrs)) s.set(k, v);
+    if (s2) for (const [k, v] of Object.entries(attrs)) s2.set(k, v);
 }
 
 // Enforce square-base (height = width) and pyramid min-depth constraints.
@@ -4062,7 +3951,7 @@ function updateDimensionLock() {
 
     // Corner radius and chamfer are only available for built-in polygon shapes,
     // not for SVG-footprint layers (SVG vertices are always used without rounding).
-    const currentSvgLayer = isComplexShape ? (layers[selectedLayerIndex] ?? null) : null;
+    const currentSvgLayer = layers[selectedLayerIndex] ?? null;
     const hasSvgLayer     = currentSvgLayer !== null && isLayerSvg(currentSvgLayer);
     if (rotationAccordionLi) rotationAccordionLi.style.display = selectedBaseShape !== 'cuboid' ? '' : 'none';
     if (modifiersSvgInfoEl) modifiersSvgInfoEl.style.display = hasSvgLayer ? '' : 'none';
@@ -4156,41 +4045,39 @@ function syncFormFromShape(shape: IsometricShape) {
 // Update form factor, icon, and color controls from the registry for the given shape id.
 function syncExtrasFromShape(id: string) {
     const defaults = ShapeRegistry[id];
+    const layer0 = defaults?.layers?.[0];
+    const icon0 = layer0?.icons?.[0];
 
-    selectedBaseShape   = (defaults?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid') as BaseShape;
-    selectedIconFace    = defaults?.iconFace   ?? 'top';
-    selectedIcon        = defaults?.icon       ?? null;
-    selectedIconSize    = defaults?.iconSize   ?? 1.5;
-    iconLayerIndex      = defaults?.iconLayerIndex ?? 0;
-    selectedIconBgEnabled  = defaults?.iconBgEnabled
-        ?? (!!defaults?.iconHref && !!defaults?.iconBgColor
-            && decodeURIComponent(defaults.iconHref).includes(`fill="${defaults.iconBgColor}"`));
+    selectedBaseShape   = (layer0?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid') as BaseShape;
+    selectedIconFace    = icon0?.face ?? 'top';
+    selectedIcon        = icon0?.iconId || null;
+    selectedIconSize    = icon0?.size ?? 1.5;
+    iconLayerIndex      = 0;
+    selectedIconBgEnabled  = icon0?.bgEnabled ?? false;
     selectedIconAdaptive   = false;
-    selectedIconBgColor = defaults?.iconBgColor ?? PRIMARY_COLORS[0].base;
-    selectedIconBgShape  = (defaults?.iconBgShape ?? 'circle') as 'circle' | 'square' | 'octagon';
-    selectedIconBgRadius = defaults?.iconBgRadius ?? 6;
-    selectedIconBgChamfer = defaults?.iconBgChamfer ?? 0.18;
-    selectedIconBgSize = defaults?.iconBgSize ?? (defaults?.iconSize ?? 1.5);
+    selectedIconBgColor = icon0?.bgColor ?? PRIMARY_COLORS[0].base;
+    selectedIconBgShape  = (icon0?.bgShape ?? 'circle') as 'circle' | 'square' | 'octagon';
+    selectedIconBgRadius = icon0?.bgRadius ?? 6;
+    selectedIconBgChamfer = icon0?.bgChamfer ?? 0.18;
+    selectedIconBgSize = icon0?.bgSize ?? (icon0?.size ?? 1.5);
 
-    // For complex shapes, icons live per-layer — don't load from shape-level.
-    // For simple shapes, migrate from old format.
-    if (!defaults?.complexShape) {
-        iconEntries = defaults ? migrateIconDef(defaults) : [];
-    }
+    // Live reference to the layer's icon array (no copy). Mutations to
+    // iconEntries are mutations to layers[0].icons.
+    iconEntries = layer0?.icons ?? [];
     editingIconIndex = -1;
 
     selectedStyle     = {
-        topColor:    defaults?.style?.topColor    ?? '',
-        sideColor:   defaults?.style?.sideColor   ?? '',
-        frontColor:  defaults?.style?.frontColor  ?? '',
-        strokeColor: defaults?.style?.strokeColor ?? '',
+        topColor:    layer0?.style?.topColor    ?? '',
+        sideColor:   layer0?.style?.sideColor   ?? '',
+        frontColor:  layer0?.style?.frontColor  ?? '',
+        strokeColor: layer0?.style?.strokeColor ?? '',
     };
-    selectedRotation  = defaults?.rotation  ?? 0;
+    selectedRotation  = defaults?.defaultRotation  ?? 0;
     dimensionYAdjustable = defaults?.dimYAdjustable ?? false;
-    selectedTaper     = defaults?.taper     ?? 0;
-    selectedTwist     = defaults?.twist     ?? 0;
-    selectedScaleTopX = defaults?.scaleTopX ?? 1;
-    selectedScaleTopY = defaults?.scaleTopY ?? 1;
+    selectedTaper     = layer0?.taper     ?? 0;
+    selectedTwist     = layer0?.twist     ?? 0;
+    selectedScaleTopX = layer0?.scaleTopX ?? 1;
+    selectedScaleTopY = layer0?.scaleTopY ?? 1;
 
     // Sync radio buttons
     inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
@@ -4266,150 +4153,56 @@ function syncExtrasFromShape(id: string) {
 
 // Swap the canvas shape to match the selected form factor, preserving current dimensions.
 function applyFormFactorToCanvas() {
-    if (isComplexShape) {
-        const layer = layers[selectedLayerIndex];
-        if (!layer) return;
-        layer.baseShape = selectedBaseShape;
-        if (selectedBaseShape !== 'custom') {
-            delete layer.svgNormVerts;
-        }
-        if (requiresSquareBase(selectedBaseShape)) {
-            layer.height = layer.width;
-            heightInput.value = String(layer.width);
-            if (heightValueEl) heightValueEl.textContent = `${Math.round(layer.width)} px`;
-            if (heightDisplayEl) heightDisplayEl.value = String(Math.round(layer.width));
-        }
-        updateDimensionLock();
-        renderLayersOnCanvas();
-        syncInspectorToLayer(selectedLayerIndex);
-        return;
+    const layer = layers[selectedLayerIndex];
+    if (!layer) return;
+    const willBePolygon = selectedBaseShape === 'custom' || selectedBaseShape === 'svgPolygon';
+    layer.baseShape = selectedBaseShape;
+    // Clear polygon-specific data when leaving a polygon-based form factor.
+    if (!willBePolygon) {
+        delete layer.normalizedVerts;
+        delete layer.svgFootprint;
+        delete layer.svgFootprintName;
+        delete layer.svgBillboard;
     }
-
-    if (!currentShape) return;
-
-    // Snap height to width immediately when switching to a square-base form factor.
-    if (requiresSquareBase(selectedBaseShape)) heightInput.value = widthInput.value;
+    markDirty();
+    if (requiresSquareBase(selectedBaseShape)) {
+        layer.height = layer.width;
+        heightInput.value = String(layer.width);
+        if (heightValueEl) heightValueEl.textContent = `${Math.round(layer.width)} px`;
+        if (heightDisplayEl) heightDisplayEl.value = String(Math.round(layer.width));
+    }
     updateDimensionLock();
-
-    const width  = parseFloat(widthInput.value)  || 40;
-    const height = parseFloat(heightInput.value) || 40;
-    const depth  = parseFloat(depthInput.value)  || 0;
-
-    const pos = currentShape.position();
-
-    paper.removeTools();
-    graph.clear();
-    graph2D.clear();
-
-    const shape = getPreviewFactory(currentShapeId, selectedBaseShape)();
-    shape.resize(width, height);
-    shape.set('isometricHeight',        depth);
-    shape.set('defaultIsometricHeight', depth);
-    shape.set('defaultSize',            { width, height });
-    shape.position(pos.x, pos.y);
-    shape.toggleView(View.Isometric);
-    graph.addCell(shape);
-    currentShape = shape;
-
-    const shape2D = getPreviewFactory(currentShapeId, selectedBaseShape)();
-    shape2D.resize(width, height);
-    shape2D.set('isometricHeight',        depth);
-    shape2D.set('defaultIsometricHeight', depth);
-    shape2D.set('defaultSize',            { width, height });
-    shape2D.position(pos.x, pos.y);
-    shape2D.toggleView(View.TwoDimensional);
-    graph2D.addCell(shape2D);
-    currentShape2D = shape2D;
-
-    applyCornerRadiusToCurrentShape();
-    applyChamferSizeToCurrentShape();
-    applyChamferStartToCurrentShape();
-    applyIconToCurrentShape();
-
-    if (selectedBaseShape === 'custom') {
-        const defaults = ShapeRegistry[currentShapeId];
-        if (defaults?.customVerts?.length) {
-            currentShape.set('normalizedVerts', defaults.customVerts);
-            currentShape2D?.set('normalizedVerts', defaults.customVerts);
-        }
-    }
-    apply3DModifiers();
-    applyRotation();
-    centerShapeOnCanvas(currentShape, currentShape2D);
+    renderLayersOnCanvas();
+    syncInspectorToLayer(selectedLayerIndex);
 }
 
-// Apply slider dimension values to the preview shape (grid units → px).
+// Apply slider dimension values to the selected layer (grid units → px).
 function onFieldChange() {
     markDirty();
-    if (isComplexShape) {
-        // Sliders operate in pixels in complex mode.
-        const layer = layers[selectedLayerIndex];
-        if (!layer) return;
-        const w = parseFloat(widthInput.value);
-        if (requiresSquareBase(layer.baseShape)) {
-            heightInput.value = String(w);
-            if (heightValueEl) heightValueEl.textContent = `${Math.round(w)} px`;
-        }
-        const h = parseFloat(heightInput.value);
-        const d = parseFloat(depthInput.value);
-        if (isNaN(w) || isNaN(h) || isNaN(d) || w < 1 || h < 1 || d < 0) return;
-        layer.width  = w;
-        layer.height = h;
-        layer.depth  = d;
-        // Update the layer's shape in-place for smooth dragging
-        const s   = layerShapes[selectedLayerIndex];
-        const s2D = layerShapes2D[selectedLayerIndex];
-        s?.resize(layer.width, layer.height);
-        s?.set('isometricHeight', layer.depth);
-        s2D?.resize(layer.width, layer.height);
-        s2D?.set('isometricHeight', layer.depth);
-        // Compensate for top-left-anchored resize: keep composite centred.
-        recenterCompositeShape();
-        // Icon coords are derived from layer[0]'s w/h/iH; if those just
-        // changed, recompute. Safe to call unconditionally — if a non-icon
-        // layer was resized, layer[0]'s size is unchanged and this is a no-op.
-        applyIconToCurrentShape();
-        return;
+    const layer = layers[selectedLayerIndex];
+    if (!layer) return;
+    const w = parseFloat(widthInput.value);
+    if (requiresSquareBase(layer.baseShape)) {
+        heightInput.value = String(w);
+        if (heightValueEl) heightValueEl.textContent = `${Math.round(w)} px`;
     }
-    if (!currentShape) return;
-    const widthPx = parseFloat(widthInput.value);
-    if (requiresSquareBase(selectedBaseShape)) {
-        heightInput.value = String(widthPx);
-        if (heightValueEl) heightValueEl.textContent = `${Math.round(widthPx)} px`;
-    }
-
-    const isTube = TUBE_FAMILY.has(selectedBaseShape);
-    if (isTube) {
-        const lengthPx = widthPx;
-        const diameterPx = parseFloat(heightInput.value);
-        if (isNaN(lengthPx) || isNaN(diameterPx) || lengthPx < 1 || diameterPx < 1) return;
-        depthInput.value = String(diameterPx);
-        const swapped = ROTATED_FORMS.has(selectedBaseShape);
-        const canvasW = swapped ? diameterPx : lengthPx;
-        const canvasH = swapped ? lengthPx : diameterPx;
-        resizeFromInput = true;
-        currentShape.resize(canvasW, canvasH);
-        currentShape.set('isometricHeight', diameterPx);
-        currentShape2D?.resize(canvasW, canvasH);
-        currentShape2D?.set('isometricHeight', diameterPx);
-        resizeFromInput = false;
-        centerShapeOnCanvas(currentShape, currentShape2D ?? null);
-        return;
-    }
-
-    const heightPx = parseFloat(heightInput.value);
-    const depthPx  = parseFloat(depthInput.value);
-    if (isNaN(widthPx) || isNaN(heightPx) || isNaN(depthPx) || widthPx < 1 || heightPx < 1 || depthPx < 0) return;
-    const swapped = ROTATED_FORMS.has(selectedBaseShape);
-    const canvasW = swapped ? heightPx : widthPx;
-    const canvasH = swapped ? widthPx : heightPx;
-    resizeFromInput = true;
-    currentShape.resize(canvasW, canvasH);
-    currentShape.set('isometricHeight', depthPx);
-    currentShape2D?.resize(canvasW, canvasH);
-    currentShape2D?.set('isometricHeight', depthPx);
-    resizeFromInput = false;
-    centerShapeOnCanvas(currentShape, currentShape2D ?? null);
+    const h = parseFloat(heightInput.value);
+    const d = parseFloat(depthInput.value);
+    if (isNaN(w) || isNaN(h) || isNaN(d) || w < 1 || h < 1 || d < 0) return;
+    layer.width  = w;
+    layer.height = h;
+    layer.depth  = d;
+    // Update the layer's shape in-place for smooth dragging.
+    const s   = layerShapes[selectedLayerIndex];
+    const s2D = layerShapes2D[selectedLayerIndex];
+    s?.resize(layer.width, layer.height);
+    s?.set('isometricHeight', layer.depth);
+    s2D?.resize(layer.width, layer.height);
+    s2D?.set('isometricHeight', layer.depth);
+    // Compensate for top-left-anchored resize: keep composite centred.
+    recenterCompositeShape();
+    // Re-bake the icon when layer[0] resizes (icon coords derive from its bbox).
+    applyIconToCurrentShape();
 }
 
 // Persist all template values to the Shape Registry.
@@ -4455,74 +4248,28 @@ function collectCurrentDef(): Partial<ShapeDefinition> {
         }
     }
 
-    if (isComplexShape && layers.length > 0) {
-        saveIconEntriesToLayer();
-        const layer1 = layers[0];
-        return {
-            defaultSize: { width: layer1.width, height: layer1.height },
-            defaultIsometricHeight: layer1.depth,
-            baseShape: layer1.baseShape,
-            cornerRadius: selectedCornerRadius,
-            chamferSize: selectedChamferSize,
-            chamferStart: selectedChamferStart || undefined,
-            style: {
-                topColor: selectedStyle.topColor || undefined,
-                frontColor: selectedStyle.frontColor || undefined,
-                sideColor: selectedStyle.sideColor || undefined,
-                strokeColor: selectedStyle.strokeColor || undefined,
-            },
-            complexShape: true,
-            layers: layers.map(l => ({ ...l, style: { ...l.style }, icons: l.icons?.map(e => ({ ...e })) })),
-            hitAreaSize: hitAreaShape ? { ...hitAreaShape.size() } : undefined,
-        };
+    // Cache the baked iconHref onto the first IconEntry (for instance-spawn use).
+    // The composite SVG building above prepares `iconHref` from the legacy selectedIcon* state;
+    // if we have IconEntries, the first one's href is updated to match.
+
+    // Every loaded Shape has at least one Layer (loadShapeIntoCanvas refuses
+    // otherwise), so this branch is the only path.
+    const layersOut = layers.map(l => ({ ...l, style: { ...l.style }, icons: l.icons.map(e => ({ ...e })) }));
+    // Apply the freshly-baked iconHref to the first icon of layer 0 if present.
+    if (iconHref && layersOut[0]?.icons.length > 0) {
+        layersOut[0].icons[0].href = iconHref;
     }
-
-    syncLegacyStateToIconEntry();
-
-    const dispW = parseFloat(widthInput.value);
-    const dispH = parseFloat(heightInput.value);
-    const depthPx = parseFloat(depthInput.value);
-    const swapped = ROTATED_FORMS.has(selectedBaseShape);
-    const saveW = swapped ? dispH : dispW;
-    const saveH = swapped ? dispW : dispH;
     return {
-        defaultSize: { width: saveW, height: saveH },
-        defaultIsometricHeight: depthPx,
-        baseShape: selectedBaseShape,
-        iconFace: selectedIconFace,
-        icon: selectedIcon ?? undefined,
-        iconSize: selectedIconSize,
-        iconBgColor: selectedIconBgColor,
-        iconBgShape: selectedIconBgShape,
-        iconBgRadius: selectedIconBgRadius,
-        iconBgChamfer: selectedIconBgChamfer,
-        iconHref,
-        icons: iconEntries.length > 0 ? iconEntries : undefined,
-        cornerRadius: selectedCornerRadius,
-        chamferSize: selectedChamferSize,
-        chamferStart: selectedChamferStart || undefined,
-        style: {
-            topColor: selectedStyle.topColor || undefined,
-            frontColor: selectedStyle.frontColor || undefined,
-            sideColor: selectedStyle.sideColor || undefined,
-            strokeColor: selectedStyle.strokeColor || undefined,
-        },
-        complexShape: false,
-        layers: undefined,
-        customVerts: selectedBaseShape === 'custom' && currentShape
-            ? (currentShape.get('normalizedVerts') as [number, number][] | undefined)
-            : undefined,
-        rotation: selectedRotation || undefined,
+        displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
+        componentType: componentTypeSelect?.value || undefined,
+        defaultRotation: selectedRotation || undefined,
         dimYAdjustable: dimensionYAdjustable || undefined,
-        taper: selectedTaper || undefined,
-        twist: selectedTwist || undefined,
-        scaleTopX: selectedScaleTopX !== 1 ? selectedScaleTopX : undefined,
-        scaleTopY: selectedScaleTopY !== 1 ? selectedScaleTopY : undefined,
+        layers: layersOut,
+        hitAreaSize: hitAreaShape ? { ...hitAreaShape.size() } : undefined,
     };
 }
 
 function switchVariation(target: 'default' | 'turned90') {
-    saveIconEntriesToLayer();
     const currentDef = collectCurrentDef();
     if (activeVariation === 'default') {
         updateShapeDefinition(currentShapeId, {
@@ -4575,31 +4322,13 @@ async function onSave() {
         } else {
             // Editing turned90: keep existing default fields, store current as turned90
             if (existing) {
-                update.defaultSize = existing.defaultSize;
-                update.defaultIsometricHeight = existing.defaultIsometricHeight;
-                update.baseShape = existing.baseShape;
-                update.iconFace = existing.iconFace;
-                update.icon = existing.icon;
-                update.iconSize = existing.iconSize;
-                update.iconBgEnabled = existing.iconBgEnabled;
-                update.iconBgColor = existing.iconBgColor;
-                update.iconBgShape = existing.iconBgShape;
-                update.iconBgRadius = existing.iconBgRadius;
-                update.iconBgSize = existing.iconBgSize;
-                update.iconBgChamfer = existing.iconBgChamfer;
-                update.iconHref = existing.iconHref;
-                update.cornerRadius = existing.cornerRadius;
-                update.chamferSize = existing.chamferSize;
-                update.chamferStart = existing.chamferStart;
-                update.style = existing.style;
-                update.complexShape = existing.complexShape;
+                update.displayName = existing.displayName;
+                update.componentType = existing.componentType;
+                update.collection = existing.collection;
+                update.dimYAdjustable = existing.dimYAdjustable;
+                update.hitAreaSize = existing.hitAreaSize;
+                update.defaultRotation = existing.defaultRotation;
                 update.layers = existing.layers;
-                update.customVerts = existing.customVerts;
-                update.rotation = existing.rotation;
-                update.taper = existing.taper;
-                update.twist = existing.twist;
-                update.scaleTopX = existing.scaleTopX;
-                update.scaleTopY = existing.scaleTopY;
             }
             update.turned90 = def as ShapeDefinition;
         }
@@ -4647,7 +4376,6 @@ function centerShapeOnCanvas(shape: IsometricShape, shape2D: IsometricShape | nu
 // offsets, but ignoring its baseElevation) at the canvas centre. Other
 // layers' relative positions (including their elevation) are preserved.
 function recenterCompositeShape() {
-    if (!isComplexShape) return;
     if (layerShapes.length === 0 || layers.length === 0) return;
 
     const gridPx  = CD_GRID_COUNT * GRID_SIZE;
@@ -4655,21 +4383,27 @@ function recenterCompositeShape() {
     const centerY = gridPx / 2;
     const L0      = layers[0];
 
-    // Ground target = where Layer 0 would sit without any elevation.
-    // L0's own offsets are intentionally respected so users can still
-    // nudge the main horizontally/vertically if they need to.
+    // Ground target = where Layer 0's footprint should sit on the floor plane,
+    // regardless of how much Layer 0 is elevated. This is the un-elevated
+    // (ground) position — every layer's footprint stays anchored to the floor
+    // independent of its own baseElevation.
     const targetX = centerX + L0.offsetX;
     const targetY = centerY + L0.offsetY;
 
-    const translate = (shapes: IsometricShape[]) => {
+    const translate = (shapes: IsometricShape[], isIso: boolean) => {
         if (shapes.length === 0) return;
         const anchor    = shapes[0];
         const { x, y }  = anchor.position();
         const { width: w, height: h } = anchor.size();
-        const anchorCX  = x + w / 2;
-        const anchorCY  = y + h / 2;
-        const dx = targetX - anchorCX;
-        const dy = targetY - anchorCY;
+        // In iso view the layer is rendered offset by (-baseElevation, -baseElevation)
+        // for the elevation "lift". To compare against the ground target, add the
+        // elevation back so we recover the ground-plane center of Layer 0.
+        // In 2D view, no elevation offset is applied — the rendered position IS the ground.
+        const elev = isIso ? L0.baseElevation : 0;
+        const anchorGroundCX  = x + w / 2 + elev;
+        const anchorGroundCY  = y + h / 2 + elev;
+        const dx = targetX - anchorGroundCX;
+        const dy = targetY - anchorGroundCY;
         if (dx === 0 && dy === 0) return;
         for (const s of shapes) {
             const p = s.position();
@@ -4677,8 +4411,8 @@ function recenterCompositeShape() {
         }
     };
 
-    translate(layerShapes);
-    translate(layerShapes2D);
+    translate(layerShapes,   true);
+    translate(layerShapes2D, false);
 
     if (hitAreaVisible) {
         if (hitAreaShape) centerHitArea(hitAreaShape, graph);
@@ -4755,33 +4489,7 @@ function hideHitAreaOverlay() {
     if (hitAreaShape2D) { hitAreaShape2D.remove(); hitAreaShape2D = null; }
 }
 
-// Keep form in sync when resize or height tools are used directly on the shape.
-graph.on('change:size', (cell: dia.Cell) => {
-    if (isComplexShape) return;
-    if (currentShape && cell.id === currentShape.id) {
-        // For adjustable tube/duct shapes, constrain to only change the length axis
-        // Default (tube/duct): length=canvas width, cross-section=canvas height (fix height)
-        // Rotated (pipe/channel): length=canvas height, cross-section=canvas width (fix width)
-        if (!resizeFromInput && dimensionYAdjustable && ROTATE_PAIR[selectedBaseShape]) {
-            const { width, height } = currentShape.size();
-            const isRotated = ROTATED_FORMS.has(selectedBaseShape);
-            const fixedPx = parseFloat(heightInput.value) || 40;
-            if (isRotated && Math.abs(width - fixedPx) > 0.5) {
-                currentShape.resize(fixedPx, height, { silent: true });
-            } else if (!isRotated && Math.abs(height - fixedPx) > 0.5) {
-                currentShape.resize(width, fixedPx, { silent: true });
-            }
-        }
-        syncFormFromShape(currentShape);
-        applyIconToCurrentShape();
-        if (currentShape2D) {
-            const { width, height } = currentShape.size();
-            currentShape2D.resize(width, height);
-        }
-        centerShapeOnCanvas(currentShape, currentShape2D);
-    }
-});
-
+// Hover affordance for the resize tools (no-op when none are visible).
 paper.on('element:mouseenter', () => {
     paper.el.querySelectorAll('.joint-tools').forEach(el => el.classList.add('nr-tools--hover'));
 });
@@ -4789,26 +4497,9 @@ paper.on('element:mouseleave', () => {
     paper.el.querySelectorAll('.nr-tools--hover').forEach(el => el.classList.remove('nr-tools--hover'));
 });
 
-graph2D.on('change:size', (cell: dia.Cell) => {
-    if (isComplexShape) return;
-    if (currentShape2D && cell.id === currentShape2D.id) {
-        if (!resizeFromInput && dimensionYAdjustable && ROTATE_PAIR[selectedBaseShape]) {
-            const { width, height } = currentShape2D.size();
-            const isRotated = ROTATED_FORMS.has(selectedBaseShape);
-            const fixedPx = parseFloat(heightInput.value) || 40;
-            if (isRotated && Math.abs(width - fixedPx) > 0.5) {
-                currentShape2D.resize(fixedPx, height, { silent: true });
-            } else if (!isRotated && Math.abs(height - fixedPx) > 0.5) {
-                currentShape2D.resize(width, fixedPx, { silent: true });
-            }
-        }
-        const { width, height } = currentShape2D.size();
-        currentShape?.resize(width, height);
-        syncFormFromShape(currentShape2D);
-        applyIconToCurrentShape();
-        centerShapeOnCanvas(currentShape!, currentShape2D);
-    }
-});
+// Note: graph change:size / change:isometricHeight handlers for the legacy
+// single-shape resize-by-tool path were removed — layered Shapes resize via
+// the inspector, not via direct tool dragging on the canvas.
 
 paper2D.on('element:mouseenter', () => {
     paper2D.el.querySelectorAll('.joint-tools').forEach(el => el.classList.add('nr-tools--hover'));
@@ -4817,17 +4508,8 @@ paper2D.on('element:mouseleave', () => {
     paper2D.el.querySelectorAll('.nr-tools--hover').forEach(el => el.classList.remove('nr-tools--hover'));
 });
 
-graph.on('change:isometricHeight', (cell: dia.Cell) => {
-    if (isComplexShape) return; // layer shapes have no height tools
-    if (currentShape && cell.id === currentShape.id) {
-        syncFormFromShape(currentShape);
-        applyIconToCurrentShape();
-        if (currentShape2D) {
-            currentShape2D.set('isometricHeight', currentShape.get('isometricHeight'));
-        }
-        centerShapeOnCanvas(currentShape, currentShape2D);
-    }
-});
+// Note: change:isometricHeight handler removed — layered Shapes set depth
+// via the inspector slider, no per-shape height tool runs.
 
 // ── Complex Shape helpers ─────────────────────────────────────────────────────
 
@@ -4839,11 +4521,7 @@ graph.on('change:isometricHeight', (cell: dia.Cell) => {
  * when one is active.  Displays any pending parse error beneath the control.
  */
 function syncSvgFootprintSection() {
-    // Toggle the accordion item visibility
-    if (svgFootprintAccordionLi) {
-        svgFootprintAccordionLi.style.display = isComplexShape ? '' : 'none';
-    }
-    if (!isComplexShape || !svgFootprintAccordionContent) return;
+    if (!svgFootprintAccordionContent) return;
 
     const layer = layers[selectedLayerIndex] ?? null;
     svgFootprintAccordionContent.innerHTML = '';
@@ -5025,9 +4703,11 @@ function onSvgFootprintUpload(fileInput: HTMLInputElement) {
         if (!layer) return;
 
         svgParseError           = '';
+        layer.baseShape         = 'svgPolygon';
         layer.svgFootprint      = svgString;
-        layer.svgNormVerts      = result.normVerts;
+        layer.normalizedVerts   = result.normVerts;
         layer.svgFootprintName  = file.name;
+        markDirty();
 
         renderLayersOnCanvas();
         syncSvgFootprintSection();
@@ -5036,15 +4716,20 @@ function onSvgFootprintUpload(fileInput: HTMLInputElement) {
     reader.readAsText(file);
 }
 
-/** Removes the SVG footprint from the current layer, reverting to the built-in form factor. */
+/** Removes the SVG footprint from the current layer, reverting to the previous form factor. */
 function onRemoveSvgFootprint() {
     const layer = layers[selectedLayerIndex];
     if (!layer) return;
 
+    // Reverting from 'svgPolygon': fall back to cuboid (a sane default). The
+    // user can change to any other base shape via the form-factor picker.
+    if (layer.baseShape === 'svgPolygon') layer.baseShape = 'cuboid';
     delete layer.svgFootprint;
-    delete layer.svgNormVerts;
+    delete layer.normalizedVerts;
     delete layer.svgFootprintName;
+    delete layer.svgBillboard;
     svgParseError = '';
+    markDirty();
 
     renderLayersOnCanvas();
     syncSvgFootprintSection();
@@ -5088,7 +4773,7 @@ function renderLayersOnCanvas() {
         let shape: IsometricShape;
         if (isLayerCustomVerts(layer)) {
             const svgShape = new SvgPolygonShape();
-            svgShape.set('normalizedVerts', layer.svgNormVerts!);
+            svgShape.set('normalizedVerts', layer.normalizedVerts!);
             shape = svgShape;
         } else {
             shape = (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['cuboid'])();
@@ -5129,7 +4814,7 @@ function renderLayersOnCanvas() {
         let shape2D: IsometricShape;
         if (isLayerCustomVerts(layer)) {
             const svgShape2D = new SvgPolygonShape();
-            svgShape2D.set('normalizedVerts', layer.svgNormVerts!);
+            svgShape2D.set('normalizedVerts', layer.normalizedVerts!);
             shape2D = svgShape2D;
         } else {
             shape2D = (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['cuboid'])();
@@ -5179,11 +4864,15 @@ function renderLayersOnCanvas() {
     currentShape2D = layerShapes2D[selectedLayerIndex] ?? null;
 
     // Apply each layer's stored icons to its own shape.
-    if (isComplexShape) {
-        applyAllLayerIcons();
-    } else {
-        applyIconToCurrentShape();
-    }
+    applyAllLayerIcons();
+
+    // Re-apply the Shape's label to the fresh layerShapes[0]. The label is a
+    // Shape-level concept anchored to the floor plane; it gets wiped by the
+    // graph.clear() at the top of this function and must be re-established.
+    const labelText = ShapeRegistry[currentShapeId]?.displayName
+        ?? shapeNameInput?.value
+        ?? '';
+    if (labelText) setShapeLabel(labelText);
 
     // Realign the composite bbox to the canvas centre.
     recenterCompositeShape();
@@ -5213,39 +4902,30 @@ function buildLayersPanel() {
         return btn;
     };
 
-    // Render layers top-to-bottom with the MAIN (index 0) at the bottom of the list,
-    // mirroring the paint order: main = bottommost visual, extra layers stacked above.
+    // Render layers top-to-bottom: highest array index visually on top, layer 0
+    // at the bottom of the list (matches paint order). All layers are equal —
+    // there is no "Main" layer anymore. Every layer is movable/deletable; only
+    // constraint is that a Shape must keep at least one Layer.
     for (let i = layers.length - 1; i >= 0; i--) {
         const layer = layers[i];
-        const isMain = i === 0;
         const li = document.createElement('li');
-        li.className = 'nr-layer-item' + (i === selectedLayerIndex ? ' nr-layer-item--selected' : '') + (isMain ? ' nr-layer-item--main' : '');
+        li.className = 'nr-layer-item' + (i === selectedLayerIndex ? ' nr-layer-item--selected' : '');
 
         const nameSpan = document.createElement('span');
         nameSpan.className = 'nr-layer-item-name';
         nameSpan.textContent = layer.name;
         li.appendChild(nameSpan);
 
-        if (isMain) {
-            const tag = document.createElement('span');
-            tag.className = 'cds--tag cds--tag--blue nr-layer-main-tag';
-            tag.textContent = 'Main';
-            tag.title = 'Main layer — owns the component name and label position';
-            li.appendChild(tag);
-        } else {
-            // Chevron up/down are only shown on additional layers. Main layer stays
-            // anchored at index 0 — nothing can move above/below it.
-            // Array index 0 = bottom of list visually; index 1 is just above it.
-            // "Move up" in the UI (visually higher) = increase array index.
-            const upBtn   = makeLayerAction(CDS_ICON_CHEVRON_UP,   `Move ${layer.name} up`,   () => onMoveLayerUp(i));
-            const downBtn = makeLayerAction(CDS_ICON_CHEVRON_DOWN, `Move ${layer.name} down`, () => onMoveLayerDown(i));
-            upBtn.disabled   = i >= layers.length - 1; // already at the top
-            downBtn.disabled = i <= 1;                 // just above main — can't go lower
-            li.appendChild(upBtn);
-            li.appendChild(downBtn);
-        }
+        // Every layer can move up/down. Disabled only at the array boundaries.
+        const upBtn   = makeLayerAction(CDS_ICON_CHEVRON_UP,   `Move ${layer.name} up`,   () => onMoveLayerUp(i));
+        const downBtn = makeLayerAction(CDS_ICON_CHEVRON_DOWN, `Move ${layer.name} down`, () => onMoveLayerDown(i));
+        upBtn.disabled   = i >= layers.length - 1; // already at the top of the stack
+        downBtn.disabled = i <= 0;                 // already at the bottom of the stack
+        li.appendChild(upBtn);
+        li.appendChild(downBtn);
 
-        // Overflow menu — Rename / Duplicate / Delete. Delete is disabled on main.
+        // Overflow menu — Rename / Duplicate / Delete.
+        // Delete is disabled only when this is the last remaining Layer.
         const menuBtn = makeLayerAction(CDS_ICON_OVERFLOW, `Actions for ${layer.name}`, () => {
             showLayerOverflowMenu(menuBtn, i);
         });
@@ -5253,7 +4933,6 @@ function buildLayersPanel() {
         li.appendChild(menuBtn);
 
         li.addEventListener('click', () => {
-            saveIconEntriesToLayer();
             editingIconIndex = -1;
             const edPopup = document.getElementById('nr-icon-editor-popup');
             if (edPopup) edPopup.style.display = 'none';
@@ -5261,7 +4940,7 @@ function buildLayersPanel() {
             selectedBaseShape = layers[i]?.baseShape ?? 'cuboid';
             currentShape   = layerShapes[i]   ?? null;
             currentShape2D = layerShapes2D[i] ?? null;
-            iconEntries = layers[i]?.icons?.map(e => ({ ...e })) ?? [];
+            iconEntries = layers[i]?.icons ?? [];
             selectedIcon = null;
             selectedIconBgEnabled = false;
             buildLayersPanel();
@@ -5291,7 +4970,6 @@ function showLayerOverflowMenu(anchor: HTMLElement, index: number) {
 
     const layer = layers[index];
     if (!layer) return;
-    const isMain = index === 0;
 
     const popup = document.createElement('div');
     popup.className = 'cds--overflow-menu-options cds--overflow-menu-options--open nr-layer-overflow-popup';
@@ -5305,7 +4983,8 @@ function showLayerOverflowMenu(anchor: HTMLElement, index: number) {
     const items: Array<{ label: string; onClick: () => void; disabled?: boolean }> = [
         { label: 'Rename layer',    onClick: () => { popup.remove(); showRenameLayerModal(index); } },
         { label: 'Duplicate layer', onClick: () => { popup.remove(); onDuplicateLayer(index); } },
-        { label: 'Delete layer',    onClick: () => { popup.remove(); onDeleteLayer(index); }, disabled: isMain || layers.length <= 1 },
+        // Delete is disabled only when this is the last remaining Layer.
+        { label: 'Delete layer',    onClick: () => { popup.remove(); onDeleteLayer(index); }, disabled: layers.length <= 1 },
     ];
 
     for (const item of items) {
@@ -5434,7 +5113,6 @@ function showRenameLayerModal(index: number) {
 let applyingAllLayerIcons = false;
 
 function applyAllLayerIcons() {
-    if (!isComplexShape) return;
     applyingAllLayerIcons = true;
     const noIconAttrs = {
         topIcon:   { href: '', width: 0, height: 0 },
@@ -5447,7 +5125,7 @@ function applyAllLayerIcons() {
         const layerIcons = layers[idx].icons;
         const shape = layerShapes[idx];
         const shape2D = layerShapes2D[idx];
-        if (!layerIcons || !layerIcons.some(e => !!e.id || e.bgEnabled)) {
+        if (!layerIcons || !layerIcons.some(e => !!e.iconId || e.bgEnabled)) {
             shape?.attr(noIconAttrs);
             shape2D?.attr(noIconAttrs);
             continue;
@@ -5461,21 +5139,6 @@ function applyAllLayerIcons() {
     currentShape = savedShape;
     currentShape2D = savedShape2D;
     applyingAllLayerIcons = false;
-}
-
-function saveIconEntriesToLayer() {
-    if (!isComplexShape) return;
-    const layer = layers[selectedLayerIndex];
-    if (layer) layer.icons = iconEntries.map(e => ({ ...e }));
-}
-
-function loadIconEntriesFromLayer(index: number) {
-    if (!isComplexShape) return;
-    const layer = layers[index];
-    iconEntries = layer?.icons?.map(e => ({ ...e })) ?? [];
-    selectedIcon = null;
-    selectedIconBgEnabled = false;
-    if (renderIconsListFn) renderIconsListFn();
 }
 
 function syncInspectorToLayer(index: number) {
@@ -5512,7 +5175,8 @@ function syncInspectorToLayer(index: number) {
     }
     if (baseElevationInput)  {
         baseElevationInput.value = String(layer.baseElevation);
-        baseElevationInput.disabled = index === 0;
+        // Every layer can float freely now — no anchor-to-floor for layers[0].
+        baseElevationInput.disabled = false;
         setSliderFill(baseElevationInput);
         const d = baseElevationInput.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
         if (d) d.value = `${Math.round(layer.baseElevation)}px`;
@@ -5612,14 +5276,14 @@ function syncInspectorToLayer(index: number) {
 
 /** Called when offset/elevation sliders change */
 function onOffsetChange() {
-    if (!isComplexShape) return;
     const layer = layers[selectedLayerIndex];
     if (!layer) return;
     markDirty();
 
     layer.offsetX       = parseFloat(offsetXInput.value);
     layer.offsetY       = parseFloat(offsetYInput.value);
-    layer.baseElevation = selectedLayerIndex === 0 ? 0 : parseFloat(baseElevationInput.value);
+    // All layers can float freely now — no more layers[0] === floor constraint.
+    layer.baseElevation = parseFloat(baseElevationInput.value);
 
     if (offsetXValueEl)       offsetXValueEl.textContent       = `${Math.round(layer.offsetX)} px`;
     if (offsetYValueEl)       offsetYValueEl.textContent       = `${Math.round(layer.offsetY)} px`;
@@ -5639,44 +5303,46 @@ function onOffsetChange() {
     );
     // Keep the composite centred regardless of per-layer offset/elevation.
     recenterCompositeShape();
+    // If Layer 0's elevation just changed, re-apply the label transform so the
+    // label stays anchored to the floor plane (Hit Area), not floating with the layer.
+    if (selectedLayerIndex === 0) {
+        const txt = (layerShapes[0]?.attr('label/text') as string | undefined) ?? '';
+        setShapeLabel(txt);
+    }
 }
 
 function onAddLayer() {
-    saveIconEntriesToLayer();
     editingIconIndex = -1;
     const edPopup = document.getElementById('nr-icon-editor-popup');
     if (edPopup) edPopup.style.display = 'none';
     const stackElevation = layers.reduce((sum, l) => sum + l.depth, 0);
 
-    const newLayer: ShapeLayer = {
-        id:            `layer-${Date.now()}`,
+    const newLayer: ShapeLayer = defaultShapeLayer({
         name:          `Layer ${layers.length + 1}`,
-        baseShape:     'cuboid',
         width:         2 * GRID_SIZE,
         height:        2 * GRID_SIZE,
         depth:         GRID_SIZE,
-        offsetX:       0,
-        offsetY:       0,
         baseElevation: stackElevation,
-        style:         {},
         cornerRadius:  0,
-    };
+    });
     layers.push(newLayer);
     selectedLayerIndex = layers.length - 1;
     selectedBaseShape = newLayer.baseShape;
-    iconEntries = [];
+    iconEntries = newLayer.icons;   // live reference to the new layer's icon array
     selectedIcon = null;
     selectedIconBgEnabled = false;
+    markDirty();
     renderLayersOnCanvas();
     buildLayersPanel();
+    showLayersPanel();
     buildInspectorPanel();
     syncInspectorToLayer(selectedLayerIndex);
 }
 
 function onDeleteLayer(index: number) {
+    // Any layer is deletable, but a Shape must keep at least one Layer.
     if (layers.length <= 1) return;
-    if (index === 0) return;
-    saveIconEntriesToLayer();
+    markDirty();
     editingIconIndex = -1;
     const edPopup = document.getElementById('nr-icon-editor-popup');
     if (edPopup) edPopup.style.display = 'none';
@@ -5684,25 +5350,28 @@ function onDeleteLayer(index: number) {
     if (selectedLayerIndex >= layers.length) selectedLayerIndex = layers.length - 1;
     if (iconLayerIndex    >= layers.length) iconLayerIndex    = 0;
     selectedBaseShape = layers[selectedLayerIndex]?.baseShape ?? 'cuboid';
-    iconEntries = layers[selectedLayerIndex]?.icons?.map(e => ({ ...e })) ?? [];
+    iconEntries = layers[selectedLayerIndex]?.icons ?? [];
     selectedIcon = null;
     selectedIconBgEnabled = false;
     renderLayersOnCanvas();
     buildLayersPanel();
+    // Layers panel stays visible — even at 1 Layer, it shows that one Layer
+    // and the "Add Layer" button is the way to grow.
+    showLayersPanel();
     buildInspectorPanel();
     syncInspectorToLayer(selectedLayerIndex);
 }
 
 // "Up" in the list UI = higher array index = paints higher in the stack.
-// Main layer (index 0) is anchored; neighbouring index 1 cannot swap with it.
+// All layers can move freely — no special "Main" anchor anymore.
 function onMoveLayerUp(index: number) {
-    if (index < 1) return;                 // main is immovable
-    if (index >= layers.length - 1) return;
+    if (index < 0 || index >= layers.length - 1) return;
     [layers[index], layers[index + 1]] = [layers[index + 1], layers[index]];
     if (selectedLayerIndex === index) selectedLayerIndex = index + 1;
     else if (selectedLayerIndex === index + 1) selectedLayerIndex = index;
     if (iconLayerIndex === index) iconLayerIndex = index + 1;
     else if (iconLayerIndex === index + 1) iconLayerIndex = index;
+    markDirty();
     renderLayersOnCanvas();
     buildLayersPanel();
     syncInspectorToLayer(selectedLayerIndex);
@@ -5710,12 +5379,13 @@ function onMoveLayerUp(index: number) {
 }
 
 function onMoveLayerDown(index: number) {
-    if (index <= 1) return;                // index 1 is just above main — no further down
+    if (index <= 0) return;
     [layers[index], layers[index - 1]] = [layers[index - 1], layers[index]];
     if (selectedLayerIndex === index) selectedLayerIndex = index - 1;
     else if (selectedLayerIndex === index - 1) selectedLayerIndex = index;
     if (iconLayerIndex === index) iconLayerIndex = index - 1;
     else if (iconLayerIndex === index - 1) iconLayerIndex = index;
+    markDirty();
     renderLayersOnCanvas();
     buildLayersPanel();
     syncInspectorToLayer(selectedLayerIndex);
@@ -5758,155 +5428,9 @@ function updateSliderRangesForComplexMode(enabled: boolean) {
     }
 }
 
-function onComplexShapeToggle(enabled: boolean) {
-    if (enabled) {
-        // Read current single-shape dimensions from sliders (still in GU at this point)
-        const w = parseFloat(widthInput?.value  ?? '40') || 40;
-        const h = parseFloat(heightInput?.value ?? '40') || 40;
-        const d = parseFloat(depthInput?.value  ?? '20') || 20;
-
-        isComplexShape     = true;
-        selectedLayerIndex = 0;
-        layerShapes        = [];
-        layerShapes2D      = [];
-        const customVerts = selectedBaseShape === 'custom' && currentShape
-            ? (currentShape.get('normalizedVerts') as [number, number][] | [number, number][][] | undefined)
-            : undefined;
-        const normVerts = customVerts
-            ? (Array.isArray(customVerts[0]?.[0]) ? (customVerts as [number, number][][])[0] : customVerts as [number, number][])
-            : undefined;
-
-        layers = [{
-            id:            'layer-1',
-            name:          'Layer 1',
-            baseShape:     selectedBaseShape,
-            width:         w,
-            height:        h,
-            depth:         d,
-            offsetX:       0,
-            offsetY:       0,
-            baseElevation: 0,
-            style:         { ...selectedStyle },
-            cornerRadius:  selectedCornerRadius,
-            svgNormVerts:  normVerts,
-            icons:         iconEntries.length > 0 ? iconEntries.map(e => ({ ...e })) : undefined,
-        }];
-
-        paper.removeTools();
-        graph.clear();
-        graph2D.clear();
-        currentShape   = null;
-        currentShape2D = null;
-
-        updateSliderRangesForComplexMode(true);
-        renderLayersOnCanvas();
-        buildLayersPanel();
-        showLayersPanel();
-        if (positionAccordionLi)     positionAccordionLi.style.display     = '';
-        if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = '';
-        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = '';
-        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = '';
-        updateAdaptiveToggleVisibility();
-        syncInspectorToLayer(0);
-    } else {
-        // Revert to simple shape; restore Layer 1's properties to the sliders
-        const layer1       = layers[0];
-        isComplexShape     = false;
-        layers             = [];
-        layerShapes        = [];
-        layerShapes2D      = [];
-        selectedLayerIndex = 0;
-
-        updateSliderRangesForComplexMode(false);
-
-        if (layer1) {
-            selectedBaseShape = layer1.baseShape;
-            selectedStyle = {
-                topColor:    layer1.style.topColor    ?? '',
-                sideColor:   layer1.style.sideColor   ?? '',
-                frontColor:  layer1.style.frontColor  ?? '',
-                strokeColor: layer1.style.strokeColor ?? '',
-            };
-        }
-
-        hideLayersPanel();
-        if (positionAccordionLi)     positionAccordionLi.style.display     = 'none';
-        if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = 'none';
-        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = '';
-        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = '';
-        updateAdaptiveToggleVisibility();
-
-        // Rebuild the single-shape preview using Layer 1's dimensions
-        const initWidth  = layer1?.width  ?? 2 * GRID_SIZE;
-        const initHeight = layer1?.height ?? 2 * GRID_SIZE;
-        const initDepth  = layer1?.depth  ?? GRID_SIZE;
-
-        paper.removeTools();
-        graph.clear();
-        graph2D.clear();
-
-        const factory = getPreviewFactory(currentShapeId, selectedBaseShape);
-        if (!factory) return;
-
-        const gridPx = CD_GRID_COUNT * GRID_SIZE;
-        const posX = (gridPx - initWidth)  / 2;
-        const posY = (gridPx - initHeight) / 2;
-
-        const shape = factory();
-        shape.resize(initWidth, initHeight);
-        shape.set('isometricHeight',        initDepth);
-        shape.set('defaultIsometricHeight', initDepth);
-        shape.set('defaultSize',            { width: initWidth, height: initHeight });
-        shape.position(posX, posY);
-        shape.toggleView(View.Isometric);
-        graph.addCell(shape);
-        currentShape = shape;
-
-        const shape2D = factory();
-        shape2D.resize(initWidth, initHeight);
-        shape2D.set('isometricHeight',        initDepth);
-        shape2D.set('defaultIsometricHeight', initDepth);
-        shape2D.set('defaultSize',            { width: initWidth, height: initHeight });
-        shape2D.position(posX, posY);
-        shape2D.toggleView(View.TwoDimensional);
-        graph2D.addCell(shape2D);
-        currentShape2D = shape2D;
-
-        // Sync sliders back to Layer 1's values
-        syncFormFromShape(shape);
-
-        // Sync style
-        if (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || selectedStyle.strokeColor) {
-            applyShapeStyle(shape,   selectedStyle);
-            applyShapeStyle(shape2D, selectedStyle);
-        }
-        if (colorPickerRef) {
-            colorPickerRef.value = selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || '#e0e0e0';
-        }
-
-        // Sync corner radius from Layer 1
-        if (layer1?.cornerRadius !== undefined) {
-            selectedCornerRadius = layer1.cornerRadius;
-            if (cornerRadiusInput)   cornerRadiusInput.value   = String(selectedCornerRadius);
-            if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${selectedCornerRadius} px`;
-        }
-        applyCornerRadiusToCurrentShape();
-
-        // Sync form factor radio buttons
-        inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
-            r.checked = r.value === selectedBaseShape;
-        });
-        syncFormFactorTiles();
-        updateDimensionLock();
-
-        applyIconToCurrentShape();
-        svgParseError = '';
-        syncSvgFootprintSection(); // hides the section now that isComplexShape is false
-    }
-    // Complex toggle changes the layer count visible to the user; refresh
-    // the icon section so the "Apply icon to layer" dropdown appears/hides.
-    refreshIconAccordionContent();
-}
+// onComplexShapeToggle deleted — the toggle UI is hidden and the function was
+// only called by its click handler. Every Shape is layered now; the natural
+// minimum is a one-layer Shape, and "Add Layer" grows the stack.
 
 // ── Shape selector (palette panel) ────────────────────────────────────────────
 
@@ -5927,8 +5451,11 @@ function onCreateShape(name: string, componentType?: string) {
     addShape(id, {
         displayName: name,
         componentType,
-        defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
-        defaultIsometricHeight: GRID_SIZE * 0.5,
+        layers: [defaultShapeLayer({
+            width: GRID_SIZE * 2,
+            height: GRID_SIZE * 2,
+            depth: GRID_SIZE * 0.5,
+        })],
     });
     saveRegistryToStorage();
     document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
@@ -5943,9 +5470,7 @@ function onDuplicateShape(sourceId: string, newName: string) {
     const newId = nameToId(newName);
     const source = ShapeRegistry[sourceId];
     addShape(newId, {
-        defaultSize: { width: GRID_SIZE * 2, height: GRID_SIZE * 2 },
-        defaultIsometricHeight: GRID_SIZE * 0.5,
-        ...(source ?? {}),
+        ...(source ?? { layers: [defaultShapeLayer({ width: GRID_SIZE * 2, height: GRID_SIZE * 2, depth: GRID_SIZE * 0.5 })] }),
         displayName: newName,
     });
     saveRegistryToStorage();
@@ -6304,7 +5829,7 @@ async function cloneShapeView(shape: IsometricShape): Promise<SVGGElement | null
 }
 
 async function buildShapeSvgString(): Promise<string | null> {
-    const shapes = isComplexShape ? layerShapes : (currentShape ? [currentShape] : []);
+    const shapes = layerShapes;
     if (shapes.length === 0) return null;
 
     const ns = 'http://www.w3.org/2000/svg';
@@ -6492,7 +6017,8 @@ function buildPalettePanel() {
 
     for (const id of userIds) {
         const def = ShapeRegistry[id];
-        const iconEntry = def?.icon ? getIconById(def.icon) : undefined;
+        const catId = def?.layers?.[0]?.icons?.[0]?.iconId;
+        const iconEntry = catId ? getIconById(catId) : undefined;
         const isV = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
         items.push({
             id,
@@ -6507,7 +6033,8 @@ function buildPalettePanel() {
 
     for (const collectionName of getComponentCollections()) {
         for (const s of (byCollection.get(collectionName) ?? [])) {
-            const iconEntry = s.definition.icon ? getIconById(s.definition.icon) : undefined;
+            const catId = s.definition.layers?.[0]?.icons?.[0]?.iconId;
+            const iconEntry = catId ? getIconById(catId) : undefined;
             const isV = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
             items.push({
                 id: s.id,
@@ -6578,9 +6105,10 @@ function loadShapeIntoCanvas(id: string) {
     const complexToggleBtn = inspectorEl.querySelector<HTMLButtonElement>('#sd-complex-toggle');
     const complexToggleDiv = complexToggleBtn?.closest<HTMLElement>('.nr-toggle') ?? null;
 
-    selectedCornerRadius = savedDefaults?.cornerRadius ?? 0;
-    selectedChamferSize  = savedDefaults?.chamferSize ?? 0;
-    selectedChamferStart = savedDefaults?.chamferStart ?? 0;
+    const layer0 = savedDefaults?.layers?.[0];
+    selectedCornerRadius = layer0?.cornerRadius ?? 0;
+    selectedChamferSize  = layer0?.chamferSize ?? 0;
+    selectedChamferStart = layer0?.chamferStart ?? 0;
 
     // Sync 3D modifier sliders with loaded values
     if (taperInput) { taperInput.value = String(selectedTaper); taperValueEl.textContent = selectedTaper.toFixed(2); }
@@ -6588,14 +6116,17 @@ function loadShapeIntoCanvas(id: string) {
     if (stxInput) { stxInput.value = String(selectedScaleTopX); stxValueEl.textContent = selectedScaleTopX.toFixed(2); }
     if (styInput) { styInput.value = String(selectedScaleTopY); styValueEl.textContent = selectedScaleTopY.toFixed(2); }
 
-    if (savedDefaults?.complexShape && savedDefaults.layers?.length) {
-        // ── Complex shape path ─────────────────────────────────────────────────
-        isComplexShape     = true;
-        layers             = savedDefaults.layers.map(l => ({ ...l, style: { ...l.style } }));
+    // Every Shape is layered now — there's no "simple shape" path. A Shape with
+    // one Layer is the natural minimum; the Layers panel is hidden in that case
+    // to reduce UI clutter, but the underlying state model is uniform.
+    if (savedDefaults?.layers?.length) {
+        layers             = savedDefaults.layers.map(l => ({ ...l, style: { ...l.style }, icons: l.icons.map(e => ({ ...e })) }));
         selectedLayerIndex = 0;
 
-        iconEntries = layers[0]?.icons?.map(e => ({ ...e })) ?? [];
+        iconEntries = layers[0]?.icons ?? [];
 
+        // The complex toggle is obsolete but still exists in the DOM — set it
+        // checked for consistency. (Cleanup of the toggle UI is a follow-up.)
         if (complexToggleDiv) complexToggleDiv.classList.add('nr-toggle--checked');
         if (complexToggleBtn) complexToggleBtn.setAttribute('aria-checked', 'true');
         if (positionAccordionLi)     positionAccordionLi.style.display     = '';
@@ -6605,99 +6136,20 @@ function loadShapeIntoCanvas(id: string) {
 
         updateSliderRangesForComplexMode(true);
         renderLayersOnCanvas();
-        // Label lives only on Layer 1 (layerShapes[0]); other layers stay unlabelled.
-        layerShapes[0]?.attr('label/text', displayName);
-        layerShapes2D[0]?.attr('label/text', displayName);
+        // Label sits on layerShapes[0] visually. It's a cosmetic anchor — the
+        // label is logically a Shape-level property, not a per-layer one.
+        setShapeLabel(displayName);
         buildLayersPanel();
+        // Always show the Layers panel — even a single-layer Shape lists its one
+        // Layer so the user can rename it, change its base shape, or click
+        // "Add Layer" to grow into a multi-layer Shape.
         showLayersPanel();
         syncInspectorToLayer(0);
     } else {
-        // ── Simple shape path (original logic) ────────────────────────────────
-        isComplexShape     = false;
-        layers             = [];
-
-        updateSliderRangesForComplexMode(false);
-        if (complexToggleDiv) complexToggleDiv.classList.remove('nr-toggle--checked');
-        if (complexToggleBtn) complexToggleBtn.setAttribute('aria-checked', 'false');
-        if (positionAccordionLi)     positionAccordionLi.style.display     = 'none';
-        if (svgFootprintAccordionLi) svgFootprintAccordionLi.style.display = 'none';
-        if (iconBgNoBackgroundBtnEl) iconBgNoBackgroundBtnEl.style.display = '';
-        if (iconBgCustomColorRowEl)  iconBgCustomColorRowEl.style.display  = '';
-        updateAdaptiveToggleVisibility();
-        hideLayersPanel();
-
-        const savedBaseShape = savedDefaults?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid';
-        const factory = getPreviewFactory(id, savedBaseShape);
-        if (!factory) return;
-
-        const FALLBACK_GU = 2 * GRID_SIZE;
-        const initWidth  = savedDefaults?.defaultSize?.width     ?? FALLBACK_GU;
-        const initHeight = savedDefaults?.defaultSize?.height    ?? FALLBACK_GU;
-        const initDepth  = savedDefaults?.defaultIsometricHeight ?? FALLBACK_GU;
-
-        const gridPx = CD_GRID_COUNT * GRID_SIZE;
-        const posX = (gridPx - initWidth)  / 2;
-        const posY = (gridPx - initHeight) / 2;
-
-        const shape = factory();
-        shape.resize(initWidth, initHeight);
-        shape.set('isometricHeight',        initDepth);
-        shape.set('defaultIsometricHeight', initDepth);
-        shape.set('defaultSize',            { width: initWidth, height: initHeight });
-        shape.set('cornerRadius', selectedCornerRadius);
-        shape.set('chamferSize', selectedChamferSize);
-        shape.set('chamferStart', selectedChamferStart);
-        shape.set('taper', selectedTaper);
-        shape.set('twist', selectedTwist);
-        shape.set('scaleTopX', selectedScaleTopX);
-        shape.set('scaleTopY', selectedScaleTopY);
-        if (savedDefaults?.customVerts) shape.set('normalizedVerts', savedDefaults.customVerts);
-        shape.attr('label/text', displayName);
-        shape.position(posX, posY);
-        shape.toggleView(View.Isometric);
-        graph.addCell(shape);
-        currentShape = shape;
-
-        const shape2D = factory();
-        shape2D.resize(initWidth, initHeight);
-        shape2D.set('isometricHeight',        initDepth);
-        shape2D.set('defaultIsometricHeight', initDepth);
-        shape2D.set('defaultSize',            { width: initWidth, height: initHeight });
-        shape2D.set('cornerRadius', selectedCornerRadius);
-        shape2D.set('chamferSize', selectedChamferSize);
-        shape2D.set('chamferStart', selectedChamferStart);
-        shape2D.set('taper', selectedTaper);
-        shape2D.set('twist', selectedTwist);
-        shape2D.set('scaleTopX', selectedScaleTopX);
-        shape2D.set('scaleTopY', selectedScaleTopY);
-        if (savedDefaults?.customVerts) shape2D.set('normalizedVerts', savedDefaults.customVerts);
-        shape2D.attr('label/text', displayName);
-        shape2D.position(posX, posY);
-        shape2D.toggleView(View.TwoDimensional);
-        graph2D.addCell(shape2D);
-        currentShape2D = shape2D;
-
-        syncAllInspectorFields();
-
-        if (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || selectedStyle.strokeColor) {
-            applyShapeStyle(shape,   selectedStyle);
-            applyShapeStyle(shape2D, selectedStyle);
-        }
-
-        applyCornerRadiusToCurrentShape();
-        applyChamferSizeToCurrentShape();
-
-        // Force re-render so both modifiers are reflected in the initial paint.
-        if (currentShape) {
-            const { width, height } = currentShape.size();
-            currentShape.resize(width, height);
-        }
-        if (currentShape2D) {
-            const { width, height } = currentShape2D.size();
-            currentShape2D.resize(width, height);
-        }
-
-        applyIconToCurrentShape();
+        // Defensive fallback: a Shape without layers can't be loaded. Should
+        // never happen with the new schema, but guard against corrupt data.
+        console.warn(`[nextrack] Shape "${id}" has no layers — refusing to load.`);
+        return;
     }
 
     // Show resize handle for adjustable shapes
@@ -6710,12 +6162,8 @@ function loadShapeIntoCanvas(id: string) {
 // ── Paper element events ───────────────────────────────────────────────────────
 
 // Re-attach tools if the user clicks the shape after panning the canvas.
-// In complex shape mode, canvas shapes are not individually selectable —
-// layer selection is managed exclusively through the Layers panel.
-paper.on('element:pointerup', (elementView: dia.ElementView) => {
-    if (isComplexShape) return;
-    currentShape = elementView.model as IsometricShape;
-});
+// Layer selection is managed exclusively through the Layers panel — the
+// canvas is non-interactive for selection purposes.
 
 // ── Exported panel shim ────────────────────────────────────────────────────────
 // index.ts calls cdPanel.hide() when switching back to the System Designer.

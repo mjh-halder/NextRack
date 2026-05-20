@@ -5,7 +5,9 @@ import { ShapeRegistry } from '../shape-registry';
 
 const _databaseEntry = ShapeRegistry['database'];
 if (!_databaseEntry) throw new Error('[nextrack] Built-in registry entry "database" is missing at startup — check module initialization order');
-const { defaultSize, defaultIsometricHeight } = _databaseEntry;
+const _layer0 = _databaseEntry.layers[0];
+const defaultSize = { width: _layer0.width, height: _layer0.height };
+const defaultIsometricHeight = _layer0.depth;
 
 @Model({
     attributes: {

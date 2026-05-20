@@ -5,7 +5,9 @@ import { ShapeRegistry } from '../shape-registry';
 
 const _computerEntry = ShapeRegistry['computer'];
 if (!_computerEntry) throw new Error('[nextrack] Built-in registry entry "computer" is missing at startup — check module initialization order');
-const { defaultSize, defaultIsometricHeight } = _computerEntry;
+const _layer0 = _computerEntry.layers[0];
+const defaultSize = { width: _layer0.width, height: _layer0.height };
+const defaultIsometricHeight = _layer0.depth;
 
 @Model({
     attributes: {

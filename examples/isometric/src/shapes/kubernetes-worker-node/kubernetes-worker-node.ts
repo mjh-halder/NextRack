@@ -5,7 +5,9 @@ import { ShapeRegistry } from '../shape-registry';
 
 const _kubeNodeEntry = ShapeRegistry['kubernetes-worker-node'];
 if (!_kubeNodeEntry) throw new Error('[nextrack] Built-in registry entry "kubernetes-worker-node" is missing at startup — check module initialization order');
-const { defaultSize, defaultIsometricHeight } = _kubeNodeEntry;
+const _layer0 = _kubeNodeEntry.layers[0];
+const defaultSize = { width: _layer0.width, height: _layer0.height };
+const defaultIsometricHeight = _layer0.depth;
 
 @Model({
     attributes: {
