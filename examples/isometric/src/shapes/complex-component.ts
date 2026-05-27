@@ -8,7 +8,7 @@
  *
  * Geometry is derived at render time by reusing the existing IsometricShape
  * subclasses as off-graph proxies — their path-generator methods
- * (cuboidFrontPath, topHexPath, svgSideFacesPath, etc.) produce the exact
+ * (rectangleFrontPath, topHexPath, svgSideFacesPath, etc.) produce the exact
  * same SVG paths you see in the Shape Designer.
  *
  * Rendering is imperative: the view listens for layer/size/isometricHeight
@@ -20,44 +20,41 @@
 import { dia, elementTools } from '@joint/core';
 import IsometricShape, {
     View,
-    CuboidShape,
-    CylinderShape,
+    RectangleShape,
+    CircleShape,
     CONNECT_KEY,
 } from './isometric-shape';
-import { Computer } from './computer/computer';     // proxy for cuboid baseShape
-import { Database } from './database/database';     // proxy for cylinder baseShape
-import { Pyramid } from './pyramid/pyramid';
+import { Rectangle } from './rectangle/rectangle';           // proxy for rectangle baseShape
+import { Circle } from './circle/circle';     // proxy for circle baseShape
 import { Octagon } from './octagon/octagon';
-import { KubernetesWorkerNode } from './kubernetes-worker-node/kubernetes-worker-node';
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape';
 import { ShapeLayer, IconEntry } from './shape-registry';
 import { CONNECT_TOOL_PRESET } from '../tools';
-import { GRID_SIZE } from '../theme';
+import { GRID_SIZE, SHAPE_CELL_SIZE } from '../theme';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// ── Default palette (matches the SVG template defaults of existing shapes) ───
+// Fill/stroke resolution funnels through utils.resolveStyleColors so the
+// SD's ComplexComponent render path uses the same dark/light rules as the
+// CD's direct-instance path (utils.applyShapeStyle). See ADR-0004.
 
-const STROKE     = '#333';
-const FILL_TOP   = '#a8a8a8';
-const FILL_SIDE  = '#c6c6c6';
-const FILL_FRONT = '#e0e0e0';
+import { resolveStyleColors, icon2DHref, buildCompositeIconSvg } from '../utils';
+import { resolveIconRender } from '../icon-resolver';
+import { isDarkMode } from '../svg-inventory';
 
 function fillFor(style: ShapeLayer['style'], kind: 'top' | 'side' | 'front'): string {
-    if (kind === 'top'   && style.topColor)   return style.topColor;
-    if (kind === 'side'  && style.sideColor)  return style.sideColor;
-    if (kind === 'front' && style.frontColor) return style.frontColor;
-    return kind === 'top' ? FILL_TOP : kind === 'side' ? FILL_SIDE : FILL_FRONT;
+    const c = resolveStyleColors(style);
+    return kind === 'top' ? c.top : kind === 'side' ? c.side : c.front;
 }
 
 function strokeFor(style: ShapeLayer['style']): string {
-    return style.strokeColor || STROKE;
+    return resolveStyleColors(style).stroke;
 }
 
 // ── Face descriptors ─────────────────────────────────────────────────────────
 
 interface FaceDesc {
-    element: 'path' | 'polygon' | 'ellipse';
+    element: 'path' | 'polygon' | 'ellipse' | 'rect';
     attrs: Record<string, string | number>;
 }
 
@@ -75,15 +72,17 @@ function makeProxy(layer: ShapeLayer): IsometricShape {
     if (isSvg) {
         proxy = new SvgPolygonShape();
         (proxy as SvgPolygonShape).set('normalizedVerts', layer.normalizedVerts!);
+        if (layer.lines && layer.lines.length > 0) {
+            (proxy as SvgPolygonShape).set('lines', layer.lines);
+        }
     } else {
         // Matches the mapping used by `createComplexLayers` for consistency.
         switch (layer.baseShape) {
-            case 'cylinder':  proxy = new Database();       break;
-            case 'pyramid':   proxy = new Pyramid();        break;
+            case 'circle':  proxy = new Circle();       break;
             case 'octagon':   proxy = new Octagon();        break;
             case 'hexahedron':
-            case 'cuboid':
-            default:          proxy = new Computer();       break;
+            case 'rectangle':
+            default:          proxy = new Rectangle();         break;
         }
     }
     proxy.resize(layer.width, layer.height);
@@ -93,7 +92,6 @@ function makeProxy(layer: ShapeLayer): IsometricShape {
     if (layer.chamferStart) proxy.set('chamferStart', layer.chamferStart);
     if (layer.chamferBottomSize) proxy.set('chamferBottomSize', layer.chamferBottomSize);
     if (layer.chamferBottomStart) proxy.set('chamferBottomStart', layer.chamferBottomStart);
-    if (layer.taper) proxy.set('taper', layer.taper);
     if (layer.twist) proxy.set('twist', layer.twist);
     if (layer.scaleTopX !== undefined && layer.scaleTopX !== 1) proxy.set('scaleTopX', layer.scaleTopX);
     if (layer.scaleTopY !== undefined && layer.scaleTopY !== 1) proxy.set('scaleTopY', layer.scaleTopY);
@@ -108,18 +106,16 @@ function isoFacesForLayer(layer: ShapeLayer): FaceDesc[] {
     const stroke = strokeFor(layer.style);
     const commonStroke = { stroke, 'stroke-linejoin': 'round' };
 
-    if (proxy instanceof KubernetesWorkerNode) {
-        return [
-            { element: 'path',    attrs: { d: proxy.frontPath(),        fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path',    attrs: { d: proxy.sidePath(),         fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'polygon', attrs: { points: proxy.topOctagonPoints(), fill: fillFor(layer.style, 'top'), ...commonStroke } },
-        ];
-    }
     if (proxy instanceof SvgPolygonShape) {
-        return [
+        const faces: FaceDesc[] = [
             { element: 'path', attrs: { d: proxy.svgSideFacesPath(), fill: fillFor(layer.style, 'side'), ...commonStroke } },
             { element: 'path', attrs: { d: proxy.svgTopPath(),       fill: fillFor(layer.style, 'top'),  ...commonStroke } },
         ];
+        const linesD = proxy.linesPath();
+        if (linesD) {
+            faces.push({ element: 'path', attrs: { d: linesD, fill: 'none', stroke, 'stroke-width': 1.5, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' } });
+        }
+        return faces;
     }
     if (proxy instanceof Octagon) {
         return [
@@ -135,24 +131,18 @@ function isoFacesForLayer(layer: ShapeLayer): FaceDesc[] {
             { element: 'path', attrs: { d: proxy.topOctagonPath(), fill: fillFor(layer.style, 'top'), ...commonStroke } },
         ];
     }
-    if (proxy instanceof Pyramid) {
+    if (proxy instanceof RectangleShape) {
         return [
-            { element: 'polygon', attrs: { points: proxy.frontFacePoints(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'polygon', attrs: { points: proxy.sideFacePoints(),  fill: fillFor(layer.style, 'side'),  ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.baseRectanglePathIso(),  fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.rectangleFrontPath(),    fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.rectangleSidePath(),     fill: fillFor(layer.style, 'side'),  ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.rectangleCornerV1Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.rectangleCornerV2Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.rectangleCornerV3Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
+            { element: 'path', attrs: { d: proxy.topRectanglePath(),      fill: fillFor(layer.style, 'top'),   ...commonStroke } },
         ];
     }
-    if (proxy instanceof CuboidShape) {
-        return [
-            { element: 'path', attrs: { d: proxy.baseCuboidPath(),     fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path', attrs: { d: proxy.cuboidFrontPath(),    fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path', attrs: { d: proxy.cuboidSidePath(),     fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path', attrs: { d: proxy.cuboidCornerV1Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path', attrs: { d: proxy.cuboidCornerV2Path(), fill: fillFor(layer.style, 'side'),  ...commonStroke } },
-            { element: 'path', attrs: { d: proxy.cuboidCornerV3Path(), fill: fillFor(layer.style, 'front'), ...commonStroke } },
-            { element: 'path', attrs: { d: proxy.topCuboidPath(),      fill: fillFor(layer.style, 'top'),   ...commonStroke } },
-        ];
-    }
-    if (proxy instanceof CylinderShape) {
+    if (proxy instanceof CircleShape) {
         const { width: w, height: h } = proxy.size();
         const iH = proxy.isometricHeight;
         return [
@@ -164,53 +154,47 @@ function isoFacesForLayer(layer: ShapeLayer): FaceDesc[] {
     return [];
 }
 
-/** 2D footprint for one layer (used in the System Designer's 2D view). */
-function twoDimFaceForLayer(layer: ShapeLayer): FaceDesc | null {
-    const proxy  = makeProxy(layer);
-    const stroke = strokeFor(layer.style);
-    const common = { stroke, 'stroke-linejoin': 'round' };
-    const fill   = fillFor(layer.style, 'front');
-
-    if (proxy instanceof KubernetesWorkerNode) {
-        return { element: 'polygon', attrs: { points: proxy.baseOctagonPoints(), fill, ...common } };
-    }
-    if (proxy instanceof CylinderShape) {
-        const { width: w, height: h } = proxy.size();
-        return { element: 'ellipse', attrs: { cx: w / 2, cy: h / 2, rx: w / 2, ry: h / 2, fill, ...common } };
-    }
-    if (proxy instanceof Pyramid) {
-        return { element: 'polygon', attrs: { points: proxy.baseDiamondPoints(), fill, ...common } };
-    }
-    if (proxy instanceof SvgPolygonShape) {
-        return { element: 'path', attrs: { d: proxy.svgBasePath(), fill, ...common } };
-    }
-    if (proxy instanceof Octagon) {
-        return { element: 'path', attrs: { d: proxy.baseOctagonPath(), fill, ...common } };
-    }
-    if (proxy instanceof CuboidShape) {
-        return { element: 'path', attrs: { d: proxy.baseCuboidPath(), fill, ...common } };
-    }
-    return null;
-}
-
 // ── Layer positioning ────────────────────────────────────────────────────────
 //
 // Each layer's local origin (top-left of its own bbox) sits at an offset from
-// the ComplexComponent's origin. Matches the math in `createComplexLayers`.
-function layerOriginIso(layer: ShapeLayer, modelW: number, modelH: number): { x: number; y: number } {
-    const cx = modelW / 2;
-    const cy = modelH / 2;
-    return {
-        x: cx - layer.width  / 2 + layer.offsetX - layer.baseElevation,
-        y: cy - layer.height / 2 + layer.offsetY - layer.baseElevation,
-    };
+// the ComplexComponent's origin.
+//
+// When layers are arranged asymmetrically (e.g. layer 0 at offsetX=0, layer 1
+// at offsetX=40), the union bbox is wider than any single layer and its
+// centre sits OFF the shape origin. Without compensating, iso rendering
+// shifts the layer union to the right of the element bbox — which the user
+// perceives as the 2D icon being "off-centre" compared to iso. Subtract the
+// bbox centre (in shape-coords) so the layer union is centred inside the
+// element's bbox regardless of how lopsided the offsets are.
+function shapeBboxCentre(layers: readonly ShapeLayer[]): { x: number; y: number } {
+    const floors = layers.filter(l => l.baseElevation === 0);
+    const considered = floors.length > 0 ? floors : layers;
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    for (const l of considered) {
+        if (l.offsetX - l.width  / 2 < minX) minX = l.offsetX - l.width  / 2;
+        if (l.offsetX + l.width  / 2 > maxX) maxX = l.offsetX + l.width  / 2;
+        if (l.offsetY - l.height / 2 < minY) minY = l.offsetY - l.height / 2;
+        if (l.offsetY + l.height / 2 > maxY) maxY = l.offsetY + l.height / 2;
+    }
+    if (!Number.isFinite(minX)) return { x: 0, y: 0 };
+    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
 }
-function layerOrigin2D(layer: ShapeLayer, modelW: number, modelH: number): { x: number; y: number } {
+
+function layerOriginIso(layer: ShapeLayer, modelW: number, modelH: number, layers: readonly ShapeLayer[]): { x: number; y: number } {
     const cx = modelW / 2;
     const cy = modelH / 2;
+    // Single-layer shapes preserve user-set offset as-is (typing offsetX in
+    // the inspector means "shift this single layer N px"). Multi-layer
+    // shapes subtract the union-bbox centre so an asymmetric arrangement
+    // still ends up centred inside the element bbox — without this, layer 1
+    // at offsetX=40 + layer 0 at offsetX=0 would render with the cluster
+    // skewed right of the element centre and the SD 2D icon (at bbox
+    // centre) would appear offset from the iso main.
+    const bbox = layers.length > 1 ? shapeBboxCentre(layers) : { x: 0, y: 0 };
     return {
-        x: cx - layer.width  / 2 + layer.offsetX,
-        y: cy - layer.height / 2 + layer.offsetY,
+        x: cx - layer.width  / 2 + (layer.offsetX - bbox.x) - layer.baseElevation,
+        y: cy - layer.height / 2 + (layer.offsetY - bbox.y) - layer.baseElevation,
     };
 }
 
@@ -262,6 +246,7 @@ export class ComplexComponent extends IsometricShape {
             iconSize: GRID_SIZE,
             iconFace: 'top',
             iconLayerIndex: 0,
+            simplified2D: false,
             attrs: {
                 hitArea: {
                     width: 'calc(w)', height: 'calc(h)',
@@ -269,16 +254,20 @@ export class ComplexComponent extends IsometricShape {
                     magnet: true,
                 },
                 label: {
-                    textAnchor: 'start',
-                    textVerticalAnchor: 'middle',
+                    // Default position: centred horizontally, just below the
+                    // component footprint. `textVerticalAnchor: top` makes y
+                    // the top of the text so the gap below the shape stays
+                    // visually consistent regardless of fontSize.
+                    textAnchor: 'middle',
+                    textVerticalAnchor: 'top',
                     fontFamily: 'sans-serif',
                     fontSize: 11,
                     fill: '#333',
                     stroke: '#fff',
                     strokeWidth: 3,
                     paintOrder: 'stroke',
-                    x: 'calc(w + 10)',
-                    y: 'calc(h + 10)',
+                    x: 'calc(w/2)',
+                    y: 'calc(h + 6)',
                     text: '',
                 },
             },
@@ -291,41 +280,79 @@ export class ComplexComponent extends IsometricShape {
             [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
         };
     }
+
 }
 
 // ── View ─────────────────────────────────────────────────────────────────────
 
 export class ComplexComponentView extends dia.ElementView {
 
+    private onThemeChange = (): void => { this.rebuildLayers(); };
+
     override render(): this {
         super.render();
         this.listenTo(
             this.model,
-            'change:layers change:size change:isometricHeight',
+            'change:layers change:size change:isometricHeight change:simplified2D change:viewMode',
             this.rebuildLayers,
         );
+        // Theme-aware fills/strokes baked into face DOM ⇒ rebuild on toggle.
+        // Same goes for the central color-derivation settings: vendor
+        // presets resolve through createThemeColor at render time, so a
+        // settings tweak needs a rebuild too.
+        window.addEventListener('nr-theme-change', this.onThemeChange);
+        window.addEventListener('nr-color-derivation-change', this.onThemeChange);
+        window.addEventListener('nr-icon-rendering-change', this.onThemeChange);
         this.rebuildLayers();
         return this;
     }
 
-    /** Replace the children of `layers2D` and `layersISO` with fresh DOM. */
+    override remove(): this {
+        window.removeEventListener('nr-theme-change', this.onThemeChange);
+        window.removeEventListener('nr-color-derivation-change', this.onThemeChange);
+        window.removeEventListener('nr-icon-rendering-change', this.onThemeChange);
+        return super.remove();
+    }
+
+    /**
+     * Repaint `layers2D` and `layersISO` based on the current `viewMode`. Only
+     * the group for the active view gets DOM children — the other one is
+     * emptied. This is stronger than relying on `display:none` toggling because
+     * an emptied group has no faces, no icons, no hit-area, so a stale "ghost"
+     * of the previous view can never show up via hover, port lookup or
+     * selection-outline geometry.
+     */
     private rebuildLayers(): void {
         const layers = (this.model.get('layers') as ShapeLayer[] | undefined) ?? [];
         const iso2d = this.findNode('layers2D') as SVGGElement | null;
         const isoG  = this.findNode('layersISO') as SVGGElement | null;
         if (iso2d) iso2d.replaceChildren();
         if (isoG)  isoG.replaceChildren();
-        if (layers.length === 0) return;
 
+        const isIso = (this.model.get('viewMode') as string) !== '2d';
+        // Belt-and-braces: empty the inactive group AND hide it + block pointer
+        // events, so nothing in the secondary layer's bbox area can trigger
+        // hover, ports or selection — even if JointJS's attr-pipeline display
+        // toggle hasn't been applied yet.
+        if (iso2d) {
+            iso2d.style.display = isIso ? 'none' : '';
+            iso2d.style.pointerEvents = isIso ? 'none' : '';
+        }
+        if (isoG) {
+            isoG.style.display = isIso ? '' : 'none';
+            isoG.style.pointerEvents = isIso ? '' : 'none';
+        }
+
+        if (layers.length === 0) return;
         const { width: modelW, height: modelH } = this.model.size();
 
-        // ISO group: Layer 0 (main) painted FIRST (behind), additional layers stacked
-        // on top in array order. Icon is appended LAST inside the chosen layer's
-        // group so it always paints above that layer's faces.
-        if (isoG) {
+        if (isIso && isoG) {
+            // ISO group: Layer 0 (main) painted FIRST (behind), additional layers stacked
+            // on top in array order. Icon is appended LAST inside the chosen layer's
+            // group so it always paints above that layer's faces.
             for (let i = 0; i < layers.length; i++) {
                 const layer = layers[i];
-                const { x, y } = layerOriginIso(layer, modelW, modelH);
+                const { x, y } = layerOriginIso(layer, modelW, modelH, layers);
                 const g = document.createElementNS(SVG_NS, 'g');
                 g.setAttribute('transform', `translate(${x} ${y})`);
                 for (const face of isoFacesForLayer(layer)) appendFace(g, face);
@@ -334,21 +361,89 @@ export class ComplexComponentView extends dia.ElementView {
             }
         }
 
-        // 2D group: same forward order — main at the bottom, additional layers above.
-        if (iso2d) {
-            for (let i = 0; i < layers.length; i++) {
-                const layer = layers[i];
-                const face = twoDimFaceForLayer(layer);
-                if (!face) continue;
-                const { x, y } = layerOrigin2D(layer, modelW, modelH);
-                const g = document.createElementNS(SVG_NS, 'g');
-                g.setAttribute('transform', `translate(${x} ${y})`);
-                appendFace(g, face);
-                appendLayerIcons(g, layer, false);
-                iso2d.appendChild(g);
+        if (!isIso && iso2d) {
+            // 2D: single 40×40 cell with the main icon, centred on the
+            // element. No layer offset — even when secondary layers' offsets
+            // skew the bbox to one side, the icon stays in the dead centre
+            // of the element's bbox. This matches CD's 2D preview where every
+            // layer stacks at canvas centre with all offsets ignored.
+            const SIZE = SHAPE_CELL_SIZE;
+            const mainIcon = findMainIcon(layers);
+            const x = (modelW - SIZE) / 2;
+            const y = (modelH - SIZE) / 2;
+            const g = document.createElementNS(SVG_NS, 'g');
+            g.setAttribute('transform', `translate(${x} ${y})`);
+            const href2D = mainIcon ? icon2DHref(mainIcon) : '';
+            if (href2D) {
+                const img = document.createElementNS(SVG_NS, 'image');
+                img.setAttribute('href', href2D);
+                img.setAttribute('x', '0');
+                img.setAttribute('y', '0');
+                img.setAttribute('width', String(SIZE));
+                img.setAttribute('height', String(SIZE));
+                img.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+                g.appendChild(img);
             }
+            iso2d.appendChild(g);
         }
     }
+}
+
+
+// Find the single "main" IconEntry across all layers — either the explicit
+// isMain flag, or the first icon if none is flagged.
+function findMainIcon(layers: ShapeLayer[]): IconEntry | null {
+    for (const l of layers) {
+        for (const ie of (l.icons ?? [])) if (ie.isMain) return ie;
+    }
+    for (const l of layers) {
+        for (const ie of (l.icons ?? [])) if (ie.href) return ie;
+    }
+    return null;
+}
+
+// Find which layer currently owns the shape-wide main icon. Falls back to
+// layer 0 when no `isMain` flag is set anywhere.
+function findMainLayer(layers: ShapeLayer[]): ShapeLayer | undefined {
+    return layers.find(l => l.icons?.some(e => e.isMain)) ?? layers[0];
+}
+
+/**
+ * Build the IconEntry's composite SVG live, using the current theme. Mirrors
+ * what CD's `applyIconToCurrentShape` does — both paths funnel through
+ * `resolveIconRender` + `buildCompositeIconSvg`, so the SD's rendering of an
+ * AWS-monochrome (or any theme-dependent) icon stays in sync with whatever
+ * the theme is RIGHT NOW. The persisted `ie.href` is treated as a save-time
+ * snapshot, not the live render source.
+ */
+function liveIconHref(ie: IconEntry, canvasPx: number): string {
+    const mode: 'light' | 'dark' = isDarkMode() ? 'dark' : 'light';
+    const decision = resolveIconRender(ie, 'isoFace', mode);
+    if (!decision) return ie.href ?? '';
+    let glyphSvg = decision.glyphSvg;
+    if (glyphSvg) {
+        const defaultGlyphColor = mode === 'dark' ? '#ffffff' : '#000000';
+        glyphSvg = glyphSvg.replace(/currentColor/g, defaultGlyphColor);
+    }
+    const iconColor = decision.glyphTint === 'original' ? null : decision.glyphTint;
+    const bg = decision.background;
+    const iconPx = ie.size * GRID_SIZE;
+    const bgPx = ie.bgSize * GRID_SIZE;
+    const composite = buildCompositeIconSvg(
+        glyphSvg || null,
+        bg?.color ?? null,
+        (bg?.shape ?? ie.bgShape),
+        false,
+        bg?.radius ?? ie.bgRadius,
+        bg?.chamfer ?? ie.bgChamfer,
+        'normal',
+        false,
+        canvasPx, iconPx, bgPx,
+        iconColor,
+        ie.iconOpacity ?? 100,
+        bg?.opacity ?? 100,
+    );
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(composite)}`;
 }
 
 /**
@@ -363,40 +458,46 @@ export class ComplexComponentView extends dia.ElementView {
  */
 function appendIcon(
     group: SVGGElement,
-    href: string,
+    ie: IconEntry,
     iconSize: number,
     iconFace: 'top' | 'front' | 'side',
     layer: ShapeLayer,
     isIso: boolean,
-    themeInvert = false,
 ): void {
     const el = document.createElementNS(SVG_NS, 'image');
-    el.setAttribute('href', href);
-    if (themeInvert) el.classList.add('nr-icon-theme-invert');
+    el.setAttribute('href', liveIconHref(ie, iconSize));
     el.setAttribute('width', String(iconSize));
     el.setAttribute('height', String(iconSize));
     el.setAttribute('preserveAspectRatio', 'xMidYMid meet');
 
+    // Per-entry offsets are in grid units; scale into pixels. Multiple icons
+    // on the same face would otherwise overlap exactly (centered) and the
+    // user would see only the top of the z-stack. Skew matches the CD
+    // canvas's composite-SVG rendering for visual parity.
+    const ox = (ie.offsetX ?? 0) * GRID_SIZE;
+    const oy = (ie.offsetY ?? 0) * GRID_SIZE;
+    const skTx = (ie.skewX || ie.skewY) ? ` skewX(${ie.skewX}) skewY(${ie.skewY})` : '';
+
     if (isIso && iconFace === 'front') {
-        const localX = (layer.width - iconSize) / 2;
-        const localY = (layer.depth - iconSize) / 2;
-        const cx = localX + iconSize / 2;
-        const cy = localY + iconSize / 2;
+        const localX = (layer.width - iconSize) / 2 + ox;
+        const localY = (layer.depth - iconSize) / 2 + oy;
         el.setAttribute('x', String(localX));
         el.setAttribute('y', String(localY));
-        el.setAttribute('transform', `matrix(1,0,-1,-1,0,${layer.height}) rotate(180,${cx},${cy})`);
+        // Non-mirroring map (det=+1) of the image rect onto the front face.
+        el.setAttribute('transform', `matrix(1,0,1,1,${-layer.depth},${layer.height - layer.depth})${skTx}`);
     } else if (isIso && iconFace === 'side') {
-        const localX = (layer.height - iconSize) / 2;
-        const localY = (layer.depth - iconSize) / 2;
+        const localX = (layer.height - iconSize) / 2 + ox;
+        const localY = (layer.depth - iconSize) / 2 + oy;
         const cx = localX + iconSize / 2;
         const cy = localY + iconSize / 2;
         el.setAttribute('x', String(localX));
         el.setAttribute('y', String(localY));
-        el.setAttribute('transform', `matrix(0,1,-1,-1,${layer.width},0) rotate(180,${cx},${cy})`);
+        el.setAttribute('transform', `matrix(0,1,-1,-1,${layer.width},0) rotate(180,${cx},${cy})${skTx}`);
     } else {
         const lift = isIso ? layer.depth : 0;
-        el.setAttribute('x', String((layer.width  - iconSize) / 2 - lift));
-        el.setAttribute('y', String((layer.height - iconSize) / 2 - lift));
+        el.setAttribute('x', String((layer.width  - iconSize) / 2 - lift + ox));
+        el.setAttribute('y', String((layer.height - iconSize) / 2 - lift + oy));
+        if (skTx) el.setAttribute('transform', skTx.trimStart());
     }
     group.appendChild(el);
 }
@@ -404,15 +505,21 @@ function appendIcon(
 function appendLayerIcons(g: SVGGElement, layer: ShapeLayer, isIso: boolean): void {
     const icons = layer.icons;
     if (!icons || icons.length === 0) return;
-    for (const ie of icons) {
-        if (!ie.href) continue;
+    // Iterate in reverse so icons higher in the entry list (lower index)
+    // appear on TOP visually — the icon list in the Component Designer is
+    // ordered top-to-bottom, and `applyIconToCurrentShape` uses the same
+    // reverse iteration to keep CD and SD canvases consistent.
+    for (let i = icons.length - 1; i >= 0; i--) {
+        const ie = icons[i];
+        // We previously skipped entries with no `ie.href`; now the composite
+        // is rebuilt live, so the only meaningful skip is "no icon and no bg".
+        if (!ie.iconId && !ie.bgEnabled) continue;
         const canvasPx = Math.max(ie.size, ie.bgSize) * GRID_SIZE;
-        const needsThemeInvert = !ie.bgEnabled && !(ie as any).iconColor;
         if (isIso) {
-            appendIcon(g, ie.href, canvasPx, ie.face, layer, true, needsThemeInvert);
+            appendIcon(g, ie, canvasPx, ie.face, layer, true);
         } else {
             const show2D = icons.length === 1 || ie.isMain;
-            if (show2D) appendIcon(g, ie.href, canvasPx, 'top', layer, false, needsThemeInvert);
+            if (show2D) appendIcon(g, ie, canvasPx, 'top', layer, false);
         }
     }
 }

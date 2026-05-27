@@ -687,6 +687,22 @@ html, body {
     user-select: none;
 }
 
+/* Helper text explaining what the 2D pane renders. */
+.cd2-pane-hint {
+    position: absolute;
+    top: 6px;
+    left: 36px;
+    font-family: var(--cds-helper-text-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: var(--cds-helper-text-01-font-size, 0.75rem);
+    color: var(--cds-text-helper, #6f6f6f);
+    pointer-events: none;
+    z-index: 1;
+    user-select: none;
+}
+.cd2-pane-hint strong {
+    font-weight: 600;
+}
+
 /* View toggle hidden — dual-view replaces it */
 #cd2-view-toggle-container {
     position: absolute;
@@ -1065,6 +1081,20 @@ html, body {
     height: 28px;
     width: 28px;
     font-size: 0.875rem;
+}
+
+/* Read-only stepper row — used for Dimension Y when the base shape forces a
+   square footprint (Y is auto-synced to X). Disables all interaction without
+   hiding the row, so the user still sees the value. */
+.nr-sd-number-row--readonly .nr-ad__number-btn,
+.nr-sd-number-row--readonly .nr-stepper-reset {
+    pointer-events: none;
+    opacity: 0.4;
+}
+.nr-sd-number-row--readonly .nr-sd-number-display {
+    pointer-events: none;
+    cursor: default;
+    opacity: 0.6;
 }
 
 .nr-stepper-reset {
@@ -2538,6 +2568,13 @@ html, body {
     filter: brightness(0);
 }
 
+/* Vendor / uploaded icons keep their original colors — see .nr-tree-icon
+ * counterpart for rationale. */
+.nr-palette-item-icon.nr-icon-color svg,
+.nr-palette-item-icon.nr-icon-color img {
+    filter: none;
+}
+
 .cds--g100 .nr-palette-item-icon {
     color: var(--cds-icon-primary, #f4f4f4);
 }
@@ -2545,6 +2582,11 @@ html, body {
 .cds--g100 .nr-palette-item-icon svg,
 .cds--g100 .nr-palette-item-icon img {
     filter: brightness(0) invert(1);
+}
+
+.cds--g100 .nr-palette-item-icon.nr-icon-color svg,
+.cds--g100 .nr-palette-item-icon.nr-icon-color img {
+    filter: none;
 }
 
 
@@ -2595,8 +2637,10 @@ html, body {
 
 #cd2-palette .nr-comp-tree__row--selected {
     background: var(--cds-layer-01, #f4f4f4);
-    border-left: 3px solid var(--cds-border-interactive, #0f62fe);
-    padding-left: 29px;
+    /* inset box-shadow draws the interactive accent without taking layout
+       space, so the label stays at its original indent (32px for top-level
+       leaves, 48px for leaves inside a user folder). */
+    box-shadow: inset 3px 0 0 0 var(--cds-border-interactive, #0f62fe);
 }
 #cd2-palette .nr-comp-tree__row--selected:hover {
     background: var(--cds-layer-hover-01, #e8e8e8);
@@ -2610,6 +2654,22 @@ html, body {
 
 .nr-comp-tree__row--leaf {
     padding-left: 32px;
+}
+
+/* "User Created" hierarchy — indent user folders one level, and indent
+   leaves inside those user folders one level deeper still. */
+.nr-comp-tree__node--folder[data-folder-kind="user-generated"]
+    > .nr-comp-tree__children
+    > .nr-comp-tree__node--folder[data-folder-kind="user"]
+    > .nr-comp-tree__row {
+    padding-left: 24px;
+}
+
+.nr-comp-tree__node--folder[data-folder-kind="user"]
+    > .nr-comp-tree__children
+    > .nr-comp-tree__node--leaf
+    > .nr-comp-tree__row--leaf {
+    padding-left: 48px;
 }
 
 .nr-comp-tree__caret {
@@ -3029,7 +3089,7 @@ html, body {
 .nr-palette-search-input {
     flex: 1;
     min-width: 0;
-    padding: 0 20px 0 0;
+    padding: 0;
     background: transparent;
     border: 0;
     outline: 0;
@@ -3039,14 +3099,13 @@ html, body {
     color: var(--cds-text-primary, #161616);
 }
 
-/* Push the native clear-button (×) flush to the right edge. */
+/* Native clear-button (×) sits inline at the right edge of the input. */
 .nr-palette-search-input::-webkit-search-cancel-button {
     -webkit-appearance: none;
     appearance: none;
     width: 12px;
     height: 12px;
-    position: absolute;
-    right: 16px;
+    margin-left: 6px;
     cursor: pointer;
     background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='%23525252'%3E%3Cpath d='M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z'/%3E%3C/svg%3E") center/contain no-repeat;
 }
@@ -3217,6 +3276,12 @@ html, body {
     /* keep the selected highlight unchanged — only hover is suppressed */
 }
 
+/* Zone rows: align with Component-Designer folder rows. Sits slightly further
+   left than the regular tree-row padding so the caret hugs the panel edge. */
+.nr-tree-zone > .nr-tree-row {
+    padding-inline-start: 4px;
+}
+
 /* Level-1 indent: children inside a zone */
 .nr-tree-children .nr-tree-row {
     padding-inline-start: 26px; /* 8px base + 16px toggle + 2px extra nesting hint */
@@ -3301,17 +3366,40 @@ html, body {
     color: var(--cds-icon-secondary, #c6c6c6);
 }
 
-/* Toggle triangle: right-pointing by default (collapsed), rotates to down (expanded) */
+/* Toggle triangle: same 16×16 wrapper as the CD component-tree caret so the
+   two trees line up. The SVG is forced to 12×12 (Carbon icons ship as 16×16
+   intrinsic) to match `.nr-comp-tree__caret svg`. */
 .nr-tree-toggle {
-    display: flex;
-    align-items: center;
+    width: 16px;
+    height: 16px;
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     color: var(--cds-icon-primary, #161616);
 }
 
 .nr-tree-toggle svg {
+    width: 12px;
+    height: 12px;
     display: block;
+    fill: currentColor;
     transition: transform 100ms ease;
+}
+
+/* Empty zone (no children): drop the caret slot entirely and line the row up
+   with top-level component leaves (16px padding-left) — same visual indent as
+   a component that sits outside any zone. */
+.nr-tree-zone--empty > .nr-tree-row {
+    padding-inline-start: 16px;
+}
+
+.nr-tree-zone--empty > .nr-tree-row > .nr-tree-toggle {
+    display: none;
+}
+
+.nr-tree-toggle.nr-tree-toggle--empty {
+    cursor: default;
 }
 
 .nr-tree-zone[aria-expanded='true'] > .nr-tree-row .nr-tree-toggle svg {
@@ -3329,12 +3417,28 @@ html, body {
     color: var(--cds-icon-primary, #161616);
 }
 
+/* Zone-icon in a zone row matches CD's folder-icon size (16×16) so the
+   two trees align column-by-column. Leaf shape-icons keep their 14×14. */
+.nr-tree-zone > .nr-tree-row > .nr-tree-icon {
+    width: 16px;
+    height: 16px;
+}
+
 .nr-tree-icon svg,
 .nr-tree-icon img {
     width: 100%;
     height: 100%;
     display: block;
     filter: brightness(0);
+}
+
+/* Vendor (AWS / Azure / GCP) and uploaded icons opt out of the brightness(0)
+ * tint via .nr-icon-color so their original colors show through. The tree is
+ * a recognition surface — Azure/GCP branded icons are designed for color and
+ * become unreadable when forced to silhouette. */
+.nr-tree-icon.nr-icon-color svg,
+.nr-tree-icon.nr-icon-color img {
+    filter: none;
 }
 
 /* Dark mode: invert mono icons so they remain visible on dark backgrounds. */
@@ -3345,6 +3449,11 @@ html, body {
 .cds--g100 .nr-tree-icon svg,
 .cds--g100 .nr-tree-icon img {
     filter: brightness(0) invert(1);
+}
+
+.cds--g100 .nr-tree-icon.nr-icon-color svg,
+.cds--g100 .nr-tree-icon.nr-icon-color img {
+    filter: none;
 }
 
 
@@ -3796,7 +3905,10 @@ body:has(#inspector:not(.inspector-hidden)) #layout-bar {
     color: var(--cds-text-primary, #f4f4f4);
     filter: brightness(0) invert(1);
 }
-.nr-icon-entry-preview.nr-icon-entry-preview--color svg {
+.nr-icon-entry-preview.nr-icon-color svg {
+    filter: none;
+}
+.cds--g100 .nr-icon-entry-preview.nr-icon-color svg {
     filter: none;
 }
 .nr-icon-entry-name-wrap {
@@ -4408,28 +4520,18 @@ body:has(#inspector:not(.inspector-hidden)) #layout-bar {
 .cds--g100 .joint-element [fill="#c6c6c6"] { fill: #393939; }
 .cds--g100 .joint-element [fill="#a8a8a8"] { fill: #6f6f6f; }
 
-/* Dark mode — shape edge strokes: base fallback */
+/* Dark mode — shape edge strokes: rewrite the template default '#333' only.
+   Per-shape user strokes (e.g. layer.style.strokeColorDark) and theme presets
+   carry literal hex values and so do NOT match this attribute selector — they
+   keep the user's color. */
 .cds--g100 .joint-element [stroke="#333"]  { stroke: #161616; }
 
-/* Dark mode — outer faces */
-.cds--g100 .joint-element [joint-selector="front"],
-.cds--g100 .joint-element [joint-selector="side"],
-.cds--g100 .joint-element [joint-selector="top"],
-.cds--g100 .joint-element [joint-selector="base"]:not([fill="transparent"]),
-.cds--g100 .joint-element [joint-selector="bottomLeft"],
-.cds--g100 .joint-element [joint-selector="bottomRight"],
-.cds--g100 .joint-element [joint-selector="lowerRight"],
-.cds--g100 .joint-element [joint-selector="upperRight"],
-.cds--g100 .joint-element [joint-selector="frontLeft"],
-.cds--g100 .joint-element [joint-selector="frontBottom"],
-.cds--g100 .joint-element [joint-selector="frontRight"] { stroke: #161616; }
-
-/* Dark mode — inner corner facets */
-.cds--g100 .joint-element [joint-selector^="cornerV"] { stroke: #161616; }
-
-/* Dark mode — invert Icon element images so black SVGs render white */
-.cds--g100 .joint-element [joint-selector="iconImage"],
-.cds--g100 .joint-element [joint-selector="iconFlat"] {
+/* Dark mode — invert Icon element images so black/line-art SVGs render white.
+ * Vendor-coloured SVGs (AWS / Azure / GCP / Uploaded) opt out via the
+ * `nr-icon-color` class set by the icon setters in inspector.ts and the
+ * Icon-Shape change handlers, matching the recognition-surface convention. */
+.cds--g100 .joint-element [joint-selector="iconImage"]:not(.nr-icon-color),
+.cds--g100 .joint-element [joint-selector="iconFlat"]:not(.nr-icon-color) {
     filter: brightness(0) invert(1);
 }
 
@@ -4459,6 +4561,16 @@ body:has(#inspector:not(.inspector-hidden)) #layout-bar {
 
 /* Grid lines */
 .cds--g100 .nr-grid-lines { stroke: #252525; }
+
+/* ── 2D view: icon-only rendering ────────────────────────────────────────────
+   In 2D the shape body (base / base2D) acts only as the hit area — the visual
+   reduces to the centered 40×40 topIcon2D. Keeps the element selectable and
+   draggable without showing a frame around the icon. */
+.nr-2d-icons-only .joint-element [joint-selector="base"],
+.nr-2d-icons-only .joint-element [joint-selector="base2D"] {
+    fill: transparent !important;
+    stroke: none !important;
+}
 
 /* ── SVG Footprint section (Component Designer, Complex Shape mode) ─────────── */
 .nr-svgfp-section {
@@ -4863,6 +4975,16 @@ body:has(#inspector:not(.inspector-hidden)) #layout-bar {
     fill: rgba(255, 255, 255, 0.7) !important;
 }
 
+/* While dragging a link, JointJS adds this class (via the `connecting`
+ * highlighter wired in system-designer.ts) to the magnet under the cursor
+ * once `validateConnection` accepts it. Match the post-drop dot colour
+ * (LINK_DOT_COLOR = #C6F08F) so the visual handoff is continuous. */
+.joint-port-body.nr-port-connecting,
+.cds--g100 .joint-port-body.nr-port-connecting {
+    opacity: 1 !important;
+    fill: #C6F08F !important;
+}
+
 /* ── Context menu (System Designer right-click) ──────────────────────────── */
 .nr-ctx-menu {
     position: fixed;
@@ -4932,6 +5054,21 @@ body:has(#inspector:not(.inspector-hidden)) #layout-bar {
 .nr-ctx-menu__label {
     flex: 1;
     white-space: nowrap;
+}
+
+.nr-ctx-menu__item--danger .nr-ctx-menu__label {
+    color: var(--cds-text-error, #da1e28);
+}
+
+/* Drop-target highlight for user-folder D&D in the Component Designer tree. */
+.nr-comp-tree__node--drop-target > .nr-comp-tree__row {
+    background: var(--cds-layer-selected-01, #e0e0e0);
+    outline: 1px dashed var(--cds-border-interactive, #0f62fe);
+    outline-offset: -1px;
+}
+
+.cds--g100 .nr-comp-tree__node--drop-target > .nr-comp-tree__row {
+    background: var(--cds-layer-selected-01, #393939);
 }
 
 /* ── Admin area ────────────────────────────────────────────────────────────── */
@@ -8339,11 +8476,34 @@ body:has(#inspector:not(.inspector-hidden)) .nr-et-btn {
 /* ── Vertex editor (component designer) ────────────────────────────────── */
 
 .nr-vertex-editor {
-    margin-top: 8px;
-    padding: 8px;
+    margin-top: 12px;
+    padding: 14px;
     border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
     border-radius: 2px;
     background: var(--cds-layer-02, #ffffff);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.nr-vertex-editor__body {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+.nr-vertex-editor__sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 96px;
+}
+.nr-vertex-editor__main {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
 }
 
 .nr-vertex-editor__svg {
@@ -8396,26 +8556,38 @@ body:has(#inspector:not(.inspector-hidden)) .nr-et-btn {
     stroke-dasharray: 3 2;
 }
 
+.nr-vertex-editor__line {
+    fill: none;
+    stroke: var(--cds-interactive, #0f62fe);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+.nr-vertex-editor__line--inactive {
+    stroke-opacity: 0.3;
+    stroke-dasharray: 3 2;
+}
+
+
 .nr-ve-path-toolbar {
     display: flex;
-    align-items: center;
+    flex-direction: column;
     gap: 4px;
-    margin-bottom: 6px;
 }
 
 .nr-ve-path-tabs {
     display: flex;
+    flex-direction: column;
     gap: 2px;
-    flex: 1;
     min-width: 0;
-    overflow-x: auto;
 }
 
 .nr-ve-path-tab {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 4px;
-    padding: 2px 8px;
+    padding: 4px 8px;
     font-size: 11px;
     border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
     border-radius: 2px;
@@ -8423,6 +8595,7 @@ body:has(#inspector:not(.inspector-hidden)) .nr-et-btn {
     color: var(--cds-text-secondary, #525252);
     cursor: pointer;
     white-space: nowrap;
+    text-align: left;
 }
 
 .nr-ve-path-tab--active {
@@ -8440,29 +8613,29 @@ body:has(#inspector:not(.inspector-hidden)) .nr-et-btn {
 .nr-ve-path-tab__del:hover { opacity: 1; }
 
 .nr-ve-path-add {
-    width: 24px;
-    height: 24px;
+    min-width: 56px;
+    padding: 4px 8px;
     display: flex;
     align-items: center;
-    justify-content: center;
-    font-size: 16px;
-    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    justify-content: flex-start;
+    font-size: 11px;
+    line-height: 1.4;
+    border: 1px solid var(--cds-interactive, #0f62fe);
     border-radius: 2px;
-    background: var(--cds-layer-02, #ffffff);
-    color: var(--cds-text-secondary, #525252);
+    background: transparent;
+    color: var(--cds-interactive, #0f62fe);
     cursor: pointer;
     flex-shrink: 0;
 }
 .nr-ve-path-add:hover {
-    background: var(--cds-layer-hover-02, #e8e8e8);
+    background: rgba(15, 98, 254, 0.08);
 }
 
 .nr-vertex-editor__hint {
-    margin-top: 6px;
     font-size: 10px;
     color: var(--cds-text-helper, #6f6f6f);
     text-align: center;
-    line-height: 1.3;
+    line-height: 1.4;
 }
 
 .cds--g100 .nr-vertex-editor {
@@ -8488,12 +8661,12 @@ body:has(#inspector:not(.inspector-hidden)) .nr-et-btn {
     color: var(--cds-text-secondary, #c6c6c6);
 }
 .cds--g100 .nr-ve-path-add {
-    border-color: var(--cds-border-subtle-01, #393939);
-    background: var(--cds-layer-02, #262626);
-    color: var(--cds-text-secondary, #c6c6c6);
+    border-color: var(--cds-interactive, #4589ff);
+    background: transparent;
+    color: var(--cds-interactive, #4589ff);
 }
 .cds--g100 .nr-ve-path-add:hover {
-    background: var(--cds-layer-hover-02, #333333);
+    background: rgba(69, 137, 255, 0.12);
 }
 
 /* ── Icon source tabs (component designer) ─────────────────────────────── */
@@ -9816,7 +9989,6 @@ body:has(#inspector:not(.inspector-hidden)) .nr-et-btn {
 
 /* ── Just Draw mode: hide resource bar and zoning section ──────────────────── */
 .nr-mode-just-draw #resource-bar,
-.nr-mode-just-draw #layout-bar,
 .nr-mode-just-draw #element-table-btn {
     display: none !important;
 }

@@ -1,11 +1,12 @@
 import { g, dia, V, highlighters, routers } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View, ToolKeys } from './shapes/isometric-shape';
-import { Computer, Database, ActiveDirectory, User, Firewall, Switch, Router, Link, Frame, cellNamespace } from './shapes';
-import { sortElements, drawGrid, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle } from './utils';
-import { GRID_SIZE, GRID_COUNT, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
+import { Link, Frame, cellNamespace } from './shapes';
+import { sortElements, drawGrid, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle, icon2DHref } from './utils';
+import { GRID_SIZE, GRID_COUNT, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
 import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath, NodeMeta } from './inspector';
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
+import { getPaletteIcon, getHitArea, getCompositeIsoHeight } from './shape-query';
 import { getPreviewFactory } from './shapes/shape-factories';
 import { ComplexComponent } from './shapes/complex-component';
 import { ComponentPalette } from './palette';
@@ -18,7 +19,7 @@ import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
 import { initMinimap, updateMinimapView, scheduleMinimapUpdate, setMinimapNavigateCallback } from './minimap';
 import { initResourceBar, showResourceBar, hideResourceBar, showZoneHud, hideZoneHud, detectStretchClusters } from './resource-bar';
 import { initAutoLayout, showLayoutBar, hideLayoutBar } from './auto-layout';
-import { applyHover, clearHover, applySelect, clearSelect, clearSelectFor, refreshSelect, applyConnHighlight, clearConnHighlights as clearConnRings, syncAllRings } from './hover-highlight';
+import { applyHover, clearHover, applySelect, clearSelect, clearSelectFor, refreshSelect, clearConnHighlights as clearConnRings, syncAllRings } from './hover-highlight';
 import { initWorkloadTable, showWorkloadTable, hideWorkloadTable } from './workload-table';
 import { initCalloutLabels, syncCalloutLabel, refreshAllCallouts, removeCallout, setCalloutVisibility } from './callout-labels';
 import { getCanvas } from './canvas-store';
@@ -324,67 +325,20 @@ let currentCell: IsometricShape | Link = null;
 let currentZoom = 1;
 let currentGridCountX = GRID_COUNT;
 let currentGridCountY = GRID_COUNT;
+// Pixel size of a single grid cell. Drives drawGrid spacing and the iso paper
+// dimensions; existing shape pixel sizes are NOT rescaled (so their footprint
+// stays the same on screen).
+let currentCellSize = GRID_SIZE;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let gridVEl: any = null;
 let gridVisible = true;
 let treeHighlightedCell: IsometricShape | null = null;
 let currentFrame: Frame | null = null;
 
-const CONN_HIGHLIGHT_ID = 'connection-highlight';
 let copiedLinkStyle: Record<string, unknown> | null = null;
-const CONN_LINK_COLOR_LIGHT = '#8d8d8d';
-const CONN_LINK_COLOR_DARK = '#ffffff';
-function getConnLinkColor(): string {
-    return document.documentElement.classList.contains('cds--g100') ? CONN_LINK_COLOR_DARK : CONN_LINK_COLOR_LIGHT;
-}
-
-// Re-color highlighted links when theme changes
-new MutationObserver(() => {
-    const color = getConnLinkColor();
-    for (const { link } of connHighlightedLinks) {
-        link.attr('line/stroke', color);
-    }
-}).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-let connHighlightedLinks: Array<{ link: dia.Link; origStroke: string; origWidth: number }> = [];
-let connHighlightedNodes: dia.Element[] = [];
-
-function highlightConnections(cell: IsometricShape): void {
-    clearConnectionHighlights();
-    const links = graph.getConnectedLinks(cell);
-    for (const link of links) {
-        if (link.attr('./display') === 'none') continue;
-        const origStroke = (link.attr('line/stroke') as string) || '#333333';
-        const origWidth = (link.attr('line/strokeWidth') as number) || 1;
-        link.attr('line/stroke', getConnLinkColor());
-        link.attr('line/strokeWidth', 2);
-        connHighlightedLinks.push({ link, origStroke, origWidth });
-
-        const srcId = (link.source() as { id?: string }).id;
-        const tgtId = (link.target() as { id?: string }).id;
-        const neighborId = srcId === (cell.id as string) ? tgtId : srcId;
-        if (neighborId) {
-            const neighbor = graph.getCell(neighborId);
-            if (neighbor && !neighbor.isLink()) {
-                const view = paper.findViewByModel(neighbor);
-                if (view) {
-                    applyConnHighlight(view);
-                    connHighlightedNodes.push(neighbor as dia.Element);
-                }
-            }
-        }
-    }
-}
 
 function clearConnectionHighlights(): void {
-    const hadLinks = connHighlightedLinks.length > 0;
-    for (const { link, origStroke, origWidth } of connHighlightedLinks) {
-        link.attr('line/stroke', origStroke);
-        link.attr('line/strokeWidth', origWidth);
-    }
-    connHighlightedLinks = [];
-    if (hadLinks) styleClusterLinks();
     clearConnRings();
-    connHighlightedNodes = [];
 }
 
 export const graph = new dia.Graph({}, { cellNamespace });
@@ -510,7 +464,11 @@ const paper = new dia.Paper({
         // Normal element connections require a port magnet
         if (!magnetT) return false;
         const port = cellViewT.findAttribute('port', magnetT);
-        return !!port;
+        if (!port) return false;
+        // No self-loops: a link must connect two different elements, even
+        // when both endpoints are ports of the same component.
+        if (sourceModel && sourceModel.id === targetModel.id) return false;
+        return true;
     },
     highlighting: {
         default: {
@@ -522,11 +480,25 @@ const paper = new dia.Paper({
                     'stroke-width': 3,
                 }
             }
-        }
+        },
+        // While a link is being dragged, JointJS asks `validateConnection`
+        // for every magnet the cursor touches. When the answer is yes, it
+        // applies the `connecting` highlighter to that magnet — we map this
+        // to a CSS class so the port-body lights up green (matching the
+        // post-drop port dot colour). `magnetAvailability` (= highlight
+        // every valid magnet on the canvas) stays off to avoid clutter.
+        connecting: {
+            name: 'addClass',
+            options: { className: 'nr-port-connecting' },
+        },
+        magnetAvailability: false,
     }
 });
 
 gridVEl = drawGrid(paper, GRID_COUNT, GRID_SIZE);
+
+// Allow the inspector to look up cell views (e.g. for fill-only opacity).
+panel.paper = paper;
 
 // Canvas dimensions: sidebar inset on the left + grid content + extra whitespace on
 // the right and bottom so panning feels open with room on all sides.
@@ -633,12 +605,15 @@ graph.on('change:position change:size', debouncedSort);
 
 const SD_ROTATE_PAIR: Record<string, string> = { tube: 'pipe', pipe: 'tube', duct: 'channel', channel: 'duct' };
 
-function applyIconAttrsToShape(shape: IsometricShape, href: string, iconPx: number, w: number, h: number, iH: number, face: string): void {
+function applyIconAttrsToShape(shape: IsometricShape, href: string, href2D: string, iconPx: number, w: number, h: number, iH: number, face: string): void {
     let topIconAttrs: Record<string, unknown>;
     if (face === 'front') {
         const lx = (w - iconPx) / 2, ly = (iH - iconPx) / 2;
-        const cx = lx + iconPx / 2, cy = ly + iconPx / 2;
-        topIconAttrs = { href, x: lx, y: ly, width: iconPx, height: iconPx, transform: `matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})` };
+        // Maps the image rect onto the front-face parallelogram with det=+1
+        // (no mathematical mirror). Image-X (right) → local-X (right) →
+        // screen down-right, which is the natural reading direction along
+        // the top edge of the iso front face.
+        topIconAttrs = { href, x: lx, y: ly, width: iconPx, height: iconPx, transform: `matrix(1,0,1,1,${-iH},${h - iH})` };
     } else if (face === 'side') {
         const lx = (h - iconPx) / 2, ly = (iH - iconPx) / 2;
         const cx = lx + iconPx / 2, cy = ly + iconPx / 2;
@@ -646,8 +621,10 @@ function applyIconAttrsToShape(shape: IsometricShape, href: string, iconPx: numb
     } else {
         topIconAttrs = { href, x: -iH + (w - iconPx) / 2, y: -iH + (h - iconPx) / 2, width: iconPx, height: iconPx, transform: null };
     }
-    const x2D = (w - iconPx) / 2, y2D = (h - iconPx) / 2;
-    shape.attr({ topIcon: topIconAttrs, topIcon2D: { href, x: x2D, y: y2D, width: iconPx, height: iconPx } });
+    // 2D view always renders the icon at the default cell size, centered — no frame.
+    const icon2DPx = SHAPE_CELL_SIZE;
+    const x2D = (w - icon2DPx) / 2, y2D = (h - icon2DPx) / 2;
+    shape.attr({ topIcon: topIconAttrs, topIcon2D: { href: href2D, x: x2D, y: y2D, width: icon2DPx, height: icon2DPx } });
 }
 
 // Scale label font and height proportionally when width changes via drag.
@@ -671,6 +648,7 @@ graph.on('change:size', (cell: dia.Cell) => {
     if (cell.get('isIcon') && cell.get('iconStanding')) {
         const el = cell as dia.Element;
         const { width: w, height: h } = el.size();
+        const iH = (el.get('isometricHeight') as number) || 0;
         const cx = w / 2;
         const cy = h / 2;
         const ox = (el.get('iconOffsetX') as number) ?? 0.22;
@@ -681,7 +659,8 @@ graph.on('change:size', (cell: dia.Cell) => {
         if (face === 'side') {
             el.attr('iconImage/transform', `translate(${-tx},${-ty}) matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy})`);
         } else {
-            el.attr('iconImage/transform', `translate(${tx},${ty}) matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`);
+            // Non-mirroring front-face placement (det = +1).
+            el.attr('iconImage/transform', `translate(${tx},${ty}) matrix(1,0,1,1,${-iH},${h - iH})`);
         }
     }
 });
@@ -705,6 +684,14 @@ graph.on('add', (cell: dia.Cell) => {
         if (iconData) {
             cell.attr('iconFlat/href', iconData);
         }
+        // Restore vendor opt-out class after rehydration so the dark-mode
+        // CSS filter doesn't paint coloured icons monochrome white. Legacy
+        // icons without iconSource fall back to the (filter-applied) default
+        // — they were Carbon-style mono in the first place.
+        const src = cell.get('iconSource') as string | undefined;
+        const keep = src === 'aws' || src === 'azure' || src === 'gcp' || src === 'uploaded';
+        cell.attr('iconImage/class', keep ? 'nr-icon-color' : '');
+        cell.attr('iconFlat/class', keep ? 'nr-icon-color' : '');
     }
 });
 graph.on('change:lineColor', (cell: dia.Cell) => {
@@ -723,22 +710,59 @@ graph.on('change:attrs', (cell: dia.Cell) => {
 });
 
 // Re-apply icon positioning after resize so icon stays centred on the new geometry.
-graph.on('change:size', (cell: dia.Cell) => {
+// Uses the Shape-wide Main IconEntry (CONTEXT.md: isMain is per-Shape) so the
+// resize handler stays in sync with what spawns the icon in the first place.
+// Only relevant for simple-shape cells — ComplexComponent re-renders its own
+// icons via change:size in its view's listener.
+function reapplyIconFor(cell: dia.Cell): void {
     const meta = cell.get(META_KEY) as Record<string, unknown> | undefined;
     const shapeKey = (meta?.shapeType as string) || '';
     const def = shapeKey ? ShapeRegistry[shapeKey] : undefined;
-    const icon0 = def?.layers?.[0]?.icons?.[0];
-    if (icon0?.href) {
-        const shape = cell as IsometricShape;
-        const { width: w, height: h } = shape.size();
-        const iH = (shape.get('isometricHeight') as number) ?? 0;
-        const face = (shape.get('effectiveIconFace') as string) || icon0.face || 'top';
-        const iconPx = (icon0.size ?? 1.5) * GRID_SIZE;
-        applyIconAttrsToShape(shape, icon0.href, iconPx, w, h, iH, face);
-    }
+    const mainIcon = def ? getPaletteIcon(def) : undefined;
+    if (!mainIcon?.href) return;
+    const shape = cell as IsometricShape;
+    const { width: w, height: h } = shape.size();
+    const iH = (shape.get('isometricHeight') as number) ?? 0;
+    const face = (shape.get('effectiveIconFace') as string) || mainIcon.face || 'top';
+    const iconPx = (mainIcon.size ?? 1.5) * GRID_SIZE;
+    applyIconAttrsToShape(shape, mainIcon.href, icon2DHref(mainIcon), iconPx, w, h, iH, face);
+}
+
+graph.on('change:size', (cell: dia.Cell) => {
+    reapplyIconFor(cell);
     refreshSelect(cell);
     syncCalloutLabel(cell as dia.Element);
 });
+
+// 2D-icon hrefs bake in the current theme (currentColor → black/white) and
+// the per-vendor render settings. Whenever the theme flips or the admin
+// retunes those settings, every cell needs its 2D href rebuilt — otherwise
+// mono icons stay frozen in the previous theme's contrast colour.
+function refreshAll2DIcons(): void {
+    for (const cell of graph.getCells()) {
+        if (cell.isLink()) continue;
+        reapplyIconFor(cell);
+    }
+}
+window.addEventListener('nr-theme-change', refreshAll2DIcons);
+window.addEventListener('nr-icon-rendering-change', refreshAll2DIcons);
+
+// Re-apply face fill/stroke colours for every single-layer Shape on theme +
+// derivation changes. ComplexComponent cells have their own listener and
+// rebuild themselves; the simple-shape path used to stay frozen with the
+// previous mode's colours, which made e.g. Azure look "stuck" on a mode flip.
+function refreshAllSimpleShapeStyles(): void {
+    for (const cell of graph.getCells()) {
+        if (cell.isLink()) continue;
+        if (Array.isArray(cell.get('layers'))) continue; // ComplexComponent
+        const meta = cell.get(META_KEY) as { shapeType?: string } | undefined;
+        const def = meta?.shapeType ? ShapeRegistry[meta.shapeType] : undefined;
+        const style = def?.layers?.[0]?.style;
+        if (style) applyShapeStyle(cell as dia.Element, style);
+    }
+}
+window.addEventListener('nr-theme-change', refreshAllSimpleShapeStyles);
+window.addEventListener('nr-color-derivation-change', refreshAllSimpleShapeStyles);
 
 graph.on('change:position', (cell: dia.Cell) => {
     refreshSelect(cell);
@@ -777,7 +801,9 @@ function getMinZoom(): number {
 function applyWheelZoom(evt: dia.Event, x: number, y: number, delta: number) {
     evt.preventDefault();
     const clampedDelta = Math.sign(delta) * Math.min(Math.abs(delta), 1);
-    const pct = 0.04 + 0.06 * (1 - currentZoom / MAX_ZOOM);
+    // Zoom step ramps from 2% near max zoom up to 5% near min — roughly
+    // half of the previous 4-10% range, which felt too aggressive.
+    const pct = 0.02 + 0.03 * (1 - currentZoom / MAX_ZOOM);
     const step = clampedDelta > 0 ? (1 + pct) : 1 / (1 + pct);
     const minZoom = getMinZoom();
     const newZoom = Math.min(MAX_ZOOM, Math.max(minZoom, currentZoom * step));
@@ -853,7 +879,10 @@ new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     paper.el.classList.toggle('nr-2d-icons-only', currentView === View.TwoDimensional);
     if (currentView === View.Isometric) sortElements(graph);
     if (currentCell && !(currentCell instanceof Link)) {
-        (currentCell as IsometricShape).addTools(paper, currentView);
+        // 2D collapses every shape to a 40×40 icon-only cell — link-drawing
+        // (the orange connect arrow) doesn't belong in that overview view.
+        const tools: ToolKeys[] | undefined = currentView === View.TwoDimensional ? [] : undefined;
+        (currentCell as IsometricShape).addTools(paper, currentView, tools);
     }
     updateMinimapView(currentView, currentGridCountX);
     syncZoomSlider();
@@ -863,10 +892,13 @@ new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
         const meta = currentCell.get(META_KEY) as Record<string, unknown> | undefined;
         const shapeKey = (meta?.shapeType as string) || '';
         const def = shapeKey ? ShapeRegistry[shapeKey] : undefined;
-        if (def?.dimYAdjustable) {
+        if (def?.dimYAdjustable && currentView === View.Isometric) {
             (currentCell as IsometricShape).addTools(paper, currentView, ['size']);
         }
     }
+    // Selection outline tracks viewMode via getVisualBounds — refresh it so
+    // a shape selected before the switch picks up the new 40×40 bounds.
+    if (currentCell) refreshSelect(currentCell);
     requestAnimationFrame(() => fitToContent());
 });
 
@@ -1614,19 +1646,20 @@ function showToast(message: string) {
 
 // ---- Adjust Grid Size ----
 
-function applyGridResize(newX: number, newY: number) {
+function applyGridResize(newX: number, newY: number, newCellSize?: number) {
     currentGridCountX = newX;
     currentGridCountY = newY;
+    if (newCellSize && newCellSize > 0) currentCellSize = newCellSize;
     obstacles.sizeX = newX;
     obstacles.sizeY = newY;
     obstacles.update();
 
     if (gridVEl) gridVEl.remove();
-    gridVEl = drawGrid(paper, newX, GRID_SIZE, '#e8e8e8', newY);
+    gridVEl = drawGrid(paper, newX, currentCellSize, '#e8e8e8', newY);
 
     paper.setDimensions(
-        SIDEBAR_INSET + 2 * GRID_SIZE * newX * SCALE * ISOMETRIC_SCALE + CANVAS_PAD,
-        GRID_SIZE * newY * SCALE + CANVAS_PAD
+        SIDEBAR_INSET + 2 * currentCellSize * newX * SCALE * ISOMETRIC_SCALE + CANVAS_PAD,
+        currentCellSize * newY * SCALE + CANVAS_PAD
     );
 
     switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
@@ -1711,8 +1744,12 @@ function showAdjustGridModal() {
 
     const { wrapper: xWrapper, input: xInput } = makeNumberField('nr-grid-x', 'Width (columns)', currentGridCountX);
     const { wrapper: yWrapper, input: yInput } = makeNumberField('nr-grid-y', 'Height (rows)', currentGridCountY);
+    const { wrapper: cellWrapper, input: cellInput } = makeNumberField('nr-grid-cell', 'Cell Size (px)', currentCellSize);
+    cellInput.min = '5';
+    cellInput.max = '200';
     bodyEl.appendChild(xWrapper);
     bodyEl.appendChild(yWrapper);
+    bodyEl.appendChild(cellWrapper);
 
     // Footer
     const footerEl = document.createElement('div');
@@ -1731,8 +1768,9 @@ function showAdjustGridModal() {
     saveBtn.addEventListener('click', () => {
         const newX = Math.max(5, Math.min(500, parseInt(xInput.value, 10) || currentGridCountX));
         const newY = Math.max(5, Math.min(500, parseInt(yInput.value, 10) || currentGridCountY));
+        const newCellSize = Math.max(5, Math.min(200, parseInt(cellInput.value, 10) || currentCellSize));
         modalEl.remove();
-        applyGridResize(newX, newY);
+        applyGridResize(newX, newY, newCellSize);
     });
 
     footerEl.appendChild(cancelBtn);
@@ -1856,7 +1894,10 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
         panel.show(shape);
         setTreeHighlight(shape);
         const view = paper.findViewByModel(shape);
-        if (view) applySelect(view);
+        // requestAnimationFrame so the view's DOM node is in the CELLS layer
+        // before applySelect runs — otherwise it falls back to the FRONT layer
+        // and the outline paints over the shape instead of behind it.
+        if (view) requestAnimationFrame(() => applySelect(view));
     }
     if (currentView === View.Isometric) {
         sortElements(graph);
@@ -1887,7 +1928,6 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
         currentCell = cell;
         panel.show(cell);
         setTreeHighlight(cell);
-        highlightConnections(cell);
         hideLayoutBar();
         focusElement(cell);
     }
@@ -1970,17 +2010,27 @@ canvasDropTarget.addEventListener('drop', (e: DragEvent) => {
 
     const { x: modelX, y: modelY } = clientToModel(e.clientX, e.clientY);
     const dropZone = findZoneAtPoint(modelX, modelY);
-    const meta: NodeMeta = { name: '', shapeType: shapeId, serverId: '', notes: '' };
+    // Initialise meta.name from the component's displayName so the new
+    // element starts with a sensible name everywhere (inspector input,
+    // cell label, element tree). The user can override it; until then
+    // there's no drift between empty-input vs. populated-label.
+    const meta: NodeMeta = { name: def.displayName ?? '', shapeType: shapeId, serverId: '', notes: '' };
 
     let placed: IsometricShape;
     const baseLayer = def.layers?.[0];
-    if ((def.layers?.length ?? 0) > 1 && baseLayer) {
+    // Use ComplexComponent whenever the Shape has multiple Layers OR a single
+    // Layer with multiple Icons. The simple-shape path applies only one icon
+    // (via the `topIcon` attr); a multi-icon Shape needs the ComplexComponent
+    // view which iterates per-icon and renders each as its own <image>.
+    const needsComplex = (def.layers?.length ?? 0) > 1 || (baseLayer?.icons?.length ?? 0) > 1;
+    if (needsComplex && baseLayer) {
         const { ComplexComponent } = require('./shapes/complex-component');
-        const haSize = def.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
+        const haSize = getHitArea(def);
         const cc = new ComplexComponent();
         cc.resize(haSize.width, haSize.height);
-        cc.set('isometricHeight', baseLayer.depth);
-        cc.set('defaultIsometricHeight', baseLayer.depth);
+        const isoH = getCompositeIsoHeight(def);
+        cc.set('isometricHeight', isoH);
+        cc.set('defaultIsometricHeight', isoH);
         cc.set('defaultSize', haSize);
         cc.set('layers', def.layers!.map((l: any) => ({ ...l, style: { ...l.style } })));
         cc.position(modelX - haSize.width / 2, modelY - haSize.height / 2);
@@ -1991,7 +2041,7 @@ canvasDropTarget.addEventListener('drop', (e: DragEvent) => {
         graph.addCell(cc);
         placed = cc;
     } else {
-        const baseShape = baseLayer?.baseShape ?? 'cuboid';
+        const baseShape = baseLayer?.baseShape ?? 'rectangle';
         const factory = getPreviewFactory(shapeId, baseShape);
         const shape = factory();
         applyRegistryDefaults(shape, def, paper);
@@ -2265,7 +2315,9 @@ const areaSelect = new AreaSelect({
         } else {
             palette.setTreeSelection(null);
         }
-        if (cells.length >= 2) showLayoutBar();
+        // Auto-layout actions need at least 3 elements to be meaningful
+        // (align/distribute over 2 is trivial). Toolbar is shown only then.
+        if (cells.length >= 3) showLayoutBar();
         else hideLayoutBar();
         hideZoneHud();
         if (cells.length === 0) {
@@ -2286,7 +2338,12 @@ const areaSelect = new AreaSelect({
         if (zones.length >= 2 && zones.length === cells.length) {
             panel.showMultiZone(zones as dia.Element[]);
         } else {
-            panel.hide();
+            const links = cells.filter(c => c.isLink()) as dia.Link[];
+            if (links.length >= 2 && links.length === cells.length) {
+                panel.showMultiLink(links);
+            } else {
+                panel.hide();
+            }
         }
     },
     onGroupMoveEnd: (cells) => {
@@ -2437,6 +2494,21 @@ paper.on('link:pointerup', (linkView: dia.LinkView) => {
     const link = linkView.model as Link;
     // Skip if shift-select already handled in pointerdown
     if (areaSelect.isSelected(link)) return;
+
+    // A failed drag from a port (invalid drop, e.g. self-loop rejected by
+    // validateConnection) still fires pointerup on the transient linkView
+    // before JointJS removes the stub link. Without this guard we would
+    // paint port dots at the stub's endpoints and leave them hanging on the
+    // FRONT layer after the link disappears.
+    const src = link.source();
+    const tgt = link.target();
+    const srcId = (src as { id?: dia.Cell.ID }).id;
+    const tgtId = (tgt as { id?: dia.Cell.ID }).id;
+    const isValidConnection = !!srcId && !!tgtId && srcId !== tgtId;
+    if (!isValidConnection) {
+        clearLinkPortDots();
+        return;
+    }
 
     areaSelect.clear();
     clearConnectionHighlights();
@@ -2589,7 +2661,6 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
     hideLayoutBar();
     hideZoneHud();
     setTreeHighlight(shape);
-    highlightConnections(shape);
 });
 
 paper.on('blank:pointerdown', (_evt: dia.Event) => {
@@ -2707,7 +2778,7 @@ function rotateShapeInGrid(cell: IsometricShape): void {
     if (!def) return;
     // Use the actual current base shape on the canvas, not the registry default
     const defBaseShape = def.layers?.[0]?.baseShape;
-    const currentBase = (cell.get('currentBaseShape') as string) || defBaseShape || 'cuboid';
+    const currentBase = (cell.get('currentBaseShape') as string) || defBaseShape || 'rectangle';
     const pairedBase = SD_ROTATE_PAIR[currentBase];
     if (!pairedBase) return;
 
@@ -2729,7 +2800,7 @@ function rotateShapeInGrid(cell: IsometricShape): void {
     newShape.set('currentBaseShape', pairedBase);
     newShape.toggleView(currentView);
     // Swap icon face based on current effective face
-    const defIcon0 = def.layers?.[0]?.icons?.[0];
+    const defIcon0 = getPaletteIcon(def);
     const currentFace = (cell.get('effectiveIconFace') as string) || defIcon0?.face || 'top';
     let rotatedFace: string = currentFace;
     if (currentFace === 'front') rotatedFace = 'side';
@@ -2785,19 +2856,23 @@ function switchShapeVariation(cell: IsometricShape): void {
 
     let newShape: IsometricShape;
     const targetBaseLayer = targetDef.layers?.[0];
-    if ((targetDef.layers?.length ?? 0) > 1 && targetBaseLayer) {
-        const haSize2 = targetDef.hitAreaSize ?? { width: targetBaseLayer.width, height: targetBaseLayer.height };
+    // Same predicate as the drop handler: multi-Layer OR multi-Icon needs the
+    // ComplexComponent view, not the single-icon simple-shape path.
+    const targetNeedsComplex = (targetDef.layers?.length ?? 0) > 1 || (targetBaseLayer?.icons?.length ?? 0) > 1;
+    if (targetNeedsComplex && targetBaseLayer) {
+        const haSize2 = getHitArea(targetDef);
         const cc = new ComplexComponent();
         cc.resize(haSize2.width, haSize2.height);
-        cc.set('isometricHeight', targetBaseLayer.depth);
-        cc.set('defaultIsometricHeight', targetBaseLayer.depth);
+        const isoH2 = getCompositeIsoHeight(targetDef);
+        cc.set('isometricHeight', isoH2);
+        cc.set('defaultIsometricHeight', isoH2);
         cc.set('defaultSize', haSize2);
         cc.set('layers', targetDef.layers!.map(l => ({ ...l, style: { ...l.style } })));
         if (targetDef.displayName) cc.attr('label/text', targetDef.displayName);
         if (targetDef.defaultRotation) cc.set('shapeRotation', targetDef.defaultRotation);
         newShape = cc;
     } else {
-        const factory = getPreviewFactory(shapeKey, targetBaseLayer?.baseShape ?? 'cuboid');
+        const factory = getPreviewFactory(shapeKey, targetBaseLayer?.baseShape ?? 'rectangle');
         newShape = factory();
         applyRegistryDefaults(newShape, targetDef, paper);
     }
@@ -2846,7 +2921,7 @@ function buildActionsForCurrentSelection(): CtxAction[] {
             { label: 'Rotate', icon: CTX_ICON_ROTATE, run: () => {
                 const { applyRotation } = require('./tools/rotate-tool');
                 const cur = (cell.get('labelRotation') as number) || 0;
-                applyRotation(cell, cur === 270 ? 0 : 270);
+                applyRotation(cell, cur === 270 ? 0 : 270, paper);
             }},
             { label: 'Move to Front', icon: CTX_ICON_FRONT,     run: () => cell.toFront() },
             { label: 'Move to Back',  icon: CTX_ICON_BACK,      run: () => cell.toBack()  },
@@ -2860,7 +2935,7 @@ function buildActionsForCurrentSelection(): CtxAction[] {
                 const cur = (labelEl.get('labelRotation') as number) || 0;
                 const next = cur === 270 ? 0 : 270;
                 const { applyRotation } = require('./tools/rotate-tool');
-                applyRotation(labelEl, next);
+                applyRotation(labelEl, next, paper);
                 panel.showLabel(labelEl);
             }},
             { label: 'Duplicate', icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
@@ -3155,9 +3230,9 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             applyMenuZoom(1 / 1.25);
             break;
         case 'view-fit':
-            currentZoom = 1;
-            switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
-            syncZoomSlider();
+            // Delegate to the zoom-bar's Fit button so the menu action and the
+            // toolbar icon share the exact same behaviour.
+            fitBtn.click();
             break;
         case 'view-center':
             centerGridInViewport(currentGridCountX, currentGridCountY);
@@ -3171,11 +3246,6 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             break;
         case 'file-export-svg':
             exportCanvasSvg();
-            break;
-        case 'admin-set-default':
-            saveCanvasGraph(activeCanvasId, graph);
-            saveDefaultDesign(graph);
-            showToast('Canvas saved.');
             break;
     }
 });

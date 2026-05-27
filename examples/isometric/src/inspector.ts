@@ -1,6 +1,9 @@
 import { dia } from '@joint/core';
 import IsometricShape from './shapes/isometric-shape';
+import { applyShapeFillOpacity } from './utils';
+import { applyLabelPosition } from './label-position';
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS, ShapeDefinition } from './shapes/shape-registry';
+import { getPaletteIcon } from './shape-query';
 import { PRIMARY_COLORS } from './colors';
 import { getCustomFields, getDataType, FieldDefinition } from './schema-registry';
 import { getProductsByType, getProduct } from './product-catalog';
@@ -8,6 +11,20 @@ import { getCanvas, updateCanvas, CanvasRecord } from './canvas-store';
 import { GRID_SIZE } from './theme';
 import { carbonIconToString, CarbonIcon } from './icons';
 import { getGridIconEntries, IconCatalogEntry } from './icon-catalog';
+import { familyForSource } from './icon-rendering';
+
+/**
+ * Mirror of the recognition-surface `nr-icon-color` opt-out on canvas
+ * Icon-Shape `<image>` elements. Vendor-coloured icons get the class →
+ * style.css suppresses the dark-mode brightness/invert filter for them.
+ * Pass `undefined` to clear both selectors (e.g. on icon removal).
+ */
+function syncIconColorClass(el: dia.Element, source: string | undefined): void {
+    const keep = source !== undefined && familyForSource(source) !== 'carbon';
+    const cls = keep ? 'nr-icon-color' : '';
+    el.attr('iconImage/class', cls);
+    el.attr('iconFlat/class', cls);
+}
 import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
 import AlignBoxTopLeft16 from '@carbon/icons/es/align-box--top-left/16.js';
 import AlignBoxTopCenter16 from '@carbon/icons/es/align-box--top-center/16.js';
@@ -76,6 +93,7 @@ function applyIconStanding(el: dia.Element, standing: boolean): void {
 
 function applyIconFaceTransform(el: dia.Element, face: IconFace): void {
     const { width: w, height: h } = el.size();
+    const iH = (el.get('isometricHeight') as number) || 0;
     const cx = w / 2;
     const cy = h / 2;
     const ox = (el.get('iconOffsetX') as number) ?? 0.22;
@@ -85,7 +103,8 @@ function applyIconFaceTransform(el: dia.Element, face: IconFace): void {
     if (face === 'side') {
         el.attr('iconImage/transform', `translate(${-tx},${-ty}) matrix(0,1,-1,-1,${w},0) rotate(180,${cx},${cy})`);
     } else {
-        el.attr('iconImage/transform', `translate(${tx},${ty}) matrix(1,0,-1,-1,0,${h}) rotate(180,${cx},${cy})`);
+        // Non-mirroring front-face placement (det = +1).
+        el.attr('iconImage/transform', `translate(${tx},${ty}) matrix(1,0,1,1,${-iH},${h - iH})`);
     }
 }
 
@@ -133,6 +152,10 @@ export interface PanelActions {
 
 export class PropertyPanel {
 
+    /** Set by the System Designer after paper init. Used to look up cell views
+     *  (e.g. for applyShapeFillOpacity). */
+    public paper?: dia.Paper;
+
     private el: HTMLElement;
     private titleEl: HTMLElement;
     private titleTextEl: HTMLElement;
@@ -159,6 +182,8 @@ export class PropertyPanel {
     private multiZoneWidthInput!: HTMLInputElement;
     private multiZoneHeightInput!: HTMLInputElement;
     private multiZoneTargets: dia.Element[] = [];
+    private multiLinkExtras: dia.Link[] = [];
+    private multiLinkDetach: (() => void) | null = null;
 
     private nodeInputs: Record<string, HTMLInputElement | HTMLTextAreaElement> = {};
     private nodeLabelHiddenEl!: HTMLInputElement;
@@ -657,6 +682,17 @@ export class PropertyPanel {
             document.addEventListener('mouseup', onUp);
         });
 
+        // The hidden <input> is the source of truth for the row's value (its
+        // change-handler reads from it, +/- buttons write to it). It must be
+        // attached to the DOM so that callers can locate the row from the
+        // input via `input.closest('.nr-sd-number-row')` — without this,
+        // closest() returns null on detached elements and downstream code
+        // that walks back up to the display element silently no-ops. That
+        // was the root cause of the area-corner display "lag" bug: the
+        // mode-toggle's per-corner display update path used closest() and
+        // never reached the visible inputs.
+        input.style.display = 'none';
+        stepper.appendChild(input);
         stepper.appendChild(displayEl);
         stepper.appendChild(resetBtn);
         stepper.appendChild(decBtn);
@@ -793,7 +829,11 @@ export class PropertyPanel {
             this.currentZone.attr('badgeBg/d', badgeChamferPath(badgePos));
         }
 
-        const zoneMeta: Record<string, unknown> = {};
+        // Preserve any zoneMeta fields not covered by current inputs — same
+        // reasoning as saveNode/saveLink: harvesting from scratch silently
+        // drops fields that this zone has but the active schema doesn't cover.
+        const existingZoneMeta = (this.currentZone.get('zoneMeta') as Record<string, unknown>) ?? {};
+        const zoneMeta: Record<string, unknown> = { ...existingZoneMeta };
         for (const [key, input] of Object.entries(this.zoneCustomInputs)) {
             zoneMeta[key] = input.value;
         }
@@ -803,7 +843,13 @@ export class PropertyPanel {
 
     private saveLink() {
         if (!this.currentLink) return;
+        // Preserve any meta fields not covered by the current input set —
+        // building meta from scratch (the previous behaviour) silently
+        // dropped legacy or schema-specific fields that the link had but
+        // the active inputs didn't cover. Same pattern as saveNode.
+        const existing = (this.currentLink.get(LINK_META_KEY) as Record<string, unknown>) ?? {};
         const meta: Record<string, unknown> = {
+            ...existing,
             linkType:   this.linkTypeSelect.value,
             bandwidth:  this.linkInputs.bandwidth.value,
             medium:     this.linkInputs.medium.value,
@@ -999,32 +1045,11 @@ export class PropertyPanel {
             const pos = positions.find(p => p.value === value);
             cell.set('labelPosition', value);
             if (value === 'none') {
-                cell.attr('label/display', 'none');
                 trigger.innerHTML = `${HIDE_ICON}<span style="font-size:0.75rem">Hidden</span>`;
             } else {
-                cell.attr('label/display', null);
-                const iH = (cell.get('isometricHeight') as number) || 0;
-                const topY = -iH - 4;
-                switch (value) {
-                    case 'bottom-right':
-                        cell.attr({ label: { x: 'calc(w + 10)', y: 'calc(h + 12)', textAnchor: 'start' } }); break;
-                    case 'bottom-left':
-                        cell.attr({ label: { x: -10, y: 'calc(h + 12)', textAnchor: 'end' } }); break;
-                    case 'top-right':
-                        cell.attr({ label: { x: 'calc(w + 10)', y: topY, textAnchor: 'start' } }); break;
-                    case 'top-left':
-                        cell.attr({ label: { x: -10, y: topY, textAnchor: 'end' } }); break;
-                    case 'top-center':
-                        cell.attr({ label: { x: 'calc(w / 2)', y: topY, textAnchor: 'middle' } }); break;
-                    case 'middle-left':
-                        cell.attr({ label: { x: -10, y: `calc(h / 2 - ${iH / 2})`, textAnchor: 'end' } }); break;
-                    case 'middle-right':
-                        cell.attr({ label: { x: 'calc(w + 10)', y: `calc(h / 2 - ${iH / 2})`, textAnchor: 'start' } }); break;
-                    case 'bottom-center':
-                        cell.attr({ label: { x: 'calc(w / 2)', y: 'calc(h + 12)', textAnchor: 'middle' } }); break;
-                }
                 trigger.innerHTML = `${pos!.icon}<span style="font-size:0.75rem">${pos!.label}</span>`;
             }
+            applyLabelPosition(cell);
             grid.querySelectorAll('.nr-label-pos-tile').forEach(t => t.classList.remove('nr-label-pos-tile--selected'));
             popup.style.display = 'none';
             this.nodeLabelHiddenEl.checked = value === 'none';
@@ -1069,6 +1094,20 @@ export class PropertyPanel {
         labelPosRow.appendChild(trigger);
         labelPosRow.appendChild(popup);
         designBody.appendChild(labelPosRow);
+
+        // Label Distance — px gap between label and component edge. Re-applies
+        // the current label position so the offset updates live.
+        const initialGap = (cell.get('labelDistance') as number) ?? 10;
+        const { row: distanceRow } = this.buildStepperRow(
+            'Label Distance', 0, 80, 1, initialGap,
+            (v) => {
+                cell.set('labelDistance', v);
+                const pos = (cell.get('labelPosition') as string) || 'bottom-right';
+                if (pos !== 'none') applyPos(pos);
+            },
+            10,
+        );
+        designBody.appendChild(distanceRow);
 
         // Hidden checkbox kept for saveNode compatibility
         const hiddenCheckbox = document.createElement('input');
@@ -1115,8 +1154,8 @@ export class PropertyPanel {
                     cell.set('accentColor', '');
                     cell.set('shapeOpacity', 100);
                     this.applyAccentColor(cell, '');
-                    const faces = ['front', 'side', 'top', 'base', 'baseIso', 'cornerV1', 'cornerV2', 'cornerV3'];
-                    for (const f of faces) cell.attr(`${f}/fillOpacity`, 1);
+                    const view = this.paper?.findViewByModel(cell);
+                    if (view) applyShapeFillOpacity(view, 1);
                 }
                 const next = !isActive;
                 styleLi.classList.toggle('nr-float-section--active', next);
@@ -1232,13 +1271,12 @@ export class PropertyPanel {
             colorRow.appendChild(hexWrap);
             styleFields.appendChild(colorRow);
 
-            // Opacity
+            // Opacity — fill-only via helper, so strokes (edges) stay opaque.
             const currentOpacity = (cell.get('shapeOpacity') as number) ?? 100;
             const { row: opacityRow } = this.buildStepperRow('Opacity', 0, 100, 5, currentOpacity, (v) => {
                 cell.set('shapeOpacity', v);
-                const fillOp = v / 100;
-                const faces = ['front', 'side', 'top', 'base', 'baseIso', 'cornerV1', 'cornerV2', 'cornerV3'];
-                for (const f of faces) cell.attr(`${f}/fillOpacity`, fillOp);
+                const view = this.paper?.findViewByModel(cell);
+                if (view) applyShapeFillOpacity(view, v / 100);
             }, 100);
             styleFields.appendChild(opacityRow);
 
@@ -1728,6 +1766,7 @@ export class PropertyPanel {
     }
 
     showLink(link: dia.Link) {
+        this.detachMultiLink();
         this.currentLink = link;
         this.currentNode = null;
         this.currentZone = null;
@@ -2147,6 +2186,53 @@ export class PropertyPanel {
         this.el.classList.remove('inspector-hidden');
     }
 
+    showMultiLink(links: dia.Link[]) {
+        this.detachMultiLink();
+        if (links.length === 0) { this.hide(); return; }
+        if (links.length === 1) { this.showLink(links[0]); return; }
+
+        const primary = links[0];
+        const extras = links.slice(1);
+
+        this.showLink(primary);
+        // showLink calls detachMultiLink, so set extras AFTER it returns.
+        this.multiLinkExtras = extras;
+
+        // Style props mirrored to all other selected connections whenever the
+        // primary connection changes. Design-only — Data/meta stays per-link.
+        const MIRRORED_PROPS = [
+            'lineStyle', 'lineColor', 'lineThickness', 'lineOpacity',
+            'arrowType', 'sourceArrowType',
+            'arrowSize', 'sourceArrowSize', 'targetArrowSize',
+            'router', 'connector',
+        ];
+
+        const mirror = () => {
+            const lineAttrs = primary.attr('line');
+            for (const l of extras) {
+                if (!l.graph) continue;
+                for (const k of MIRRORED_PROPS) {
+                    const v = primary.get(k);
+                    if (v !== undefined) l.set(k, v);
+                }
+                if (lineAttrs) l.attr('line', lineAttrs);
+            }
+        };
+
+        primary.on('change', mirror);
+        this.multiLinkDetach = () => primary.off('change', mirror);
+
+        this.titleTextEl.textContent = `${links.length} Connections`;
+    }
+
+    private detachMultiLink() {
+        if (this.multiLinkDetach) {
+            this.multiLinkDetach();
+            this.multiLinkDetach = null;
+        }
+        this.multiLinkExtras = [];
+    }
+
     showLayer(canvasId: string, onUpdate?: () => void, onLayerTypeChange?: () => void) {
         this.currentNode = null;
         this.currentLink = null;
@@ -2243,7 +2329,7 @@ export class PropertyPanel {
         const def = ShapeRegistry[shapeKey] as ShapeDefinition | undefined;
         if (!def) return;
 
-        const entry0 = def.layers?.[0]?.icons?.[0];
+        const entry0 = getPaletteIcon(def);
         const defBgColor = entry0?.bgColor || '';
         const defHref = entry0?.href;
         const effectiveColor = color || defBgColor || '';
@@ -2761,9 +2847,11 @@ export class PropertyPanel {
                     el.set('iconData', null);
                     el.set('iconSvgRaw', null);
                     el.set('iconFileName', null);
+                    el.set('iconSource', null);
                     el.set('iconStanding', false);
                     el.set('iconFace', 'front');
                     el.attr('iconImage/transform', null);
+                    syncIconColorClass(el, undefined);
                     preview.innerHTML = '';
                     preview.style.display = 'none';
                     rebuildFileRow();
@@ -2795,6 +2883,8 @@ export class PropertyPanel {
                         el.set('iconData', dataUrl);
                         el.set('iconSvgRaw', svgText);
                         el.set('iconFileName', file.name);
+                        el.set('iconSource', 'uploaded');
+                        syncIconColorClass(el, 'uploaded');
                         rebuildFileRow();
                         rebuildStandRow();
                     };
@@ -2842,6 +2932,8 @@ export class PropertyPanel {
                 el.set('iconData', dataUrl);
                 el.set('iconSvgRaw', icon.svg);
                 el.set('iconFileName', icon.label + '.svg');
+                el.set('iconSource', icon.source);
+                syncIconColorClass(el, icon.source);
                 rebuildFileRow();
                 rebuildStandRow();
                 applyIconStanding(el, !!(el.get('iconStanding')));
@@ -3152,7 +3244,7 @@ export class PropertyPanel {
             btn.addEventListener('click', () => {
                 const deg = opt === 'Rotated' ? 270 : 0;
                 const { applyRotation } = require('./tools/rotate-tool');
-                applyRotation(el as dia.Element, deg);
+                applyRotation(el as dia.Element, deg, this.paper);
                 orientSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
                     b.classList.toggle('nr-seg-btn--selected', b === btn)
                 );
@@ -3184,6 +3276,7 @@ export class PropertyPanel {
         this.currentZone = null;
         this.currentLayerId = null;
         this.multiZoneTargets = [];
+        this.detachMultiLink();
         this.el.classList.add('inspector-hidden');
     }
 }

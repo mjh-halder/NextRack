@@ -1,19 +1,38 @@
 import { dia, V } from '@joint/core';
 import IsometricShape, { View } from './shapes/isometric-shape';
 import { cellNamespace } from './shapes';
+import { Rectangle } from './shapes/rectangle/rectangle';
 import { Link } from './shapes/link/link';
 import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFactory } from './shapes/shape-factories';
-import { drawGrid, switchView, transformationMatrix, applyShapeStyle } from './utils';
+import { drawGrid, switchView, transformationMatrix, applyShapeStyle, applyShapeFillOpacity, buildCompositeIconSvg, icon2DHref } from './utils';
+import { applyTheme } from './index';
 import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
 import { parseSvgFootprint } from './svg-footprint';
 import { Area } from './shapes/area/area';
 import { FrameCornerControl } from './tools';
-import { GRID_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE } from './theme';
+import { GRID_SIZE, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE } from './theme';
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
 const CD_GRID_COUNT = 10;
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, updateShapeDefinition, deleteShape, addShape, saveRegistryToStorage, ShapeLayer, IconEntry, defaultIconEntry, defaultShapeLayer } from './shapes/shape-registry';
+import { getHitArea, HIT_AREA_STEP, getPaletteIcon } from './shape-query';
 import { BaseShape } from './shapes/shape-definition';
+import {
+    requiresSquareBase,
+    isRotatedForm,
+    isTubeFamily,
+    dimensionsFor,
+    getSupportedModifiers,
+    defaultDimensionsFor,
+    isPipeGroup,
+    pipeVariantOf,
+    pipeBaseShape,
+    PipeVariant,
+    ColorTheme,
+    THEME_COLORS,
+    DEFAULT_COLORS,
+} from './shapes/shape-capabilities';
+import { deriveFaceShades } from './color-derivation';
 import { PRIMARY_COLORS } from './colors';
 import { carbonIconToString, CarbonIcon } from './icons';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
@@ -23,8 +42,6 @@ import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import OverflowMenuVertical16 from '@carbon/icons/es/overflow-menu--vertical/16.js';
 import SettingsEdit16 from '@carbon/icons/es/settings--edit/16.js';
 import Save16 from '@carbon/icons/es/save/16.js';
-import View16 from '@carbon/icons/es/view/16.js';
-import ViewOff16 from '@carbon/icons/es/view--off/16.js';
 import Eyedropper16 from '@carbon/icons/es/eyedropper/16.js';
 import Asleep16 from '@carbon/icons/es/asleep/16.js';
 import Light16 from '@carbon/icons/es/light/16.js';
@@ -48,7 +65,9 @@ import AlignBoxMiddleRight16 from '@carbon/icons/es/align-box--middle-right/16.j
 import AlignBoxBottomLeft16 from '@carbon/icons/es/align-box--bottom-left/16.js';
 import AlignBoxBottomCenter16 from '@carbon/icons/es/align-box--bottom-center/16.js';
 import AlignBoxBottomRight16 from '@carbon/icons/es/align-box--bottom-right/16.js';
-import { getIconById, addUploadedIcon, removeUploadedIcon, IconCatalogEntry, ensureFullCatalog } from './icon-catalog';
+import { getIconById, addUploadedIcon, removeUploadedIcon, IconCatalogEntry, ensureFullCatalog, onCatalogChange } from './icon-catalog';
+import { resolveIconRender } from './icon-resolver';
+import { renderIcon } from './icon-renderer';
 
 function addTooltip(wrapper: HTMLElement, text: string, position: 'append' | 'prepend' = 'append'): void {
     const tipWrap = document.createElement('span');
@@ -84,10 +103,17 @@ function isVendorIcon(entry: IconCatalogEntry | undefined | null): boolean {
     return entry?.source === 'aws' || entry?.source === 'gcp' || entry?.source === 'azure';
 }
 import { getVisibleIcons } from './icon-config';
-import { shapeStore } from './shape-store';
+import {
+    shapeStore,
+    listUserFolders,
+    createUserFolder,
+    renameUserFolder,
+    deleteUserFolder,
+    userFolderNameExists,
+} from './shape-store';
 import { saveToInventory, isDarkMode } from './svg-inventory';
 import { getComponentCollections } from './admin';
-import { buildComponentPanel, formatLabel, ComponentTreeItem } from './component-tree';
+import { buildComponentPanel, formatLabel, ComponentTreeItem, USER_CREATED_COLLECTION } from './component-tree';
 
 // DOM elements
 const canvasEl     = document.getElementById('cd2-canvas')                as HTMLDivElement;
@@ -103,64 +129,60 @@ const canvasWrapEl = document.getElementById('cd2-canvas-wrap')           as HTM
 // The set of icons offered in the picker is further filtered by the admin
 // configuration below — see buildIconContent().
 
-// ── Base shape defaults store ─────────────────────────────────────────────
-// Per-base-shape defaults, persisted to localStorage. Used when creating a
-// new component or clicking "Reset to default".
-interface BaseShapeDefaults {
-    width?: number;
-    height?: number;
-    isometricHeight?: number;
-    cornerRadius?: number;
-    chamferSize?: number;
-    chamferStart?: number;
-    chamferBottomSize?: number;
-    chamferBottomStart?: number;
-    taper?: number;
-    twist?: number;
-    scaleTopX?: number;
-    scaleTopY?: number;
-    shedRoofDrop?: number;
-    shedRoofDirection?: string;
+// One-shot cleanup: an earlier version stored per-shape user defaults under
+// this key. The feature is gone; remove stale entries so they don't linger.
+try { localStorage.removeItem('nextrack-base-shape-defaults-v1'); } catch { /* ignore */ }
+
+// Single chokepoint for "write these three dimensions into the stepper UI".
+// Writes the hidden numeric input, syncs the visible display input, and runs
+// onFieldChange so the layer + cell + recenter all stay in lock-step.
+// Every caller that programmatically changes dimensions MUST go through here
+// — bypassing this is what produced the display-vs-form drift in the past.
+function setDimensionInputs(w: number, h: number, d: number): void {
+    widthInput.value  = String(w);
+    heightInput.value = String(h);
+    depthInput.value  = String(d);
+    if (widthDisplayEl)  widthDisplayEl.value  = `${Math.round(w)}px`;
+    if (heightDisplayEl) heightDisplayEl.value = `${Math.round(h)}px`;
+    if (depthDisplayEl)  depthDisplayEl.value  = `${Math.round(d)}px`;
+    onFieldChange();
 }
 
-const SHAPE_DEFAULTS_KEY = 'nextrack-base-shape-defaults-v1';
-
-function loadBaseShapeDefaults(): Record<string, BaseShapeDefaults> {
-    try {
-        const raw = localStorage.getItem(SHAPE_DEFAULTS_KEY);
-        return raw ? JSON.parse(raw) : {};
-    } catch { return {}; }
-}
-
-function saveBaseShapeDefault(baseShape: string, defaults: BaseShapeDefaults): void {
-    const all = loadBaseShapeDefaults();
-    all[baseShape] = defaults;
-    try { localStorage.setItem(SHAPE_DEFAULTS_KEY, JSON.stringify(all)); } catch { /* ignore */ }
-}
-
-function getBaseShapeDefault(baseShape: string): BaseShapeDefaults {
-    return loadBaseShapeDefaults()[baseShape] || {};
-}
-
-function applyBaseShapeDefaults(baseShape: string): void {
-    const defs = getBaseShapeDefault(baseShape);
+// Switch the current layer between round (tube/pipe) and octagonal
+// (duct/channel) variants of the Pipe group. Preserves the current rotation
+// and dimensions — only the cross-section changes.
+function switchPipeVariant(variant: PipeVariant): void {
     const layer = layers[selectedLayerIndex];
-    widthInput.value  = String(layer?.width  ?? 40);
-    heightInput.value = String(layer?.height ?? 40);
-    depthInput.value  = String(layer?.depth  ?? 20);
-    selectedCornerRadius = defs.cornerRadius ?? 0;
-    selectedChamferSize  = defs.chamferSize ?? 0;
-    selectedChamferStart = defs.chamferStart ?? 0;
-    selectedChamferBottomSize  = defs.chamferBottomSize ?? 0;
-    selectedChamferBottomStart = defs.chamferBottomStart ?? 0;
-    selectedTaper        = defs.taper ?? 0;
-    selectedTwist        = defs.twist ?? 0;
-    selectedScaleTopX    = defs.scaleTopX ?? 1;
-    selectedScaleTopY    = defs.scaleTopY ?? 1;
-    selectedShedRoofDrop = defs.shedRoofDrop ?? 0;
-    selectedShedRoofDirection = defs.shedRoofDirection ?? 'front';
-    if (baseShape === 'tube' || baseShape === 'duct') {
-        selectedIconFace = 'side';
+    if (!layer) return;
+    const current = currentBaseShape();
+    if (!isPipeGroup(current)) return;
+    const rotated = isRotatedForm(current);
+    const next = pipeBaseShape(variant, rotated);
+    if (next === current) return;
+    layer.baseShape = next;
+    applyFormFactorToCanvas();
+    buildInspectorPanel();
+    markDirty();
+}
+
+// Default per-base-shape dimensions live centrally in shape-capabilities.ts
+// (`defaultDimensionsFor`). When switching base shape, the dimensions MUST
+// be reset to the canonical defaults — the previous layer's values are never
+// preserved across a base-shape change.
+function applyBaseShapeDefaults(baseShape: BaseShape): void {
+    const layer = layers[selectedLayerIndex];
+    const defs = defaultDimensionsFor(baseShape);
+    setDimensionInputs(defs.width, defs.height, defs.depth);
+    if (layer) {
+        applyCornerRadiusToCurrentShape(0);
+        applyChamferSizeToCurrentShape(0);
+        applyChamferStartToCurrentShape(0);
+        applyChamferBottomSizeToCurrentShape(0);
+        applyChamferBottomStartToCurrentShape(0);
+        applyTwistToCurrentShape(0);
+        applyScaleTopXToCurrentShape(1);
+        applyScaleTopYToCurrentShape(1);
+        applyShedRoofToCurrentShape(0, 'front');
     }
 }
 
@@ -172,37 +194,41 @@ let currentZoom  = 1;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let gridVEl: any = null;
 
-// Non-dimension template state (form factor, icon, style)
-let selectedBaseShape: BaseShape = (BASE_SHAPE_BY_ID[currentShapeId] || 'cuboid') as BaseShape;
-let selectedIcon: string | null = null;
-let selectedIconFace: 'top' | 'front' | 'side' = 'top';
-let selectedIconSize = 1.5; // grid units; 1.5 GU = 30px
-let selectedIconOffsetX = 0;
-let selectedIconOffsetY = 0;
-let selectedIconSkewX = 0;
-let selectedIconSkewY = 0;
-let selectedStyle = { topColor: '', sideColor: '', frontColor: '', strokeColor: '' };
+// Per-IconEntry / per-Layer modifier globals (face/size/offset/skew/bg*,
+// cornerRadius/chamfer*/twist/scaleTop*/shedRoof*) used to live as
+// parallel module globals here. They have been removed; the entry / layer
+// is the sole source of truth (see docs/adr/0001-input-sync-protocol.md).
+//
+// baseShape and style live on the layer; the helpers below read them
+// fresh on every call, so any caller that previously read the global gets
+// the current-layer value with no parallel cache.
 
-// Corner radius state (not persisted to registry; only applies to polygon shapes)
-let selectedCornerRadius = 0; // pixels
+function currentBaseShape(): BaseShape {
+    return (layers[selectedLayerIndex]?.baseShape ?? 'rectangle') as BaseShape;
+}
 
-// Chamfer state (not persisted to registry; only applies to cuboid shapes)
-let selectedChamferSize = 0;
-let selectedChamferStart = 0;
-let selectedChamferBottomSize = 0;
-let selectedChamferBottomStart = 0;
+function currentStyle() {
+    const s = layers[selectedLayerIndex]?.style;
+    return {
+        topColor:    s?.topColor    ?? '',
+        sideColor:   s?.sideColor   ?? '',
+        frontColor:  s?.frontColor  ?? '',
+        strokeColor: s?.strokeColor ?? '',
+    };
+}
 
-// Rotation state (0 or 90; applies to all shapes except cuboid)
+// Per-layer modifier state (cornerRadius / chamfer* / twist /
+// scaleTop* / shedRoof*) used to live as parallel module globals here.
+// They are gone — the layer itself (`layers[selectedLayerIndex].X`) is the
+// sole source of truth and the modifier panel reads from it on rebuild and
+// in syncInspectorToLayer. See docs/adr/0001-input-sync-protocol.md.
+
+// Rotation state (0 or 90; applies to all shapes except rectangle). This is
+// Shape-level meta, kept as a module global because there's no per-layer
+// equivalent — the rotation switcher's populator reads it and re-renders
+// the active segment.
 let selectedRotation = 0;
 let rotationAccordionLi: HTMLLIElement | null = null;
-
-// 3D modifier state
-let selectedTaper = 0;
-let selectedTwist = 0;
-let selectedScaleTopX = 1;
-let selectedScaleTopY = 1;
-let selectedShedRoofDrop = 0;
-let selectedShedRoofDirection = 'front';
 
 // SVG footprint state (complex shape mode only)
 let svgParseError = '';
@@ -213,13 +239,10 @@ let resizeFromInput = false;
 let dimBehaviourRowEl: HTMLElement | null = null;
 let hudRotateItemEl: HTMLElement | null = null;
 
-let selectedIconBgSize = 1; // grid units; independent from icon size
-let selectedIconBgEnabled = false;
-let selectedIconMonochrome = false;
-let selectedIconBgColor = PRIMARY_COLORS[0].base; // Grey 70 by default
-let selectedIconBgShape: 'circle' | 'square' | 'octagon' = 'circle';
-let selectedIconBgRadius = 6;
-let selectedIconBgChamfer = 0.18;
+// Icon background lives entirely on the IconEntry now. The bg-related
+// module globals (bgEnabled / bgColor / bgSize / bgShape / bgRadius /
+// bgChamfer) were the last carriers of "what's currently being edited";
+// they are gone — see docs/adr/0001-input-sync-protocol.md.
 
 // New multi-icon system
 let iconEntries: import('./shapes/shape-registry').IconEntry[] = [];
@@ -241,6 +264,25 @@ let layers: ShapeLayer[] = [];
 let selectedLayerIndex = 0;
 let layerShapes: IsometricShape[]   = [];  // ISO canvas shapes, one per layer
 let layerShapes2D: IsometricShape[] = [];  // 2D canvas shapes, one per layer
+
+// Re-apply theme-dependent fill/stroke on every layer when the document
+// theme (cds--g100) flips OR when the central color-derivation settings
+// change (admin Color Adjustment UI). SVG attr values are stamped on the
+// elements and don't change with a CSS class toggle.
+const _reapplyAllLayerStyles = () => {
+    for (let i = 0; i < layers.length; i++) {
+        const sty = layers[i]?.style;
+        if (!sty) continue;
+        if (layerShapes[i])   applyShapeStyle(layerShapes[i],   sty);
+        if (layerShapes2D[i]) applyShapeStyle(layerShapes2D[i], sty);
+    }
+    // Icon 2D hrefs bake in the current theme (currentColor → black/white)
+    // and per-vendor settings — rebuild them on every theme/setting change.
+    applyIconToCurrentShape();
+};
+window.addEventListener('nr-theme-change', _reapplyAllLayerStyles);
+window.addEventListener('nr-color-derivation-change', _reapplyAllLayerStyles);
+window.addEventListener('nr-icon-rendering-change', _reapplyAllLayerStyles);
 let hitAreaShape: IsometricShape | null = null;
 let hitAreaShape2D: IsometricShape | null = null;
 let hitAreaVisible = false;
@@ -267,8 +309,9 @@ let iconBgCornerRadiusInputRef: HTMLInputElement | null = null;
 let iconBgChamferRowEl:        HTMLElement      | null = null;
 let iconBgChamferInputRef:     HTMLInputElement | null = null;
 
-// Adaptive icon (no-bg + complex shape only): icon color follows app theme
-let selectedIconAdaptive = false;
+// Adaptive icon (no-bg + complex shape only): icon color follows app theme.
+// Lives on IconEntry.adaptive; the toggle row ref is kept here so the
+// populator in buildIconContent can flip its display when bg is enabled.
 let iconAdaptiveToggleRowEl: HTMLElement | null = null;
 
 // Complex-shape only: which layer carries the icon in the designer preview.
@@ -362,6 +405,11 @@ paper2D.setDimensions(
     GRID_SIZE * CD_GRID_COUNT * SCALE + CD_MARGIN * 2,
     GRID_SIZE * CD_GRID_COUNT * SCALE + CD_MARGIN * 2
 );
+// The 2D paper is permanently in icon-only mode — hide shape body faces so
+// only the centered 40×40 icon shows through. SD toggles this class
+// dynamically; in the CD the 2D paper exists in parallel to the iso paper,
+// so the class is set statically here.
+paper2D.el.classList.add('nr-2d-icons-only');
 
 // ── Fixed view matrices ───────────────────────────────────────────────────────
 // ISO paper is always isometric; 2D paper is always in 2D mode.
@@ -376,8 +424,6 @@ let shapeNameInput: HTMLInputElement;
 let componentTypeSelect: HTMLSelectElement;
 let headerSaveBtn: HTMLButtonElement | null = null;
 let inspectorDirty = false;
-let adminMode = false;
-let setDefaultBtn: HTMLButtonElement | null = null;
 
 function markDirty() {
     if (!inspectorDirty) {
@@ -423,6 +469,35 @@ function setShapeLabel(text: string): void {
     layerShapes2D[0]?.attr('label/text', text);
 }
 
+// ── Populator registry ──────────────────────────────────────────────────────
+// Implements the Populate side of the input-sync protocol
+// (docs/adr/0001-input-sync-protocol.md). Each input that displays Editor
+// Draft state registers a populator function during DOM build; populate()
+// re-runs all of them. Populators read fresh from the model on every call,
+// so calling populate() at selection-change or after any mutation keeps the
+// UI in sync with the Draft without any per-field wiring.
+
+let populators: Array<() => void> = [];
+
+function registerPopulator(fn: () => void): void {
+    populators.push(fn);
+}
+
+function clearPopulators(): void {
+    populators = [];
+}
+
+function populate(): void {
+    for (const fn of populators) {
+        try { fn(); } catch (e) {
+            // A populator referencing a stale DOM node shouldn't break the
+            // chain — log and continue so other inputs still refresh.
+            // eslint-disable-next-line no-console
+            console.warn('[populate] populator threw', e);
+        }
+    }
+}
+
 /**
  * The IconEntry currently being edited in the inspector. Null when no entry
  * is open (editingIconIndex === -1 or out of range).
@@ -461,17 +536,21 @@ function updateIcon(entryId: string, patch: Partial<IconEntry>): boolean {
     Object.assign(entry, patch);
     markDirty();
     applyIconToCurrentShape();
+    populate();
     return true;
 }
 
-/** Add a new icon entry to the current layer. Returns the new entry. */
+/** Add a new icon entry to the current layer. Returns the new entry.
+ *  isMain is true only if no other IconEntry in any Layer of this Shape has it
+ *  (CONTEXT.md: isMain is per-Shape, not per-Layer). */
 function addIcon(partial: Partial<IconEntry> = {}): IconEntry {
     const arr = currentIconsArray();
-    const isFirst = arr.length === 0;
-    const entry = defaultIconEntry({ isMain: isFirst, ...partial });
+    const shapeHasMain = layers.some(l => l.icons.some(e => e.isMain));
+    const entry = defaultIconEntry({ isMain: !shapeHasMain, ...partial });
     arr.push(entry);
     markDirty();
     applyIconToCurrentShape();
+    populate();
     return entry;
 }
 
@@ -480,20 +559,31 @@ function removeIcon(entryId: string): boolean {
     const arr = currentIconsArray();
     const idx = arr.findIndex(e => e.id === entryId);
     if (idx < 0) return false;
+    // The Main IconEntry is the Shape's identity icon and cannot be removed.
+    if (arr[idx].isMain) return false;
     arr.splice(idx, 1);
     markDirty();
     applyIconToCurrentShape();
+    populate();
     return true;
 }
 
-/** Mark one icon as the Main icon (exclusive — clears the flag on others). */
+/** Mark one icon as the Main icon (exclusive across the whole Shape — clears
+ *  isMain on every other IconEntry in every other Layer too, since isMain is
+ *  per-Shape, not per-Layer). */
 function setMainIcon(entryId: string): boolean {
-    const arr = currentIconsArray();
-    const target = arr.find(e => e.id === entryId);
+    let target: IconEntry | undefined;
+    for (const l of layers) {
+        const found = l.icons.find(e => e.id === entryId);
+        if (found) { target = found; break; }
+    }
     if (!target) return false;
-    for (const e of arr) e.isMain = (e === target);
+    for (const l of layers) {
+        for (const e of l.icons) e.isMain = (e === target);
+    }
     markDirty();
     applyIconToCurrentShape();
+    populate();
     return true;
 }
 
@@ -505,6 +595,7 @@ function reorderIcons(fromIdx: number, toIdx: number): boolean {
     arr.splice(toIdx, 0, moved);
     markDirty();
     applyIconToCurrentShape();
+    populate();
     return true;
 }
 
@@ -515,6 +606,7 @@ function updateLayer(layerId: string, patch: Partial<ShapeLayer>): boolean {
     Object.assign(layer, patch);
     markDirty();
     renderLayersOnCanvas();
+    populate();
     return true;
 }
 let widthInput:   HTMLInputElement;
@@ -535,8 +627,6 @@ let chamferSizeValueEl: HTMLElement;
 let chamferBottomSizeInput: HTMLInputElement;
 let chamferBottomSizeValueEl: HTMLElement;
 let iconFaceRowEl:      HTMLElement;
-let taperInput: HTMLInputElement;
-let taperValueEl: HTMLElement;
 let twistInput: HTMLInputElement;
 let twistValueEl: HTMLElement;
 let stxInput: HTMLInputElement;
@@ -643,15 +733,20 @@ function buildSliderField(
     input.type = 'number';
     input.id = id;
     input.className = 'nr-ad__number-input';
+    input.style.display = 'none';
     input.min = String(min);
     input.max = String(max);
     input.step = String(step);
     assignInput(input);
 
-    // Display element shows px value + unit
+    // Display element shows px value + unit. Read-only by design: numeric
+    // input is via −/+ buttons or drag-to-scrub only — no free text entry.
     const displayEl = document.createElement('input');
     displayEl.type = 'text';
     displayEl.className = 'nr-sd-number-display';
+    displayEl.readOnly = true;
+    displayEl.style.userSelect = 'none';
+    displayEl.style.cursor = 'ew-resize';
     displayEl.value = `${toDisplay(parseFloat(input.value))}${showUnit}`;
 
     // Hidden value element for compatibility
@@ -758,6 +853,7 @@ function buildSliderField(
         document.addEventListener('mouseup', onUp);
     });
 
+    stepper.appendChild(input);
     stepper.appendChild(displayEl);
     stepper.appendChild(resetBtn);
     stepper.appendChild(decBtn);
@@ -767,7 +863,7 @@ function buildSliderField(
 }
 
 function currentDimensionsPx(): { wPx: number; hPx: number; dPx: number } {
-    const swapped = ROTATED_FORMS.has(selectedBaseShape);
+    const swapped = isRotatedForm(currentBaseShape());
     if (currentShape) {
         const { width, height } = currentShape.size();
         return { wPx: swapped ? height : width, hPx: swapped ? width : height, dPx: (currentShape.get('isometricHeight') ?? 0) };
@@ -785,18 +881,24 @@ function currentDimensionsPx(): { wPx: number; hPx: number; dPx: number } {
 
 function buildDimensionsContent(container: HTMLElement) {
     const { wPx, hPx, dPx } = currentDimensionsPx();
-    const isTube = TUBE_FAMILY.has(selectedBaseShape);
+    const dims = dimensionsFor(currentBaseShape());
+    // Y holds the diameter when the second slider is "Diameter" (tube family);
+    // otherwise it holds the model height.
+    const ySource = dims.z === null ? dPx : hPx;
 
-    buildSliderField(isTube ? 'Length' : 'Dimension X',  'sd-width',  1, 160, 1,
-        (el) => { widthInput  = el; el.value = String(wPx); },
-        (el) => { widthValueEl  = el; },
+    buildSliderField(dims.x.label, 'sd-width', 1, 160, 1,
+        (el) => { widthInput = el; el.value = String(wPx); },
+        (el) => { widthValueEl = el; },
         onFieldChange, container);
 
-    if (isTube) {
-        buildSliderField('Diameter', 'sd-height', 1, 160, 1,
-            (el) => { heightInput = el; el.value = String(dPx); },
-            (el) => { heightValueEl = el; },
-            onFieldChange, container);
+    buildSliderField(dims.y.label, 'sd-height', 1, 160, 1,
+        (el) => { heightInput = el; el.value = String(ySource); },
+        (el) => { heightValueEl = el; },
+        onFieldChange, container);
+
+    if (dims.z === null) {
+        // Depth is derived (= diameter) for tube-family shapes — keep a hidden
+        // input so downstream readers still find it.
         depthInput = document.createElement('input');
         depthInput.type = 'hidden';
         depthInput.value = String(dPx);
@@ -804,13 +906,9 @@ function buildDimensionsContent(container: HTMLElement) {
         depthValueEl = null;
         depthDisplayEl = null;
     } else {
-        buildSliderField('Dimension Y', 'sd-height', 1, 160, 1,
-            (el) => { heightInput = el; el.value = String(hPx); },
-            (el) => { heightValueEl = el; },
-            onFieldChange, container);
-        buildSliderField('Dimension Z',  'sd-depth',  0, 160, 1,
-            (el) => { depthInput  = el; el.value = String(dPx); },
-            (el) => { depthValueEl  = el; },
+        buildSliderField(dims.z.label, 'sd-depth', 0, 160, 1,
+            (el) => { depthInput = el; el.value = String(dPx); },
+            (el) => { depthValueEl = el; },
             onFieldChange, container);
     }
 
@@ -818,11 +916,11 @@ function buildDimensionsContent(container: HTMLElement) {
     const rows = container.querySelectorAll<HTMLElement>('.nr-sd-number-row');
     widthDisplayEl  = rows[0]?.querySelector('.nr-sd-number-display') ?? null;
     heightDisplayEl = rows[1]?.querySelector('.nr-sd-number-display') ?? null;
-    if (!isTube) depthDisplayEl = rows[2]?.querySelector('.nr-sd-number-display') ?? null;
+    if (dims.z !== null) depthDisplayEl = rows[2]?.querySelector('.nr-sd-number-display') ?? null;
 
     // Dimension Behaviour switcher (only for duct/pipe)
-    const showBehaviour = selectedBaseShape === 'duct' || selectedBaseShape === 'pipe'
-        || selectedBaseShape === 'tube' || selectedBaseShape === 'channel';
+    const showBehaviour = currentBaseShape() === 'duct' || currentBaseShape() === 'pipe'
+        || currentBaseShape() === 'tube' || currentBaseShape() === 'channel';
     const behaviourRow = document.createElement('div');
     behaviourRow.className = 'nr-sd-face-row';
     behaviourRow.style.display = showBehaviour ? '' : 'none';
@@ -862,41 +960,10 @@ function buildDimensionsContent(container: HTMLElement) {
     resetBtn.title = 'Reset to default';
     resetBtn.innerHTML = 'Reset to default';
     resetBtn.addEventListener('click', () => {
-        const defs = getBaseShapeDefault(selectedBaseShape);
-        widthInput.value = String(defs.width ?? 2);
-        heightInput.value = String(defs.height ?? 2);
-        depthInput.value = String(defs.isometricHeight ?? 2);
-        onFieldChange();
+        const defs = defaultDimensionsFor(currentBaseShape());
+        setDimensionInputs(defs.width, defs.height, defs.depth);
     });
     container.appendChild(resetBtn);
-
-    setDefaultBtn = document.createElement('button');
-    setDefaultBtn.type = 'button';
-    setDefaultBtn.className = 'nr-sd-reset-btn nr-sd-set-default-btn';
-    const shapeLabel = BASE_SHAPE_LABELS[selectedBaseShape] || selectedBaseShape;
-    setDefaultBtn.textContent = `Set as default for ${shapeLabel}`;
-    setDefaultBtn.title = `Save current dimensions as default for ${shapeLabel}`;
-    setDefaultBtn.style.display = adminMode ? '' : 'none';
-    setDefaultBtn.addEventListener('click', () => {
-        saveBaseShapeDefault(selectedBaseShape, {
-            width: parseFloat(widthInput.value) || 2,
-            height: parseFloat(heightInput.value) || 2,
-            isometricHeight: parseFloat(depthInput.value) || 2,
-            cornerRadius: selectedCornerRadius || undefined,
-            chamferSize: selectedChamferSize || undefined,
-            chamferStart: selectedChamferStart || undefined,
-            chamferBottomSize: selectedChamferBottomSize || undefined,
-            chamferBottomStart: selectedChamferBottomStart || undefined,
-            taper: selectedTaper || undefined,
-            twist: selectedTwist || undefined,
-            scaleTopX: selectedScaleTopX !== 1 ? selectedScaleTopX : undefined,
-            scaleTopY: selectedScaleTopY !== 1 ? selectedScaleTopY : undefined,
-            shedRoofDrop: selectedShedRoofDrop || undefined,
-            shedRoofDirection: selectedShedRoofDirection !== 'front' ? selectedShedRoofDirection : undefined,
-        });
-        showToast(`Default saved for "${selectedBaseShape}"`);
-    });
-    container.appendChild(setDefaultBtn);
 }
 
 function buildModifiersContent(container: HTMLElement) {
@@ -909,112 +976,117 @@ function buildModifiersContent(container: HTMLElement) {
     modifiersSvgInfoEl = svgInfo;
     container.appendChild(svgInfo);
 
+    // Pipe variant switcher (Round / Octagonal) — only shown when the current
+    // base shape is part of the pipe variant group. Switching writes the
+    // matching BaseShape onto the layer (preserving rotation) without
+    // resetting dimensions. Style mirrors the icon editor's Bg Shape switcher.
+    const variantRow = document.createElement('div');
+    variantRow.className = 'nr-sd-face-row';
+    variantRow.dataset.pipeVariantRow = 'true';
+    const variantLabel = document.createElement('label');
+    variantLabel.className = 'nr-sd-row-label';
+    variantLabel.textContent = 'Cross-section';
+    variantRow.appendChild(variantLabel);
+    const variantSwitcher = document.createElement('div');
+    variantSwitcher.className = 'nr-seg-control nr-seg-control--fixed';
+    for (const v of ['round', 'octagonal'] as PipeVariant[]) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'nr-seg-btn';
+        const label = v === 'round' ? 'Round' : 'Octagonal';
+        btn.title = label;
+        btn.textContent = label;
+        btn.dataset.variant = v;
+        btn.addEventListener('click', () => switchPipeVariant(v));
+        variantSwitcher.appendChild(btn);
+    }
+    variantRow.appendChild(variantSwitcher);
+    container.appendChild(variantRow);
+
+    const layerForBuild = () => layers[selectedLayerIndex];
+
     const cornerRadiusRow = document.createElement('div');
     cornerRadiusRow.dataset.modifier = 'cornerRadius';
     buildSliderField('Corner Radius', 'sd-corner-radius', 0, 30, 1,
-        (el) => { cornerRadiusInput = el; el.value = String(selectedCornerRadius); },
+        (el) => { cornerRadiusInput = el; el.value = String(layerForBuild()?.cornerRadius ?? 0); },
         (el) => { cornerRadiusValueEl = el; },
-        () => {
-            selectedCornerRadius = parseInt(cornerRadiusInput.value, 10);
-            applyCornerRadiusToCurrentShape();
-        },
+        () => { applyCornerRadiusToCurrentShape(parseInt(cornerRadiusInput.value, 10)); },
         cornerRadiusRow, 'px');
     container.appendChild(cornerRadiusRow);
 
     const chamferRow = document.createElement('div');
     chamferRow.dataset.modifier = 'chamfer';
     buildSliderField('Top Chamfer', 'sd-chamfer', 0, 30, 1,
-        (el) => { chamferSizeInput = el; el.value = String(selectedChamferSize); },
+        (el) => { chamferSizeInput = el; el.value = String(layerForBuild()?.chamferSize ?? 0); },
         (el) => { chamferSizeValueEl = el; },
-        () => {
-            selectedChamferSize = parseInt(chamferSizeInput.value, 10);
-            applyChamferSizeToCurrentShape();
-        },
+        () => { applyChamferSizeToCurrentShape(parseInt(chamferSizeInput.value, 10)); },
         chamferRow, 'px');
     container.appendChild(chamferRow);
 
     const chamferHeightRow = document.createElement('div');
     chamferHeightRow.dataset.modifier = 'chamferHeight';
-    // chamferStartInput, chamferStartVal — module-level
     buildSliderField('Top Chamfer %', 'sd-chamfer-start', 0, 1, 0.05,
-        (el) => { chamferStartInput = el; el.value = String(selectedChamferStart); },
+        (el) => { chamferStartInput = el; el.value = String(layerForBuild()?.chamferStart ?? 0); },
         (el) => { chamferStartVal = el; },
-        () => {
-            selectedChamferStart = parseFloat(chamferStartInput.value);
-            applyChamferStartToCurrentShape();
-        },
+        () => { applyChamferStartToCurrentShape(parseFloat(chamferStartInput.value)); },
         chamferHeightRow, '%');
     container.appendChild(chamferHeightRow);
 
     const chamferBottomRow = document.createElement('div');
     chamferBottomRow.dataset.modifier = 'chamferBottom';
     buildSliderField('Bottom Chamfer', 'sd-chamfer-bottom', 0, 30, 1,
-        (el) => { chamferBottomSizeInput = el; el.value = String(selectedChamferBottomSize); },
+        (el) => { chamferBottomSizeInput = el; el.value = String(layerForBuild()?.chamferBottomSize ?? 0); },
         (el) => { chamferBottomSizeValueEl = el; },
-        () => {
-            selectedChamferBottomSize = parseInt(chamferBottomSizeInput.value, 10);
-            applyChamferBottomSizeToCurrentShape();
-        },
+        () => { applyChamferBottomSizeToCurrentShape(parseInt(chamferBottomSizeInput.value, 10)); },
         chamferBottomRow, 'px');
     container.appendChild(chamferBottomRow);
 
     const chamferBottomHeightRow = document.createElement('div');
     chamferBottomHeightRow.dataset.modifier = 'chamferBottomHeight';
-    // chamferBottomStartInput, chamferBottomStartVal — module-level
     buildSliderField('Bottom Chamfer %', 'sd-chamfer-bottom-start', 0, 1, 0.05,
-        (el) => { chamferBottomStartInput = el; el.value = String(selectedChamferBottomStart); },
+        (el) => { chamferBottomStartInput = el; el.value = String(layerForBuild()?.chamferBottomStart ?? 0); },
         (el) => { chamferBottomStartVal = el; },
-        () => {
-            selectedChamferBottomStart = parseFloat(chamferBottomStartInput.value);
-            applyChamferBottomStartToCurrentShape();
-        },
+        () => { applyChamferBottomStartToCurrentShape(parseFloat(chamferBottomStartInput.value)); },
         chamferBottomHeightRow, '%');
     container.appendChild(chamferBottomHeightRow);
-
-    const taperRow = document.createElement('div');
-    taperRow.dataset.modifier = 'taper';
-    buildSliderField('Taper', 'sd-taper', -0.95, 0.95, 0.05,
-        (el) => { taperInput = el; el.value = String(selectedTaper); },
-        (el) => { taperValueEl = el; },
-        () => { selectedTaper = parseFloat(taperInput.value); apply3DModifiers(); },
-        taperRow);
-    container.appendChild(taperRow);
 
     const twistRow = document.createElement('div');
     twistRow.dataset.modifier = 'twist';
     buildSliderField('Twist', 'sd-twist', -180, 180, 5,
-        (el) => { twistInput = el; el.value = String(selectedTwist); },
+        (el) => { twistInput = el; el.value = String(layerForBuild()?.twist ?? 0); },
         (el) => { twistValueEl = el; },
-        () => { selectedTwist = parseFloat(twistInput.value); apply3DModifiers(); },
+        () => { applyTwistToCurrentShape(parseFloat(twistInput.value)); },
         twistRow, '°');
     container.appendChild(twistRow);
 
     const stxRow = document.createElement('div');
     stxRow.dataset.modifier = 'scaleTopX';
-    buildSliderField('Scale Top X', 'sd-scale-top-x', 0.1, 2, 0.05,
-        (el) => { stxInput = el; el.value = String(selectedScaleTopX); },
+    buildSliderField('Scale Top X', 'sd-scale-top-x', 0, 2, 0.05,
+        (el) => { stxInput = el; el.value = String(layerForBuild()?.scaleTopX ?? 1); },
         (el) => { stxValueEl = el; },
-        () => { selectedScaleTopX = parseFloat(stxInput.value); apply3DModifiers(); },
+        () => { applyScaleTopXToCurrentShape(parseFloat(stxInput.value)); },
         stxRow);
     container.appendChild(stxRow);
 
     const styRow = document.createElement('div');
     styRow.dataset.modifier = 'scaleTopY';
-    buildSliderField('Scale Top Y', 'sd-scale-top-y', 0.1, 2, 0.05,
-        (el) => { styInput = el; el.value = String(selectedScaleTopY); },
+    buildSliderField('Scale Top Y', 'sd-scale-top-y', 0, 2, 0.05,
+        (el) => { styInput = el; el.value = String(layerForBuild()?.scaleTopY ?? 1); },
         (el) => { styValueEl = el; },
-        () => { selectedScaleTopY = parseFloat(styInput.value); apply3DModifiers(); },
+        () => { applyScaleTopYToCurrentShape(parseFloat(styInput.value)); },
         styRow);
     container.appendChild(styRow);
 
     // Shed Roof
-    // shedDropInput, shedDropValueEl — module-level
     const shedDropRow = document.createElement('div');
     shedDropRow.dataset.modifier = 'shedRoof';
     buildSliderField('Shed Roof', 'sd-shed-drop', 0, 30, 1,
-        (el) => { shedDropInput = el; el.value = String(selectedShedRoofDrop); },
+        (el) => { shedDropInput = el; el.value = String(layerForBuild()?.shedRoofDrop ?? 0); },
         (el) => { shedDropValueEl = el; },
-        () => { selectedShedRoofDrop = parseInt(shedDropInput.value, 10); applyShedRoofToCurrentShape(); },
+        () => {
+            const layer = layerForBuild();
+            applyShedRoofToCurrentShape(parseInt(shedDropInput.value, 10), layer?.shedRoofDirection ?? 'front');
+        },
         shedDropRow, 'px');
     container.appendChild(shedDropRow);
 
@@ -1036,22 +1108,28 @@ function buildModifiersContent(container: HTMLElement) {
         { label: 'Back',  val: 'back',  icon: ArrowUp16 as CarbonIcon },
         { label: 'Left',  val: 'left',  icon: ArrowLeft16 as CarbonIcon },
     ];
+    const shedDirButtons: Record<string, HTMLButtonElement> = {};
     for (const dir of shedDirDefs) {
         const btn = document.createElement('button');
         btn.type = 'button';
         const val = dir.val;
-        btn.className = 'nr-seg-btn' + (val === selectedShedRoofDirection ? ' nr-seg-btn--selected' : '');
+        btn.className = 'nr-seg-btn';
         btn.title = dir.label;
         btn.innerHTML = carbonIconToString(dir.icon);
         btn.addEventListener('click', () => {
-            selectedShedRoofDirection = val;
-            shedDirSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
-                b.classList.toggle('nr-seg-btn--selected', b === btn));
-            applyShedRoofToCurrentShape();
-            markDirty();
+            const layer = layerForBuild();
+            applyShedRoofToCurrentShape(layer?.shedRoofDrop ?? 0, val);
+            populate();
         });
+        shedDirButtons[val] = btn;
         shedDirSwitcher.appendChild(btn);
     }
+    registerPopulator(() => {
+        const dir = layerForBuild()?.shedRoofDirection ?? 'front';
+        for (const v of ['front', 'right', 'back', 'left']) {
+            shedDirButtons[v]?.classList.toggle('nr-seg-btn--selected', v === dir);
+        }
+    });
     shedDirRow.appendChild(shedDirSwitcher);
     container.appendChild(shedDirRow);
 
@@ -1061,20 +1139,19 @@ function buildModifiersContent(container: HTMLElement) {
     modResetBtn.title = 'Reset to default';
     modResetBtn.innerHTML = 'Reset to default';
     modResetBtn.addEventListener('click', () => {
-        const defs = getBaseShapeDefault(selectedBaseShape);
-        cornerRadiusInput.value = String(defs.cornerRadius ?? 0); selectedCornerRadius = defs.cornerRadius ?? 0; applyCornerRadiusToCurrentShape();
-        chamferSizeInput.value = String(defs.chamferSize ?? 0); selectedChamferSize = defs.chamferSize ?? 0; applyChamferSizeToCurrentShape();
-        chamferStartInput.value = String(defs.chamferStart ?? 0); selectedChamferStart = defs.chamferStart ?? 0; applyChamferStartToCurrentShape();
-        chamferBottomSizeInput.value = String(defs.chamferBottomSize ?? 0); selectedChamferBottomSize = defs.chamferBottomSize ?? 0; applyChamferBottomSizeToCurrentShape();
-        chamferBottomStartInput.value = String(defs.chamferBottomStart ?? 0); selectedChamferBottomStart = defs.chamferBottomStart ?? 0; applyChamferBottomStartToCurrentShape();
-        taperInput.value = String(defs.taper ?? 0); selectedTaper = defs.taper ?? 0;
-        twistInput.value = String(defs.twist ?? 0); selectedTwist = defs.twist ?? 0;
-        stxInput.value = String(defs.scaleTopX ?? 1); selectedScaleTopX = defs.scaleTopX ?? 1;
-        styInput.value = String(defs.scaleTopY ?? 1); selectedScaleTopY = defs.scaleTopY ?? 1;
-        shedDropInput.value = String(defs.shedRoofDrop ?? 0); selectedShedRoofDrop = defs.shedRoofDrop ?? 0; applyShedRoofToCurrentShape();
-        selectedShedRoofDirection = defs.shedRoofDirection ?? 'front';
-        shedDirSwitcher.querySelectorAll('.nr-seg-btn').forEach((b, i) => b.classList.toggle('nr-seg-btn--selected', ['front','right','back','left'][i] === selectedShedRoofDirection));
-        apply3DModifiers();
+        // Modifier reset = identity values (no chamfer, no twist, etc.).
+        // Per-modifier user defaults are no longer stored.
+        cornerRadiusInput.value      = '0';  applyCornerRadiusToCurrentShape(0);
+        chamferSizeInput.value       = '0';  applyChamferSizeToCurrentShape(0);
+        chamferStartInput.value      = '0';  applyChamferStartToCurrentShape(0);
+        chamferBottomSizeInput.value = '0';  applyChamferBottomSizeToCurrentShape(0);
+        chamferBottomStartInput.value= '0';  applyChamferBottomStartToCurrentShape(0);
+        twistInput.value             = '0';  applyTwistToCurrentShape(0);
+        stxInput.value               = '1';  applyScaleTopXToCurrentShape(1);
+        styInput.value               = '1';  applyScaleTopYToCurrentShape(1);
+        shedDropInput.value          = '0';  applyShedRoofToCurrentShape(0, 'front');
+        // For pipe-group shapes, also reset the cross-section to Round.
+        if (isPipeGroup(currentBaseShape())) switchPipeVariant('round');
         buildInspectorPanel();
     });
     container.appendChild(modResetBtn);
@@ -1116,6 +1193,27 @@ function buildPositionContent(container: HTMLElement) {
         (el) => { baseElevationInput = el; el.value = String(elev); },
         (el) => { baseElevationValueEl = el; el.textContent = `${Math.round(elev)} px`; },
         onOffsetChange, container);
+
+    const posResetBtn = document.createElement('button');
+    posResetBtn.type = 'button';
+    posResetBtn.className = 'nr-sd-reset-btn';
+    posResetBtn.title = 'Reset offset and elevation to default';
+    posResetBtn.innerHTML = 'Reset to default';
+    posResetBtn.addEventListener('click', () => {
+        offsetXInput.value        = '0';
+        offsetYInput.value        = '0';
+        baseElevationInput.value  = '0';
+        const setDisp = (input: HTMLInputElement, val: number) => {
+            const row = input.closest('.nr-sd-number-row');
+            const display = row?.querySelector('.nr-sd-number-display') as HTMLInputElement | null;
+            if (display) display.value = `${val}px`;
+        };
+        setDisp(offsetXInput, 0);
+        setDisp(offsetYInput, 0);
+        setDisp(baseElevationInput, 0);
+        onOffsetChange();
+    });
+    container.appendChild(posResetBtn);
 }
 
 function buildRotationContent(container: HTMLElement) {
@@ -1130,20 +1228,24 @@ function buildRotationContent(container: HTMLElement) {
     const switcher = document.createElement('div');
     switcher.className = 'nr-sd-face-switcher';
 
+    const rotationButtons: Record<0 | 90, HTMLButtonElement> = { 0: null!, 90: null! };
     for (const angle of [0, 90] as const) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'nr-sd-face-btn' + (selectedRotation === angle ? ' nr-sd-face-btn--active' : '');
+        btn.className = 'nr-sd-face-btn';
         btn.textContent = `${angle}°`;
         btn.addEventListener('click', () => {
-            selectedRotation = angle;
-            switcher.querySelectorAll('.nr-sd-face-btn').forEach(b =>
-                b.classList.toggle('nr-sd-face-btn--active', b === btn)
-            );
-            applyRotation();
+            applyRotation(angle);
+            populate();
         });
+        rotationButtons[angle] = btn;
         switcher.appendChild(btn);
     }
+
+    registerPopulator(() => {
+        rotationButtons[0].classList.toggle('nr-sd-face-btn--active', selectedRotation === 0);
+        rotationButtons[90].classList.toggle('nr-sd-face-btn--active', selectedRotation === 90);
+    });
 
     row.appendChild(switcher);
     container.appendChild(row);
@@ -1158,8 +1260,8 @@ const CLIP_SHAPE_ICONS: Record<string, string> = {
 };
 
 const FORM_FACTOR_PREVIEWS_SVG: Record<string, string> = {
-    cuboid:    `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>`,
-    cylinder:  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>`,
+    rectangle:    `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>`,
+    circle:  `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>`,
     pyramid:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="12,4 20,20 4,20"/></svg>`,
     octagon:   `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="8,4 16,4 20,8 20,16 16,20 8,20 4,16 4,8"/></svg>`,
     tube:      `<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><ellipse cx="18" cy="12" rx="3" ry="6"/><line x1="6" y1="6" x2="18" y2="6"/><line x1="6" y1="18" x2="18" y2="18"/><ellipse cx="6" cy="12" rx="3" ry="6"/></svg>`,
@@ -1170,13 +1272,13 @@ const FORM_FACTOR_PREVIEWS_SVG: Record<string, string> = {
 };
 
 function buildFormFactorContent(container: HTMLElement) {
+    // Pipe is one dropdown entry covering tube/pipe/duct/channel — the
+    // round/octagonal split lives in the modifier panel's variant switcher.
     const options: { value: BaseShape; label: string }[] = [
-        { value: 'cuboid',      label: 'Square' },
-        { value: 'cylinder',    label: 'Circle' },
+        { value: 'rectangle',   label: 'Rectangle' },
+        { value: 'circle',      label: 'Circle' },
         { value: 'octagon',     label: 'Octagon' },
-        { value: 'pyramid',     label: 'Pyramid' },
-        { value: 'tube',        label: 'Tube' },
-        { value: 'duct',        label: 'Duct' },
+        { value: 'tube',        label: 'Pipe' },
         { value: 'custom',      label: 'Custom' },
     ];
 
@@ -1195,19 +1297,27 @@ function buildFormFactorContent(container: HTMLElement) {
     trigger.type = 'button';
     trigger.className = 'nr-sd-dropdown__trigger';
 
-    const PRIMARY_SHAPE: Record<string, string> = { pipe: 'tube', channel: 'duct' };
+    // All four pipe-group variants render as the single 'tube' dropdown entry
+    // labelled "Pipe"; the round/octagonal split is a modifier-panel switcher.
+    // hexahedron is an alias for rectangle, svgPolygon for custom — map them
+    // so the trigger lookup never lands on a value missing from `options`.
+    const PRIMARY_SHAPE: Record<string, string> = {
+        pipe: 'tube', channel: 'tube', duct: 'tube',
+        hexahedron: 'rectangle',
+        svgPolygon: 'custom',
+    };
     const setTriggerContent = (value: BaseShape) => {
         const displayValue = PRIMARY_SHAPE[value] || value;
-        const opt = options.find(o => o.value === displayValue)!;
+        const opt = options.find(o => o.value === displayValue) ?? options[0];
         trigger.innerHTML = `<span class="nr-sd-dropdown__icon">${FORM_FACTOR_PREVIEWS_SVG[displayValue] ?? ''}</span><span class="nr-sd-dropdown__text">${opt.label}</span><svg class="nr-sd-dropdown__chevron" viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 11L3 6l.7-.7L8 9.6l4.3-4.3.7.7z"/></svg>`;
     };
-    setTriggerContent(selectedBaseShape);
+    setTriggerContent(currentBaseShape());
 
     syncFormFactorDropdown = () => {
-        setTriggerContent(selectedBaseShape);
+        setTriggerContent(currentBaseShape());
         menu.querySelectorAll('.nr-sd-dropdown__item--selected').forEach(el => el.classList.remove('nr-sd-dropdown__item--selected'));
-        const active = menu.querySelector(`[data-value="${selectedBaseShape}"]`) ||
-            menu.querySelector(`[data-value="${PRIMARY_SHAPE[selectedBaseShape] || selectedBaseShape}"]`);
+        const active = menu.querySelector(`[data-value="${currentBaseShape()}"]`) ||
+            menu.querySelector(`[data-value="${PRIMARY_SHAPE[currentBaseShape()] || currentBaseShape()}"]`);
         if (active) active.classList.add('nr-sd-dropdown__item--selected');
     };
 
@@ -1230,11 +1340,14 @@ function buildFormFactorContent(container: HTMLElement) {
         li.className = 'nr-sd-dropdown__item';
         li.setAttribute('role', 'option');
         li.setAttribute('data-value', opt.value);
-        if (opt.value === selectedBaseShape) li.classList.add('nr-sd-dropdown__item--selected');
+        if (opt.value === currentBaseShape()) li.classList.add('nr-sd-dropdown__item--selected');
         li.innerHTML = `<span class="nr-sd-dropdown__icon">${FORM_FACTOR_PREVIEWS_SVG[opt.value] ?? ''}</span><span class="nr-sd-dropdown__text">${opt.label}</span>`;
 
         li.addEventListener('click', () => {
-            selectedBaseShape = opt.value;
+            // Form-factor pick: write the new base shape onto the current
+            // layer. Downstream calls re-read it via currentBaseShape().
+            const layer = layers[selectedLayerIndex];
+            if (layer) layer.baseShape = opt.value;
             setTriggerContent(opt.value);
             menu.querySelectorAll('.nr-sd-dropdown__item--selected').forEach(el => el.classList.remove('nr-sd-dropdown__item--selected'));
             li.classList.add('nr-sd-dropdown__item--selected');
@@ -1245,8 +1358,9 @@ function buildFormFactorContent(container: HTMLElement) {
             applyBaseShapeDefaults(opt.value);
             applyFormFactorToCanvas();
             if (opt.value === 'custom' && onCustomSelected) onCustomSelected();
-            const needsVariants = opt.value === 'tube' || opt.value === 'duct';
-            if (needsVariants) hasVariations = true;
+            // Pipe-group base shapes (round + octagonal variants × rotations)
+            // ship with rotation variations enabled.
+            if (isPipeGroup(opt.value)) hasVariations = true;
             buildInspectorPanel();
         });
 
@@ -1270,24 +1384,19 @@ function buildFormFactorContent(container: HTMLElement) {
     // ── Custom vertex editor ─────────────────────────────────────────────
     const veContainer = document.createElement('div');
     veContainer.className = 'nr-vertex-editor';
-    veContainer.style.display = selectedBaseShape === 'custom' ? '' : 'none';
+    veContainer.style.display = currentBaseShape() === 'custom' ? '' : 'none';
 
     const VE_PAD = 12;
     const VE_HANDLE = 6;
-    let VE_GRID_X = 16;
-    let VE_GRID_Y = 16;
-    let VE_SNAP_X = 1 / VE_GRID_X;
-    let VE_SNAP_Y = 1 / VE_GRID_Y;
-
-    const { wPx, hPx } = currentDimensionsPx();
-    const maxPx = Math.max(wPx, hPx, 1);
-    VE_GRID_X = Math.round((wPx / maxPx) * 16) || 16;
-    VE_GRID_Y = Math.round((hPx / maxPx) * 16) || 16;
-    VE_SNAP_X = 1 / VE_GRID_X;
-    VE_SNAP_Y = 1 / VE_GRID_Y;
-
-    const VE_SIZE_X = VE_PAD * 2 + VE_GRID_X * 10;
-    const VE_SIZE_Y = VE_PAD * 2 + VE_GRID_Y * 10;
+    // The drawing view is always a 16×16 square regardless of the actual
+    // shape dimensions — normalized coordinates (0..1 in both axes) decouple
+    // the editor from the rendered aspect ratio.
+    const VE_GRID = 16;
+    const VE_SNAP_X = 1 / VE_GRID;
+    const VE_SNAP_Y = 1 / VE_GRID;
+    const VE_SIZE_X = VE_PAD * 2 + VE_GRID * 10;
+    const VE_SIZE_Y = VE_SIZE_X;
+    const VE_MAJOR_STEP = 4;
 
     const veSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     veSvg.setAttribute('width', String(VE_SIZE_X));
@@ -1298,26 +1407,25 @@ function buildFormFactorContent(container: HTMLElement) {
     const veGridGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     const areaX = VE_SIZE_X - VE_PAD * 2;
     const areaY = VE_SIZE_Y - VE_PAD * 2;
-    for (let i = 0; i <= VE_GRID_Y; i++) {
-        const pos = VE_PAD + (i / VE_GRID_Y) * areaY;
+    for (let i = 0; i <= VE_GRID; i++) {
+        const yPos = VE_PAD + (i / VE_GRID) * areaY;
         const hLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
         hLine.setAttribute('x1', String(VE_PAD));
-        hLine.setAttribute('y1', String(pos));
+        hLine.setAttribute('y1', String(yPos));
         hLine.setAttribute('x2', String(VE_PAD + areaX));
-        hLine.setAttribute('y2', String(pos));
+        hLine.setAttribute('y2', String(yPos));
         hLine.classList.add('nr-vertex-editor__grid-line');
-        if (i % (VE_GRID_Y / Math.round(wPx / GRID_SIZE)) === 0) hLine.classList.add('nr-vertex-editor__grid-line--major');
+        if (i % VE_MAJOR_STEP === 0) hLine.classList.add('nr-vertex-editor__grid-line--major');
         veGridGroup.appendChild(hLine);
-    }
-    for (let i = 0; i <= VE_GRID_X; i++) {
-        const pos = VE_PAD + (i / VE_GRID_X) * areaX;
+
+        const xPos = VE_PAD + (i / VE_GRID) * areaX;
         const vLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        vLine.setAttribute('x1', String(pos));
+        vLine.setAttribute('x1', String(xPos));
         vLine.setAttribute('y1', String(VE_PAD));
-        vLine.setAttribute('x2', String(pos));
+        vLine.setAttribute('x2', String(xPos));
         vLine.setAttribute('y2', String(VE_PAD + areaY));
         vLine.classList.add('nr-vertex-editor__grid-line');
-        if (i % (VE_GRID_X / Math.round(hPx / GRID_SIZE)) === 0) vLine.classList.add('nr-vertex-editor__grid-line--major');
+        if (i % VE_MAJOR_STEP === 0) vLine.classList.add('nr-vertex-editor__grid-line--major');
         veGridGroup.appendChild(vLine);
     }
     veSvg.appendChild(veGridGroup);
@@ -1331,74 +1439,131 @@ function buildFormFactorContent(container: HTMLElement) {
     const veEdgeHitsGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     veSvg.insertBefore(veEdgeHitsGroup, veHandlesGroup);
 
-    // Path toolbar
+    // Two-column layout: sidebar (add buttons + path list) on the left,
+    // drawing grid on the right.
+    const veBody = document.createElement('div');
+    veBody.className = 'nr-vertex-editor__body';
+
+    const veSidebar = document.createElement('div');
+    veSidebar.className = 'nr-vertex-editor__sidebar';
+
+    const veMain = document.createElement('div');
+    veMain.className = 'nr-vertex-editor__main';
+
+    // Sidebar contents: add-buttons row on top, then the list of added paths.
     const vePathToolbar = document.createElement('div');
     vePathToolbar.className = 'nr-ve-path-toolbar';
 
     const vePathTabsEl = document.createElement('div');
     vePathTabsEl.className = 'nr-ve-path-tabs';
-    vePathToolbar.appendChild(vePathTabsEl);
 
+    // Two add buttons \u2014 Path (closed polygon = footprint) vs. Line (open
+    // polyline drawn on the top face only). Type is set on creation and
+    // cannot be changed afterwards.
     const veAddPathBtn = document.createElement('button');
     veAddPathBtn.type = 'button';
     veAddPathBtn.className = 'nr-ve-path-add';
-    veAddPathBtn.textContent = '+';
-    veAddPathBtn.title = 'New path';
+    veAddPathBtn.textContent = '+ Path';
+    veAddPathBtn.title = 'New path (closed polygon)';
     veAddPathBtn.addEventListener('click', () => {
-        customPaths.push([[0.25, 0.25], [0.5, 0.25], [0.5, 0.5], [0.25, 0.5]]);
-        activePathIdx = customPaths.length - 1;
+        editorPaths.push({ type: 'polygon', verts: [[0.25, 0.25], [0.5, 0.25], [0.5, 0.5], [0.25, 0.5]] });
+        activePathIdx = editorPaths.length - 1;
         rebuildPathTabs();
         veRender();
         veApply();
     });
     vePathToolbar.appendChild(veAddPathBtn);
 
-    veContainer.appendChild(vePathToolbar);
-    veContainer.appendChild(veSvg);
+    const veAddLineBtn = document.createElement('button');
+    veAddLineBtn.type = 'button';
+    veAddLineBtn.className = 'nr-ve-path-add';
+    veAddLineBtn.textContent = '+ Line';
+    veAddLineBtn.title = 'New line (open polyline on top face)';
+    veAddLineBtn.addEventListener('click', () => {
+        editorPaths.push({ type: 'line', verts: [[0.25, 0.5], [0.75, 0.5]] });
+        activePathIdx = editorPaths.length - 1;
+        rebuildPathTabs();
+        veRender();
+        veApply();
+    });
+    vePathToolbar.appendChild(veAddLineBtn);
 
+    veSidebar.appendChild(vePathToolbar);
+    veSidebar.appendChild(vePathTabsEl);
+
+    veMain.appendChild(veSvg);
     const veHint = document.createElement('div');
     veHint.className = 'nr-vertex-editor__hint';
     veHint.textContent = 'Drag vertices. Double-click edge to add. Right-click vertex to remove.';
-    veContainer.appendChild(veHint);
+    veMain.appendChild(veHint);
+
+    veBody.appendChild(veSidebar);
+    veBody.appendChild(veMain);
+    veContainer.appendChild(veBody);
 
     container.appendChild(veContainer);
 
-    let customPaths: [number, number][][] = [[[0, 0], [1, 0], [1, 1], [0, 1]]];
+    // Unified path model: polygons (closed, define footprint) + lines (open,
+    // overlay on top face). Lines are stored separately on the layer/cell.
+    interface EditorPath { type: 'polygon' | 'line'; verts: [number, number][] }
+    let editorPaths: EditorPath[] = [{ type: 'polygon', verts: [[0, 0], [1, 0], [1, 1], [0, 1]] }];
     let activePathIdx = 0;
 
-    if (selectedBaseShape === 'custom' && currentShape) {
-        const raw = currentShape.get('normalizedVerts');
+    if (currentBaseShape() === 'custom' && currentShape) {
+        editorPaths = loadEditorPaths();
+    }
+
+    function loadEditorPaths(): EditorPath[] {
+        const result: EditorPath[] = [];
+        const raw = currentShape?.get('normalizedVerts');
         if (raw && raw.length > 0) {
             if (typeof raw[0][0] === 'number') {
-                customPaths = [(raw as [number, number][]).map(v => [...v] as [number, number])];
+                result.push({ type: 'polygon', verts: (raw as [number, number][]).map(v => [...v] as [number, number]) });
             } else {
-                customPaths = (raw as [number, number][][]).map(
-                    (path: [number, number][]) => path.map(v => [...v] as [number, number])
-                );
+                for (const p of raw as [number, number][][]) {
+                    result.push({ type: 'polygon', verts: p.map(v => [...v] as [number, number]) });
+                }
             }
         }
+        const linesRaw = currentShape?.get('lines') as [number, number][][] | undefined;
+        if (linesRaw && linesRaw.length > 0) {
+            for (const l of linesRaw) {
+                result.push({ type: 'line', verts: l.map(v => [...v] as [number, number]) });
+            }
+        }
+        if (result.length === 0) {
+            result.push({ type: 'polygon', verts: [[0, 0], [1, 0], [1, 1], [0, 1]] });
+        }
+        return result;
     }
 
     function rebuildPathTabs() {
         vePathTabsEl.innerHTML = '';
-        customPaths.forEach((_, idx) => {
+        // Number paths and lines independently for readable tab labels.
+        let pathCounter = 0;
+        let lineCounter = 0;
+        editorPaths.forEach((path, idx) => {
             const tab = document.createElement('button');
             tab.type = 'button';
             tab.className = 'nr-ve-path-tab' + (idx === activePathIdx ? ' nr-ve-path-tab--active' : '');
-            tab.textContent = `Path ${idx + 1}`;
+            const label = document.createElement('span');
+            label.textContent = path.type === 'polygon'
+                ? `Path ${++pathCounter}`
+                : `Line ${++lineCounter}`;
+            tab.appendChild(label);
             tab.addEventListener('click', () => {
                 activePathIdx = idx;
                 rebuildPathTabs();
                 veRender();
             });
-            if (customPaths.length > 1) {
+            if (editorPaths.length > 1) {
                 const del = document.createElement('span');
                 del.className = 'nr-ve-path-tab__del';
                 del.textContent = '\u00d7';
                 del.addEventListener('click', (e) => {
                     e.stopPropagation();
-                    customPaths.splice(idx, 1);
-                    if (activePathIdx >= customPaths.length) activePathIdx = customPaths.length - 1;
+                    editorPaths.splice(idx, 1);
+                    if (activePathIdx >= editorPaths.length) activePathIdx = editorPaths.length - 1;
                     rebuildPathTabs();
                     veRender();
                     veApply();
@@ -1407,7 +1572,7 @@ function buildFormFactorContent(container: HTMLElement) {
             }
             vePathTabsEl.appendChild(tab);
         });
-        vePathToolbar.style.display = selectedBaseShape === 'custom' ? '' : 'none';
+        vePathToolbar.style.display = currentBaseShape() === 'custom' ? '' : 'none';
     }
 
     function veToScreen(nx: number, ny: number): [number, number] {
@@ -1428,17 +1593,21 @@ function buildFormFactorContent(container: HTMLElement) {
         veHandlesGroup.innerHTML = '';
         veEdgeHitsGroup.innerHTML = '';
 
-        for (let p = 0; p < customPaths.length; p++) {
-            const path = customPaths[p];
-            const pts = path.map(([nx, ny]) => veToScreen(nx, ny));
-            const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-            polygon.setAttribute('points', pts.map(([x, y]) => `${x},${y}`).join(' '));
-            polygon.classList.add('nr-vertex-editor__polygon');
-            if (p !== activePathIdx) polygon.classList.add('nr-vertex-editor__polygon--inactive');
-            vePolygonsGroup.appendChild(polygon);
+        for (let p = 0; p < editorPaths.length; p++) {
+            const ep = editorPaths[p];
+            const pts = ep.verts.map(([nx, ny]) => veToScreen(nx, ny));
+            const shape = document.createElementNS('http://www.w3.org/2000/svg',
+                ep.type === 'polygon' ? 'polygon' : 'polyline');
+            shape.setAttribute('points', pts.map(([x, y]) => `${x},${y}`).join(' '));
+            shape.classList.add(ep.type === 'polygon' ? 'nr-vertex-editor__polygon' : 'nr-vertex-editor__line');
+            if (p !== activePathIdx) {
+                shape.classList.add(ep.type === 'polygon' ? 'nr-vertex-editor__polygon--inactive' : 'nr-vertex-editor__line--inactive');
+            }
+            vePolygonsGroup.appendChild(shape);
 
             if (p !== activePathIdx) continue;
 
+            const edgeCount = ep.type === 'polygon' ? pts.length : pts.length - 1;
             for (let i = 0; i < pts.length; i++) {
                 const [x, y] = pts[i];
                 const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -1449,6 +1618,7 @@ function buildFormFactorContent(container: HTMLElement) {
                 circle.dataset.idx = String(i);
                 veHandlesGroup.appendChild(circle);
 
+                if (i >= edgeCount) continue;
                 const j = (i + 1) % pts.length;
                 const [x2, y2] = pts[j];
                 const edgeLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -1465,14 +1635,28 @@ function buildFormFactorContent(container: HTMLElement) {
 
     function veApply() {
         if (!currentShape) return;
-        const allPaths = customPaths.map(path => path.map(v => [...v] as [number, number]));
-        currentShape.set('normalizedVerts', allPaths);
-        if (currentShape2D) currentShape2D.set('normalizedVerts', allPaths);
+        const polygons: [number, number][][] = [];
+        const lines:    [number, number][][] = [];
+        for (const ep of editorPaths) {
+            const copy = ep.verts.map(v => [...v] as [number, number]);
+            if (ep.type === 'polygon') polygons.push(copy);
+            else                       lines.push(copy);
+        }
+        currentShape.set('normalizedVerts', polygons);
+        currentShape.set('lines', lines);
+        if (currentShape2D) {
+            currentShape2D.set('normalizedVerts', polygons);
+            currentShape2D.set('lines', lines);
+        }
         const layer = layers[selectedLayerIndex];
         if (layer) {
-            layer.normalizedVerts = allPaths[0];
+            layer.normalizedVerts = polygons[0];
+            layer.lines = lines.length > 0 ? lines : undefined;
             layer.baseShape = 'custom';
         }
+        // Anchor count may have crossed the 4-vs-other boundary, which changes
+        // shed-roof capability on SvgPolygonShape — refresh the modifier panel.
+        syncModifierVisibility();
         markDirty();
     }
 
@@ -1491,7 +1675,7 @@ function buildFormFactorContent(container: HTMLElement) {
         const rect = veSvg.getBoundingClientRect();
         const sx = e.clientX - rect.left;
         const sy = e.clientY - rect.top;
-        customPaths[activePathIdx][veDragIdx] = veFromScreen(sx, sy);
+        editorPaths[activePathIdx].verts[veDragIdx] = veFromScreen(sx, sy);
         veRender();
         veApply();
     });
@@ -1504,20 +1688,22 @@ function buildFormFactorContent(container: HTMLElement) {
             const after = parseInt(target.dataset.after, 10);
             const rect = veSvg.getBoundingClientRect();
             const [nx, ny] = veFromScreen(e.clientX - rect.left, e.clientY - rect.top);
-            customPaths[activePathIdx].splice(after + 1, 0, [nx, ny]);
+            editorPaths[activePathIdx].verts.splice(after + 1, 0, [nx, ny]);
             veRender();
             veApply();
         }
     });
 
-    // Right-click vertex to remove (min 3)
+    // Right-click vertex to remove (min 3 for polygons, 2 for lines)
     veSvg.addEventListener('contextmenu', (e: MouseEvent) => {
         e.preventDefault();
         const target = e.target as SVGElement;
         if (target.classList.contains('nr-vertex-editor__handle') && target.dataset.idx) {
-            if (customPaths[activePathIdx].length <= 3) return;
+            const active = editorPaths[activePathIdx];
+            const min = active.type === 'polygon' ? 3 : 2;
+            if (active.verts.length <= min) return;
             const idx = parseInt(target.dataset.idx, 10);
-            customPaths[activePathIdx].splice(idx, 1);
+            active.verts.splice(idx, 1);
             veRender();
             veApply();
         }
@@ -1525,27 +1711,14 @@ function buildFormFactorContent(container: HTMLElement) {
 
     veContainerRef = veContainer;
     onCustomSelected = () => {
-        if (currentShape) {
-            const raw = currentShape.get('normalizedVerts');
-            if (raw && raw.length > 0) {
-                if (typeof raw[0][0] === 'number') {
-                    customPaths = [(raw as [number, number][]).map(v => [...v] as [number, number])];
-                } else {
-                    customPaths = (raw as [number, number][][]).map(
-                        (path: [number, number][]) => path.map(v => [...v] as [number, number])
-                    );
-                }
-            } else {
-                customPaths = [[[0, 0], [1, 0], [1, 1], [0, 1]]];
-            }
-        }
+        if (currentShape) editorPaths = loadEditorPaths();
         activePathIdx = 0;
         rebuildPathTabs();
         veRender();
         veApply();
     };
 
-    if (selectedBaseShape === 'custom') {
+    if (currentBaseShape() === 'custom') {
         rebuildPathTabs();
         veRender();
     }
@@ -1563,61 +1736,8 @@ function syncFormFactorTiles() {
     });
 }
 
-const NO_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32"><line x1="6" y1="16" x2="26" y2="16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`;
-
-// Generates a composite SVG with icon and background at absolute pixel sizes
-// within a fixed viewBox. Both are centered independently.
-function buildCompositeIconSvg(iconSvg: string | null, bgColor: string | null, bgShape: 'circle' | 'square' | 'octagon', applyWhiteFilter = true, bgRadius = 6, bgChamfer = 0.18, padding: 'normal' | 'compact' | 'tight' | 'none' = 'normal', clipToShape = false, canvasPx = 64, iconPx = 64, bgPx = 64, iconColor: string | null = null, iconOpacity = 100, bgOpacity = 100): string {
-    const S = canvasPx;
-
-    // Background — absolute size, centered
-    const bgOff = (S - bgPx) / 2;
-    let shapeEl = '';
-    if (bgShape === 'circle') {
-        shapeEl = `<circle cx="${bgOff + bgPx / 2}" cy="${bgOff + bgPx / 2}" r="${bgPx / 2}"`;
-    } else if (bgShape === 'octagon') {
-        const c = bgPx * bgChamfer;
-        shapeEl = `<polygon points="${bgOff + c},${bgOff} ${bgOff + bgPx - c},${bgOff} ${bgOff + bgPx},${bgOff + c} ${bgOff + bgPx},${bgOff + bgPx - c} ${bgOff + bgPx - c},${bgOff + bgPx} ${bgOff + c},${bgOff + bgPx} ${bgOff},${bgOff + bgPx - c} ${bgOff},${bgOff + c}"`;
-    } else {
-        shapeEl = `<rect x="${bgOff}" y="${bgOff}" width="${bgPx}" height="${bgPx}" rx="${bgRadius}"`;
-    }
-    const bgOpStr = bgOpacity < 100 ? ` opacity="${(bgOpacity / 100).toFixed(2)}"` : '';
-    const bgEl = bgColor !== null ? `${shapeEl} fill="${bgColor}"${bgOpStr}/>` : '';
-
-    // Icon — absolute size, centered independently (skip if no icon SVG)
-    let iconEl = '';
-    if (iconSvg) {
-        const iconOff = (S - iconPx) / 2;
-        const padFrac = padding === 'none' ? 0 : padding === 'compact' ? 6 / 64 : padding === 'tight' ? 3 / 64 : 13 / 64;
-        const pad = iconPx * padFrac;
-        const iconInner = iconPx - 2 * pad;
-        const iconX = iconOff + pad;
-        const iconY = iconOff + pad;
-
-        let defsParts = '';
-        let filterAttr = '';
-        if (iconColor) {
-            const r = parseInt(iconColor.slice(1, 3), 16) / 255;
-            const g = parseInt(iconColor.slice(3, 5), 16) / 255;
-            const b = parseInt(iconColor.slice(5, 7), 16) / 255;
-            defsParts += `<filter id="nr-tint" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 ${r.toFixed(3)} 0 0 0 0 ${g.toFixed(3)} 0 0 0 0 ${b.toFixed(3)} 0 0 0 1 0"/></filter>`;
-            filterAttr = ' filter="url(#nr-tint)"';
-        } else if (applyWhiteFilter) {
-            defsParts += `<filter id="nr-white" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"/></filter>`;
-            filterAttr = ' filter="url(#nr-white)"';
-        }
-        if (clipToShape) {
-            defsParts += `<clipPath id="nr-icon-clip">${shapeEl}/></clipPath>`;
-        }
-        const defs = defsParts ? `<defs>${defsParts}</defs>` : '';
-        const clipAttr = clipToShape ? ' clip-path="url(#nr-icon-clip)"' : '';
-        const iconOpStr = iconOpacity < 100 ? ` opacity="${(iconOpacity / 100).toFixed(2)}"` : '';
-        const iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(iconSvg)}`;
-        return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${defs}${bgEl}<image href="${iconHref}" x="${iconX}" y="${iconY}" width="${iconInner}" height="${iconInner}"${filterAttr}${clipAttr}${iconOpStr}/></svg>`;
-    }
-
-    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${bgEl}</svg>`;
-}
+// buildCompositeIconSvg lives in utils.ts (single source of truth shared
+// with SD's icon2DHref). Imported above.
 
 /**
  * Moves the element matching `selector` to be the last child of `viewEl` so
@@ -1638,47 +1758,63 @@ function applyIconToCurrentShape() {
     const iconShape2D = currentShape2D;
     if (!iconShape) return;
 
-    // If no entries and no legacy icon, clear
-    const hasLegacyIcon = !!selectedIcon;
-    const hasEntries = iconEntries.some(e => !!e.iconId);
-    if (!hasLegacyIcon && !hasEntries && !selectedIconBgEnabled) {
-        const noIconAttrs = {
-            topIcon:   { href: '', width: 0, height: 0 },
-            topIcon2D: { href: '', width: 0, height: 0 },
-        };
-        iconShape.attr(noIconAttrs);
-        iconShape2D?.attr(noIconAttrs);
-        return;
-    }
-
-    // Multi-icon rendering: each icon gets its own face transform baked into the SVG
+    // Render the multi-icon path when ANY entry has an icon or background.
+    // (The previous code also checked selectedIcon / selectedIconBgEnabled
+    // globals as a "legacy" fallback. With the entries as SoT, these checks
+    // are redundant — and would re-introduce the drift the input-sync ADR
+    // documents.)
     if (iconEntries.length > 0 && iconEntries.some(e => !!e.iconId || e.bgEnabled)) {
         const { width: shapeW, height: shapeH } = iconShape.size();
         const iH = iconShape.isometricHeight;
 
-        // Build per-icon composites with face transforms baked in
+        // Build per-icon composites with face transforms baked in.
+        //
+        // Z-order: SVG paints later siblings on top, so we want the LAST
+        // entry rendered to be the one the user expects on top — which is
+        // the FIRST entry in the icons list (top of the list = top of the
+        // stack, matching how renderIconsList shows them). We iterate the
+        // entries in reverse so iconEntries[0] is appended last to isoParts.
         const isoParts: string[] = [];
-        const twoDParts: string[] = [];
 
-        for (const ie of iconEntries) {
+        const mode = isDarkMode() ? 'dark' : 'light';
+        for (let i = iconEntries.length - 1; i >= 0; i--) {
+            const ie = iconEntries[i];
             if (!ie.iconId && !ie.bgEnabled) continue;
-            const ieIcon = ie.iconId ? getIconById(ie.iconId) : undefined;
             const ieBgSize = ie.bgSize;
             const ieCanvasGU = Math.max(ie.size, ieBgSize);
             const ieCanvasPx = ieCanvasGU * GRID_SIZE;
             const ieIconPx = ie.size * GRID_SIZE;
             const ieBgPx = ieBgSize * GRID_SIZE;
-            const ieBg = ie.bgEnabled ? ie.bgColor : null;
-            const isAws = ieIcon?.source === 'aws';
-            const isVendorColor = ieIcon?.source === 'azure' || ieIcon?.source === 'gcp' || (isAws && !ie.monochrome);
-            const ieMono = isAws && ie.monochrome;
-            const ieSvgStr = ieMono ? (ieIcon?.svgMono || ieIcon?.svg || '') : (ieIcon?.svg || '');
-            const ieIconColor = ie.iconColor || '';
-            const ieWhite = isVendorColor ? false : (ieIconColor ? false : (ie.bgEnabled ? true : isDarkMode()));
+
+            // All vendor / mono / iconColor / background decisions are made by
+            // the central resolver. This loop only adds the iso-face transform.
+            const decision = resolveIconRender(ie, 'isoFace', mode);
+            if (!decision) continue;
+
+            // Carbon-style line art ships with fill="currentColor"; the data
+            // URI has no paint context, so resolve to a concrete colour. The
+            // feColorMatrix (when iconColor is set) will overpaint it anyway.
+            let ieSvgStr = decision.glyphSvg;
+            if (ieSvgStr) {
+                const defaultGlyphColor = mode === 'dark' ? '#ffffff' : '#000000';
+                ieSvgStr = ieSvgStr.replace(/currentColor/g, defaultGlyphColor);
+            }
+            const ieIconColor = decision.glyphTint === 'original' ? null : decision.glyphTint;
+            const bg = decision.background;
+
             const ieSvg = buildCompositeIconSvg(
-                ieSvgStr || null, ieBg, ie.bgShape, ieSvgStr ? ieWhite : false,
-                ie.bgRadius, ie.bgChamfer, 'normal', false, ieCanvasPx, ieIconPx, ieBgPx,
-                ieIconColor || null, ie.iconOpacity ?? 100, ie.bgOpacity ?? 100
+                ieSvgStr || null,
+                bg?.color ?? null,
+                (bg?.shape ?? ie.bgShape),
+                false, // applyWhiteFilter — superseded by glyphTint
+                bg?.radius ?? ie.bgRadius,
+                bg?.chamfer ?? ie.bgChamfer,
+                'normal',
+                false,
+                ieCanvasPx, ieIconPx, ieBgPx,
+                ieIconColor,
+                ie.iconOpacity ?? 100,
+                bg?.opacity ?? 100,
             );
             const ieHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(ieSvg)}`;
             ie.href = ieHref;
@@ -1686,21 +1822,12 @@ function applyIconToCurrentShape() {
             const oy = ie.offsetY * GRID_SIZE;
             const skTx = (ie.skewX || ie.skewY) ? `skewX(${ie.skewX}) skewY(${ie.skewY})` : '';
 
-            // 2D: only show "Main" icon (or the single icon if only one exists)
-            const showIn2D = iconEntries.length === 1 || ie.isMain;
-            if (showIn2D) {
-                const x2d = (shapeW - ieCanvasPx) / 2 + ox;
-                const y2d = (shapeH - ieCanvasPx) / 2 + oy;
-                twoDParts.push(`<image href="${ieHref}" x="${x2d}" y="${y2d}" width="${ieCanvasPx}" height="${ieCanvasPx}"/>`);
-            }
-
             // ISO: per-face transform
             if (ie.face === 'front') {
                 const lx = (shapeW - ieCanvasPx) / 2 + ox;
                 const ly = (iH - ieCanvasPx) / 2 + oy;
-                const fcx = lx + ieCanvasPx / 2;
-                const fcy = ly + ieCanvasPx / 2;
-                isoParts.push(`<g transform="matrix(1,0,-1,-1,0,${shapeH}) rotate(180,${fcx},${fcy}) ${skTx}"><image href="${ieHref}" x="${lx}" y="${ly}" width="${ieCanvasPx}" height="${ieCanvasPx}"/></g>`);
+                // Non-mirroring (det=+1) map onto the front-face parallelogram.
+                isoParts.push(`<g transform="matrix(1,0,1,1,${-iH},${shapeH - iH}) ${skTx}"><image href="${ieHref}" x="${lx}" y="${ly}" width="${ieCanvasPx}" height="${ieCanvasPx}"/></g>`);
             } else if (ie.face === 'side') {
                 const lx = (shapeH - ieCanvasPx) / 2 + ox;
                 const ly = (iH - ieCanvasPx) / 2 + oy;
@@ -1716,22 +1843,29 @@ function applyIconToCurrentShape() {
             }
         }
 
-        if (isoParts.length > 0 || twoDParts.length > 0) {
+        // 2D: single Main icon, rendered through the shared icon2DHref so
+        // SD and CD show pixel-identical output. Avoids the per-source
+        // divergence that the previous inline 2D composite caused.
+        const mainIE = iconEntries.find(e => !!e.iconId && e.isMain)
+            ?? (iconEntries.length === 1 ? iconEntries[0] : undefined);
+        const twoDHref = mainIE?.iconId ? icon2DHref(mainIE) : '';
+
+        if (isoParts.length > 0 || twoDHref) {
             // Iso composite: large viewBox to accommodate all face projections
             const vbSize = Math.max(shapeW, shapeH) + iH * 2;
             const isoSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-iH} ${-iH} ${vbSize} ${vbSize}" width="${vbSize}" height="${vbSize}">${isoParts.join('')}</svg>`;
             const isoHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(isoSvg)}`;
 
-            const twoDSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${shapeW} ${shapeH}" width="${shapeW}" height="${shapeH}">${twoDParts.join('')}</svg>`;
-            const twoDHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(twoDSvg)}`;
+            const x2D = (shapeW - SHAPE_CELL_SIZE) / 2;
+            const y2D = (shapeH - SHAPE_CELL_SIZE) / 2;
 
             iconShape.attr({
                 topIcon: { href: isoHref, x: -iH, y: -iH, width: vbSize, height: vbSize, transform: null, class: '' },
-                topIcon2D: { href: twoDHref, x: 0, y: 0, width: shapeW, height: shapeH, class: '' },
+                topIcon2D: { href: twoDHref, x: x2D, y: y2D, width: SHAPE_CELL_SIZE, height: SHAPE_CELL_SIZE, class: '' },
             });
             iconShape2D?.attr({
                 topIcon: { href: isoHref, x: -iH, y: -iH, width: vbSize, height: vbSize, transform: null, class: '' },
-                topIcon2D: { href: twoDHref, x: 0, y: 0, width: shapeW, height: shapeH, class: '' },
+                topIcon2D: { href: twoDHref, x: x2D, y: y2D, width: SHAPE_CELL_SIZE, height: SHAPE_CELL_SIZE, class: '' },
             });
             return;
         }
@@ -1756,20 +1890,13 @@ function refreshIconAccordionContent(): void {
     buildIconContent(iconAccordionContentEl);
 }
 
-function updateAdaptiveToggleVisibility() {
-    const show = !selectedIconBgEnabled;
-    if (iconAdaptiveToggleRowEl) iconAdaptiveToggleRowEl.style.display = show ? '' : 'none';
-    // When hidden, reset adaptive so icons render correctly on bg re-enable
-    if (!show && selectedIconAdaptive) {
-        selectedIconAdaptive = false;
-        // iconAdaptiveToggleRowEl is the nr-toggle wrapper div; uncheck it
-        if (iconAdaptiveToggleRowEl) {
-            iconAdaptiveToggleRowEl.classList.remove('nr-toggle--checked');
-            const btn = iconAdaptiveToggleRowEl.querySelector<HTMLButtonElement>('.nr-toggle__track');
-            if (btn) btn.setAttribute('aria-checked', 'false');
-        }
-    }
-}
+// updateAdaptiveToggleVisibility was the imperative sync function that the
+// bg-color handlers called to hide the adaptive toggle (and clear its
+// global) whenever the background became enabled. It is no longer needed:
+//   - the bg-color handlers now pass `adaptive: false` directly to
+//     updateIcon when enabling the background, keeping the model coherent;
+//   - the adaptive populator in buildIconContent reads entry.bgEnabled to
+//     toggle the row's display, replacing the imperative DOM mutation.
 
 function buildIconContent(container: HTMLElement) {
     // Cache the container so layer-count changes can trigger a rebuild
@@ -1839,50 +1966,34 @@ function buildIconContent(container: HTMLElement) {
         const filtered = term
             ? sourceFiltered.filter(ic => ic.label.toLowerCase().includes(term))
             : sourceFiltered;
-        const allIcons: Array<{ id: string | null; label: string; svg: string; source?: string }> = [
-            { id: null, label: 'No icon', svg: NO_ICON_SVG },
-            ...filtered.map(ic => ({ id: ic.id, label: ic.label, svg: ic.svg, source: ic.source })),
-        ];
+        const allIcons: Array<{ id: string | null; label: string; svg: string; source?: string }> =
+            filtered.map(ic => ({ id: ic.id, label: ic.label, svg: ic.svg, source: ic.source }));
         for (const icon of allIcons) {
             const btn = document.createElement('button');
             btn.type = 'button';
             btn.className = 'nr-sd-icon-btn';
-            const isVendor = icon.source === 'aws' || icon.source === 'gcp' || icon.source === 'azure';
-            if (isVendor) {
-                btn.classList.add('nr-icon-color');
-                if (icon.source === 'aws' && selectedIconMonochrome) btn.classList.add('nr-icon-mono');
-            }
+            // The picker is a recognition surface. Resolve via the shared
+            // icon-renderer so the rules match the trees / list / palette:
+            // vendor + uploaded keep their original colors; carbon + custom
+            // get the brightness-tint via the default CSS. Monochrome is
+            // never applied here — it's a canvas-bake property.
+            const rendered = icon.id ? renderIcon(icon.id, 'picker') : null;
+            if (rendered?.cssClass) btn.classList.add(rendered.cssClass);
             btn.setAttribute('title', icon.label);
             btn.setAttribute('aria-label', icon.label);
             btn.setAttribute('data-icon-id', icon.id ?? '');
-            if (icon.id === null) btn.classList.add('nr-sd-icon-btn--remove');
-            const isSelected = icon.id === null ? selectedIcon === null : selectedIcon === icon.id;
-            if (isSelected) btn.classList.add('nr-sd-icon-btn--selected');
-            if (icon.source === 'aws') {
-                const entry = filtered.find(ic => ic.id === icon.id) as IconCatalogEntry | undefined;
-                if (selectedIconMonochrome) {
-                    btn.innerHTML = entry?.svgMono || icon.svg;
-                } else {
-                    btn.innerHTML = icon.svg;
-                }
-            } else {
-                btn.innerHTML = icon.svg;
-            }
+            btn.setAttribute('data-icon-source', icon.source ?? '');
+            btn.innerHTML = rendered?.html ?? icon.svg;
 
             btn.addEventListener('click', () => {
-                selectedIcon = icon.id;
-                grid.querySelectorAll('.nr-sd-icon-btn').forEach(b =>
-                    b.classList.toggle('nr-sd-icon-btn--selected', b === btn)
-                );
-                syncIconControlVisibility();
                 const entry = currentEditingEntry();
-                if (entry) updateIcon(entry.id, { iconId: icon.id! });
-                else        applyIconToCurrentShape();
+                if (!entry) { applyIconToCurrentShape(); markDirty(); return; }
+                updateIcon(entry.id, { iconId: icon.id! });
+                syncIconControlVisibility();
                 if (iconsSectionBodyEl) {
                     const listEl = iconsSectionBodyEl.querySelector('div');
                     if (listEl) renderIconsListFn?.();
                 }
-                markDirty();
             });
 
             if (icon.source === 'uploaded') {
@@ -1890,9 +2001,9 @@ function buildIconContent(container: HTMLElement) {
                     e.preventDefault();
                     if (confirm(`Remove uploaded icon "${icon.label}"?`)) {
                         removeUploadedIcon(icon.id!);
-                        if (selectedIcon === icon.id) {
-                            selectedIcon = null;
-                            applyIconToCurrentShape();
+                        const entry = currentEditingEntry();
+                        if (entry && entry.iconId === icon.id) {
+                            updateIcon(entry.id, { iconId: '' });
                         }
                         renderGrid();
                     }
@@ -1920,14 +2031,18 @@ function buildIconContent(container: HTMLElement) {
             if (!file) return;
             const label = file.name.replace(/\.[^.]+$/, '');
 
+            const selectUploadedIcon = (id: string) => {
+                const entry = currentEditingEntry();
+                if (entry) updateIcon(entry.id, { iconId: id });
+                else        applyIconToCurrentShape();
+                renderGrid();
+            };
+
             if (file.type === 'image/svg+xml' || file.name.endsWith('.svg')) {
                 const reader = new FileReader();
                 reader.onload = () => {
                     const svgText = reader.result as string;
-                    const id = addUploadedIcon(label, svgText);
-                    selectedIcon = id;
-                    applyIconToCurrentShape();
-                    renderGrid();
+                    selectUploadedIcon(addUploadedIcon(label, svgText));
                 };
                 reader.readAsText(file);
             } else {
@@ -1935,10 +2050,7 @@ function buildIconContent(container: HTMLElement) {
                 reader.onload = () => {
                     const dataUri = reader.result as string;
                     const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><image href="${dataUri}" width="32" height="32"/></svg>`;
-                    const id = addUploadedIcon(label, svg);
-                    selectedIcon = id;
-                    applyIconToCurrentShape();
-                    renderGrid();
+                    selectUploadedIcon(addUploadedIcon(label, svg));
                 };
                 reader.readAsDataURL(file);
             }
@@ -1948,7 +2060,25 @@ function buildIconContent(container: HTMLElement) {
         uploadBtn.addEventListener('click', () => fileInput.click());
         grid.appendChild(fileInput);
         grid.appendChild(uploadBtn);
+
+        // Apply current entry's selection state + AWS mono variant on every
+        // grid (re)render. This runs not just on populate() but every time
+        // the grid is rebuilt (tab switch, search filter), so the displayed
+        // state always tracks the entry.
+        populateGrid();
     };
+
+    const populateGrid = () => {
+        const entry = currentEditingEntry();
+        grid.querySelectorAll<HTMLElement>('.nr-sd-icon-btn').forEach(btn => {
+            const id = btn.dataset.iconId ?? '';
+            const isSelected = id === ''
+                ? !entry?.iconId
+                : id === entry?.iconId;
+            btn.classList.toggle('nr-sd-icon-btn--selected', isSelected);
+        });
+    };
+    registerPopulator(populateGrid);
 
     searchInput.addEventListener('input', () => {
         iconSearchTerm = searchInput.value;
@@ -1962,8 +2092,7 @@ function buildIconContent(container: HTMLElement) {
     // Adaptive icon toggle — only in complex shape + no-bg mode
     // Uses nr-toggle: button-based, ::before thumb, no cds-- conflict.
     const adaptiveRow = document.createElement('div');
-    adaptiveRow.className = 'nr-toggle' + (selectedIconAdaptive ? ' nr-toggle--checked' : '');
-    adaptiveRow.style.display = selectedIconBgEnabled ? 'none' : '';
+    adaptiveRow.className = 'nr-toggle';
     iconAdaptiveToggleRowEl = adaptiveRow;
 
     const adaptiveLabelText = document.createElement('span');
@@ -1975,17 +2104,21 @@ function buildIconContent(container: HTMLElement) {
     adaptiveTrack.id = 'sd-icon-adaptive';
     adaptiveTrack.className = 'nr-toggle__track';
     adaptiveTrack.setAttribute('role', 'switch');
-    adaptiveTrack.setAttribute('aria-checked', selectedIconAdaptive ? 'true' : 'false');
     adaptiveTrack.setAttribute('aria-label', 'Theme adaptive');
 
     adaptiveTrack.addEventListener('click', () => {
-        const next = !adaptiveRow.classList.contains('nr-toggle--checked');
-        adaptiveRow.classList.toggle('nr-toggle--checked', next);
-        adaptiveTrack.setAttribute('aria-checked', next ? 'true' : 'false');
-        selectedIconAdaptive = next;
         const entry = currentEditingEntry();
-        if (entry) updateIcon(entry.id, { adaptive: next });
-        else        applyIconToCurrentShape();
+        if (!entry) { applyIconToCurrentShape(); return; }
+        updateIcon(entry.id, { adaptive: !entry.adaptive });
+    });
+
+    registerPopulator(() => {
+        const entry = currentEditingEntry();
+        const checked = !!entry?.adaptive;
+        const bgEnabled = !!entry?.bgEnabled;
+        adaptiveRow.classList.toggle('nr-toggle--checked', checked);
+        adaptiveRow.style.display = bgEnabled ? 'none' : '';
+        adaptiveTrack.setAttribute('aria-checked', checked ? 'true' : 'false');
     });
 
     adaptiveRow.appendChild(adaptiveLabelText);
@@ -2004,23 +2137,19 @@ function buildIconContent(container: HTMLElement) {
     const modeSwitcher = document.createElement('div');
     modeSwitcher.className = 'nr-seg-control nr-seg-control--fixed';
 
+    const modeButtons: Record<'colored' | 'mono', HTMLButtonElement> = { colored: null!, mono: null! };
     for (const mode of ['colored', 'mono'] as const) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        const isActive = mode === 'colored' ? !selectedIconMonochrome : selectedIconMonochrome;
-        btn.className = 'nr-seg-btn' + (isActive ? ' nr-seg-btn--selected' : '');
+        btn.className = 'nr-seg-btn';
         btn.textContent = mode === 'colored' ? 'Color' : 'Mono';
         btn.addEventListener('click', () => {
-            selectedIconMonochrome = mode === 'mono';
-            modeSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
-                b.classList.toggle('nr-seg-btn--selected', b === btn)
-            );
-            renderGrid();
-            syncIconControlVisibility();
             const entry = currentEditingEntry();
-            if (entry) updateIcon(entry.id, { monochrome: selectedIconMonochrome });
-            else        applyIconToCurrentShape();
+            if (!entry) { applyIconToCurrentShape(); return; }
+            updateIcon(entry.id, { monochrome: mode === 'mono' });
+            renderGrid();
         });
+        modeButtons[mode] = btn;
         modeSwitcher.appendChild(btn);
     }
 
@@ -2028,16 +2157,17 @@ function buildIconContent(container: HTMLElement) {
     iconModeRow.appendChild(modeSwitcher);
     container.appendChild(iconModeRow);
 
+    registerPopulator(() => {
+        const entry = currentEditingEntry();
+        const mono = !!entry?.monochrome;
+        modeButtons.colored.classList.toggle('nr-seg-btn--selected', !mono);
+        modeButtons.mono.classList.toggle('nr-seg-btn--selected', mono);
+    });
+
     function syncIconControlVisibility() {
+        // Show the mode switcher only when viewing AWS icons. The selected
+        // segment state inside the switcher is owned by the populator above.
         iconModeRow.style.display = iconSourceTab === 'aws' ? '' : 'none';
-        modeSwitcher.querySelectorAll('.nr-seg-btn').forEach((b, i) => {
-            b.classList.toggle('nr-seg-btn--selected', i === 0 ? !selectedIconMonochrome : selectedIconMonochrome);
-        });
-        // Apply mono filter only to AWS icons in the grid
-        grid.querySelectorAll('.nr-sd-icon-btn.nr-icon-color').forEach(btn => {
-            const isAws = iconSourceTab === 'aws';
-            btn.classList.toggle('nr-icon-mono', isAws && selectedIconMonochrome);
-        });
     }
 
 
@@ -2055,30 +2185,39 @@ function buildIconContent(container: HTMLElement) {
 
     // For rotated forms, the internal face is swapped — show the default-form perspective
     const swapFace = (f: 'top' | 'front' | 'side'): 'top' | 'front' | 'side' => {
-        if (!ROTATED_FORMS.has(selectedBaseShape)) return f;
+        if (!isRotatedForm(currentBaseShape())) return f;
         if (f === 'front') return 'side';
         if (f === 'side') return 'front';
         return f;
     };
-    const displayFace = swapFace(selectedIconFace);
 
-    for (const face of ['top', 'front', 'side'] as const) {
+    const FACES = ['top', 'front', 'side'] as const;
+    const faceButtons: Record<typeof FACES[number], HTMLButtonElement> =
+        { top: null!, front: null!, side: null! };
+
+    for (const face of FACES) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'nr-seg-btn' + (displayFace === face ? ' nr-seg-btn--selected' : '');
+        btn.className = 'nr-seg-btn';
         btn.textContent = face.charAt(0).toUpperCase() + face.slice(1);
         btn.addEventListener('click', () => {
-            // User picks in default-form perspective; swap to internal for rotated forms
-            selectedIconFace = swapFace(face);
-            faceSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
-                b.classList.toggle('nr-seg-btn--selected', b === btn)
-            );
             const entry = currentEditingEntry();
-            if (entry) updateIcon(entry.id, { face: selectedIconFace });
-            else        applyIconToCurrentShape();
+            if (!entry) { applyIconToCurrentShape(); return; }
+            // User picks in default-form perspective; swap to internal for rotated forms
+            updateIcon(entry.id, { face: swapFace(face) });
         });
+        faceButtons[face] = btn;
         faceSwitcher.appendChild(btn);
     }
+
+    registerPopulator(() => {
+        const entry = currentEditingEntry();
+        if (!entry) return;
+        const displayFace = swapFace(entry.face);
+        for (const face of FACES) {
+            faceButtons[face].classList.toggle('nr-seg-btn--selected', displayFace === face);
+        }
+    });
 
     iconFaceRowEl.appendChild(faceLbl);
     iconFaceRowEl.appendChild(faceSwitcher);
@@ -2087,11 +2226,10 @@ function buildIconContent(container: HTMLElement) {
     // Size — in pixels (1 GU = GRID_SIZE px)
     let iconSizeInputRef: HTMLInputElement;
     buildSliderField('Size', 'sd-icon-size', 0.5, 4, 0.1,
-        (el) => { iconSizeInputRef = el; el.value = String(currentEditingEntry()?.size ?? selectedIconSize); },
+        (el) => { iconSizeInputRef = el; el.value = String(currentEditingEntry()?.size ?? 1.5); },
         (el) => { el.id = 'sd-icon-size-value'; },
         () => {
             const v = parseFloat(iconSizeInputRef.value);
-            selectedIconSize = v;
             const entry = currentEditingEntry();
             if (entry) updateIcon(entry.id, { size: v });
             else        applyIconToCurrentShape();
@@ -2166,30 +2304,26 @@ function buildIconContent(container: HTMLElement) {
 
     // Offset
     const editEntry0 = currentEditingEntry();
-    buildDualRow('Offset', editEntry0?.offsetX ?? selectedIconOffsetX, editEntry0?.offsetY ?? selectedIconOffsetY, -1, 1, 0.05, '',
+    buildDualRow('Offset', editEntry0?.offsetX ?? 0, editEntry0?.offsetY ?? 0, -1, 1, 0.05, '',
         (v) => {
-            selectedIconOffsetX = v;
             const e = currentEditingEntry();
             if (e) updateIcon(e.id, { offsetX: v });
             else    applyIconToCurrentShape();
         },
         (v) => {
-            selectedIconOffsetY = v;
             const e = currentEditingEntry();
             if (e) updateIcon(e.id, { offsetY: v });
             else    applyIconToCurrentShape();
         });
 
     // Skew
-    buildDualRow('Skew', editEntry0?.skewX ?? selectedIconSkewX, editEntry0?.skewY ?? selectedIconSkewY, -30, 30, 1, '°',
+    buildDualRow('Skew', editEntry0?.skewX ?? 0, editEntry0?.skewY ?? 0, -30, 30, 1, '°',
         (v) => {
-            selectedIconSkewX = v;
             const e = currentEditingEntry();
             if (e) updateIcon(e.id, { skewX: v });
             else    applyIconToCurrentShape();
         },
         (v) => {
-            selectedIconSkewY = v;
             const e = currentEditingEntry();
             if (e) updateIcon(e.id, { skewY: v });
             else    applyIconToCurrentShape();
@@ -2352,13 +2486,25 @@ function buildIconBackgroundContent(container: HTMLElement) {
     const hiddenPicker = document.createElement('input');
     hiddenPicker.type = 'color';
     hiddenPicker.className = 'nr-sd-hex-hidden-picker';
-    hiddenPicker.value = selectedIconBgColor;
+    // Initial value overwritten by syncIconBgColorDisplay() immediately
+    // below, then re-set by populate() on every refresh — the default here
+    // only matters if the popup is open without an entry, which doesn't
+    // happen in normal flow.
+    hiddenPicker.value = PRIMARY_COLORS[0].base;
 
+    // Populator for bg color display. Reads the active entry's bg fields and
+    // mirrors them into the DOM. Registered with the populator registry so
+    // it runs on every populate(). Kept assigned to the module-level
+    // `syncIconBgColorDisplay` variable so legacy call sites still work; they
+    // become redundant once populate() fully takes over but are harmless.
     syncIconBgColorDisplay = () => {
-        if (selectedIconBgEnabled) {
-            hexInput.value = selectedIconBgColor;
+        const entry = currentEditingEntry();
+        const bgEnabled = !!entry?.bgEnabled;
+        const bgColor = entry?.bgColor || PRIMARY_COLORS[0].base;
+        if (bgEnabled) {
+            hexInput.value = bgColor;
             hexInput.classList.remove('nr-sd-hex-input--default');
-            colorBtn.style.backgroundColor = selectedIconBgColor;
+            colorBtn.style.backgroundColor = bgColor;
             colorBtn.innerHTML = '';
         } else {
             hexInput.value = 'None';
@@ -2366,9 +2512,10 @@ function buildIconBackgroundContent(container: HTMLElement) {
             colorBtn.style.backgroundColor = '';
             colorBtn.innerHTML = NO_COLOR_ICON;
         }
-        hiddenPicker.value = selectedIconBgColor;
-        if (iconBgSettingsWrapEl) iconBgSettingsWrapEl.style.display = selectedIconBgEnabled ? '' : 'none';
+        hiddenPicker.value = bgColor;
+        if (iconBgSettingsWrapEl) iconBgSettingsWrapEl.style.display = bgEnabled ? '' : 'none';
     };
+    registerPopulator(syncIconBgColorDisplay);
     syncIconBgColorDisplay();
 
     // Unified popup: no-color + presets + custom picker
@@ -2383,17 +2530,16 @@ function buildIconBackgroundContent(container: HTMLElement) {
     noColorBtn.title = 'No color';
     noColorBtn.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><line x1="3" y1="13" x2="13" y2="3"/></svg>';
     noColorBtn.addEventListener('click', () => {
-        selectedIconBgEnabled = false;
         popup.style.display = 'none';
-        syncIconBgColorDisplay();
-        updateAdaptiveToggleVisibility();
         const entry = currentEditingEntry();
         if (entry) updateIcon(entry.id, { bgEnabled: false });
         else        { applyIconToCurrentShape(); markDirty(); }
     });
     popup.appendChild(noColorBtn);
 
-    // Preset swatches
+    // Preset swatches. Picking a color enables the background. Model
+    // invariant: when bg is on, `adaptive` must be false — pass it in the
+    // same patch so the entry stays consistent.
     for (const color of PRIMARY_COLORS) {
         const swatch = document.createElement('button');
         swatch.type = 'button';
@@ -2401,14 +2547,9 @@ function buildIconBackgroundContent(container: HTMLElement) {
         swatch.style.backgroundColor = color.base;
         swatch.title = color.label;
         swatch.addEventListener('click', () => {
-            selectedIconBgEnabled = true;
-            selectedIconBgColor = color.base;
-            hiddenPicker.value = color.base;
             popup.style.display = 'none';
-            syncIconBgColorDisplay();
-            updateAdaptiveToggleVisibility();
             const entry = currentEditingEntry();
-            if (entry) updateIcon(entry.id, { bgEnabled: true, bgColor: color.base });
+            if (entry) updateIcon(entry.id, { bgEnabled: true, bgColor: color.base, adaptive: false });
             else        { applyIconToCurrentShape(); markDirty(); }
         });
         popup.appendChild(swatch);
@@ -2444,12 +2585,8 @@ function buildIconBackgroundContent(container: HTMLElement) {
     }, true);
 
     hiddenPicker.addEventListener('input', () => {
-        selectedIconBgEnabled = true;
-        selectedIconBgColor = hiddenPicker.value;
-        syncIconBgColorDisplay();
-        updateAdaptiveToggleVisibility();
         const entry = currentEditingEntry();
-        if (entry) updateIcon(entry.id, { bgEnabled: true, bgColor: hiddenPicker.value });
+        if (entry) updateIcon(entry.id, { bgEnabled: true, bgColor: hiddenPicker.value, adaptive: false });
         else        { applyIconToCurrentShape(); markDirty(); }
     });
 
@@ -2470,16 +2607,17 @@ function buildIconBackgroundContent(container: HTMLElement) {
     // ── Background settings (visible when bg color is selected) ─────────
     const bgSettingsWrap = document.createElement('div');
     bgSettingsWrap.className = 'nr-sd-bg-settings';
-    bgSettingsWrap.style.display = selectedIconBgEnabled ? '' : 'none';
+    // Default to hidden; syncIconBgColorDisplay (populator) sets the correct
+    // display from the entry immediately on populate().
+    bgSettingsWrap.style.display = 'none';
     iconBgSettingsWrapEl = bgSettingsWrap;
 
     let bgSizeInputRef: HTMLInputElement;
     buildSliderField('Bg Size', 'sd-icon-bg-size', 0.5, 4, 0.1,
-        (el) => { bgSizeInputRef = el; el.value = String(currentEditingEntry()?.bgSize ?? selectedIconBgSize); },
+        (el) => { bgSizeInputRef = el; el.value = String(currentEditingEntry()?.bgSize ?? 1); },
         (el) => { el.id = 'sd-icon-bg-size-value'; },
         () => {
             const v = parseFloat(bgSizeInputRef.value);
-            selectedIconBgSize = v;
             const entry = currentEditingEntry();
             if (entry) updateIcon(entry.id, { bgSize: v });
             else        applyIconToCurrentShape();
@@ -2497,27 +2635,27 @@ function buildIconBackgroundContent(container: HTMLElement) {
     const shapeSwitcher = document.createElement('div');
     shapeSwitcher.className = 'nr-seg-control nr-seg-control--fixed';
 
-    for (const opt of [{ value: 'square' as const, label: 'Square' }, { value: 'circle' as const, label: 'Circle' }, { value: 'octagon' as const, label: 'Octagon' }]) {
+    const SHAPE_OPTS = [
+        { value: 'square' as const, label: 'Square' },
+        { value: 'circle' as const, label: 'Circle' },
+        { value: 'octagon' as const, label: 'Octagon' },
+    ];
+    const shapeButtons: Record<'square' | 'circle' | 'octagon', HTMLButtonElement> = {
+        square: null!, circle: null!, octagon: null!,
+    };
+
+    for (const opt of SHAPE_OPTS) {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'nr-seg-btn' + (selectedIconBgShape === opt.value ? ' nr-seg-btn--selected' : '');
+        btn.className = 'nr-seg-btn';
         btn.title = opt.label;
         btn.innerHTML = CLIP_SHAPE_ICONS[opt.value];
         btn.addEventListener('click', () => {
-            selectedIconBgShape = opt.value;
-            shapeSwitcher.querySelectorAll('.nr-seg-btn').forEach(b =>
-                b.classList.toggle('nr-seg-btn--selected', b === btn)
-            );
-            if (iconBgCornerRadiusRowEl) {
-                iconBgCornerRadiusRowEl.style.display = opt.value === 'square' ? '' : 'none';
-            }
-            if (iconBgChamferRowEl) {
-                iconBgChamferRowEl.style.display = opt.value === 'octagon' ? '' : 'none';
-            }
             const entry = currentEditingEntry();
-            if (entry) updateIcon(entry.id, { bgShape: opt.value });
-            else        applyIconToCurrentShape();
+            if (!entry) { applyIconToCurrentShape(); return; }
+            updateIcon(entry.id, { bgShape: opt.value });
         });
+        shapeButtons[opt.value] = btn;
         shapeSwitcher.appendChild(btn);
     }
 
@@ -2527,14 +2665,12 @@ function buildIconBackgroundContent(container: HTMLElement) {
 
     // ── Corner Roundness (square only) ─────────────────────────────────
     const crWrap = document.createElement('div');
-    crWrap.style.display = selectedIconBgShape === 'square' ? '' : 'none';
     iconBgCornerRadiusRowEl = crWrap;
     buildSliderField('Bg Corner Radius', 'sd-icon-bg-radius', 0, 32, 1,
-        (el) => { el.value = String(currentEditingEntry()?.bgRadius ?? selectedIconBgRadius); iconBgCornerRadiusInputRef = el; },
+        (el) => { el.value = String(currentEditingEntry()?.bgRadius ?? 6); iconBgCornerRadiusInputRef = el; },
         (el) => { el.id = 'sd-icon-bg-radius-value'; },
         () => {
             const v = parseInt(iconBgCornerRadiusInputRef!.value, 10);
-            selectedIconBgRadius = v;
             const entry = currentEditingEntry();
             if (entry) updateIcon(entry.id, { bgRadius: v });
             else        applyIconToCurrentShape();
@@ -2544,20 +2680,31 @@ function buildIconBackgroundContent(container: HTMLElement) {
 
     // ── Octagon Cut Depth (octagon only) ──────────────────────────────
     const ocWrap = document.createElement('div');
-    ocWrap.style.display = selectedIconBgShape === 'octagon' ? '' : 'none';
     iconBgChamferRowEl = ocWrap;
     buildSliderField('Bg Depth', 'sd-icon-bg-chamfer', 0.05, 0.45, 0.01,
-        (el) => { el.value = String(currentEditingEntry()?.bgChamfer ?? selectedIconBgChamfer); iconBgChamferInputRef = el; },
+        (el) => { el.value = String(currentEditingEntry()?.bgChamfer ?? 0.18); iconBgChamferInputRef = el; },
         (el) => { el.id = 'sd-icon-bg-chamfer-value'; },
         () => {
             const v = parseFloat(iconBgChamferInputRef.value);
-            selectedIconBgChamfer = v;
             const entry = currentEditingEntry();
             if (entry) updateIcon(entry.id, { bgChamfer: v });
             else        applyIconToCurrentShape();
         },
         ocWrap, '%');
     bgSettingsWrap.appendChild(ocWrap);
+
+    // Populator: bg shape selection + per-shape control visibility (corner
+    // radius only for square, octagon-depth only for octagon). Reads from
+    // the active entry so the controls always reflect the Draft.
+    registerPopulator(() => {
+        const entry = currentEditingEntry();
+        const bgShape = entry?.bgShape ?? 'circle' as const;
+        shapeButtons.square.classList.toggle('nr-seg-btn--selected', bgShape === 'square');
+        shapeButtons.circle.classList.toggle('nr-seg-btn--selected', bgShape === 'circle');
+        shapeButtons.octagon.classList.toggle('nr-seg-btn--selected', bgShape === 'octagon');
+        crWrap.style.display = bgShape === 'square' ? '' : 'none';
+        ocWrap.style.display = bgShape === 'octagon' ? '' : 'none';
+    });
 
     // Background Opacity
     const curBgOpacity = (editingIconIndex >= 0 && iconEntries[editingIconIndex])
@@ -2580,18 +2727,47 @@ function buildIconBackgroundContent(container: HTMLElement) {
 }
 
 function buildColorContent(container: HTMLElement) {
-    const hasCustomColor = !!(selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor);
-    const current = hasCustomColor ? (selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor) : null;
+    const layer = layers[selectedLayerIndex];
+    const initialStyle = currentStyle();
+    const initialTheme: ColorTheme = (layer?.style.colorTheme as ColorTheme | undefined) ?? 'default';
+
+    // Single shape-color value used by Light/Dark pickers (top=front=side).
+    type CustomTarget = 'shapeLight' | 'shapeDark' | 'lineLight' | 'lineDark';
+
+    function setCustomField(target: CustomTarget, val: string) {
+        const lyr = layers[selectedLayerIndex];
+        if (!lyr) return;
+        if (target === 'shapeLight') {
+            const s = deriveFaceShades(val);
+            lyr.style.topColor = s.top; lyr.style.frontColor = s.front; lyr.style.sideColor = s.side;
+        } else if (target === 'shapeDark') {
+            const s = deriveFaceShades(val);
+            lyr.style.topColorDark = s.top; lyr.style.frontColorDark = s.front; lyr.style.sideColorDark = s.side;
+        } else if (target === 'lineLight') {
+            lyr.style.strokeColor = val;
+        } else {
+            lyr.style.strokeColorDark = val;
+        }
+        const s = layerShapes[selectedLayerIndex], s2D = layerShapes2D[selectedLayerIndex];
+        if (s)   applyShapeStyle(s,   lyr.style);
+        if (s2D) applyShapeStyle(s2D, lyr.style);
+        markDirty();
+    }
 
     function applyColor(val: string) {
-        selectedStyle.topColor   = val;
-        selectedStyle.frontColor = val;
-        selectedStyle.sideColor  = val;
-        const layer = layers[selectedLayerIndex];
-        if (layer) { layer.style.topColor = val; layer.style.frontColor = val; layer.style.sideColor = val; }
+        // Legacy single-color setter (kept for the existing buildHexColorRow callers
+        // until the picker rows below take over).
+        const lyr = layers[selectedLayerIndex];
+        if (lyr) {
+            const s = deriveFaceShades(val);
+            lyr.style.topColor = s.top;
+            lyr.style.frontColor = s.front;
+            lyr.style.sideColor = s.side;
+        }
         const s = layerShapes[selectedLayerIndex], s2D = layerShapes2D[selectedLayerIndex];
-        if (s)   applyShapeStyle(s,   layer?.style ?? {});
-        if (s2D) applyShapeStyle(s2D, layer?.style ?? {});
+        if (s)   applyShapeStyle(s,   lyr?.style ?? {});
+        if (s2D) applyShapeStyle(s2D, lyr?.style ?? {});
+        markDirty();
     }
 
     function buildHexColorRow(label: string, id: string, value: string | null, onChange: (val: string) => void, onClear?: () => void): HTMLElement {
@@ -2717,42 +2893,137 @@ function buildColorContent(container: HTMLElement) {
         return row;
     }
 
+    // Reset every color field (Light + Dark) so applyShapeStyle (called by
+    // the caller) falls back to STYLE_TEMPLATE_DEFAULTS in both modes. Was
+    // previously only clearing the Light fields, leaving Dark colors from a
+    // prior Custom/Vendor theme in place — the canvas still showed those in
+    // Dark mode after switching to Default.
     const clearColor = () => {
-        selectedStyle.topColor = '';
-        selectedStyle.frontColor = '';
-        selectedStyle.sideColor = '';
-        selectedStyle.strokeColor = '';
-        for (const shape of [currentShape, currentShape2D]) {
-            if (!shape) continue;
-            const isTubeDuct = shape.attr('body/d') || shape.attr('outline/d');
-            const defaults: Record<string, string> = isTubeDuct
-                ? { body: '#e0e0e0', frontEllipse: '#c6c6c6', backArc: '#c6c6c6', outline: '#e0e0e0', frontFace: '#c6c6c6' }
-                : { top: '#e0e0e0', front: '#c6c6c6', base: '#c6c6c6', side: '#a8a8a8', cornerV1: '#a8a8a8', cornerV2: '#a8a8a8', cornerV3: '#c6c6c6' };
-            for (const [sel, fill] of Object.entries(defaults)) {
-                shape.attr(`${sel}/fill`, fill);
+        const layer = layers[selectedLayerIndex];
+        if (!layer) return;
+        layer.style.topColor = layer.style.frontColor = layer.style.sideColor = '';
+        layer.style.strokeColor = '';
+        layer.style.topColorDark = layer.style.frontColorDark = layer.style.sideColorDark = '';
+        layer.style.strokeColorDark = '';
+        markDirty();
+    };
+    // ── Color Theme dropdown ──────────────────────────────────────────────
+    const themeRow = document.createElement('div');
+    themeRow.className = 'nr-sd-hex-color-row';
+    const themeLbl = document.createElement('label');
+    themeLbl.className = 'nr-sd-number-label';
+    themeLbl.textContent = 'Color Theme';
+    themeRow.appendChild(themeLbl);
+    const themeSelect = document.createElement('select');
+    themeSelect.className = 'nr-sd-select';
+    for (const opt of [
+        { value: 'default', label: 'Default' },
+        { value: 'gcp',     label: 'GCP'    },
+        { value: 'aws',     label: 'AWS'    },
+        { value: 'azure',   label: 'Azure'  },
+        { value: 'custom',  label: 'Custom' },
+    ]) {
+        const o = document.createElement('option');
+        o.value = opt.value; o.textContent = opt.label;
+        if (opt.value === initialTheme) o.selected = true;
+        themeSelect.appendChild(o);
+    }
+    themeRow.appendChild(themeSelect);
+    container.appendChild(themeRow);
+
+    // ── Custom color pickers (shown only when theme === 'custom') ─────────
+    const customWrap = document.createElement('div');
+    customWrap.className = 'nr-sd-color-custom-wrap';
+
+    // Seed pickers from layer values, falling back to common defaults.
+    const seedShapeLight = initialStyle.topColor      || DEFAULT_COLORS.shapeLight;
+    const seedShapeDark  = layer?.style.topColorDark   || DEFAULT_COLORS.shapeDark;
+    const seedLineLight  = initialStyle.strokeColor   || DEFAULT_COLORS.lineLight;
+    const seedLineDark   = layer?.style.strokeColorDark|| DEFAULT_COLORS.lineDark;
+
+    customWrap.appendChild(buildHexColorRow('Shape Light', 'sd-color-shape-light', seedShapeLight, v => setCustomField('shapeLight', v)));
+    customWrap.appendChild(buildHexColorRow('Shape Dark',  'sd-color-shape-dark',  seedShapeDark,  v => setCustomField('shapeDark',  v)));
+    customWrap.appendChild(buildHexColorRow('Line Light',  'sd-color-line-light',  seedLineLight,  v => setCustomField('lineLight',  v)));
+    customWrap.appendChild(buildHexColorRow('Line Dark',   'sd-color-line-dark',   seedLineDark,   v => setCustomField('lineDark',   v)));
+    customWrap.style.display = initialTheme === 'custom' ? '' : 'none';
+    container.appendChild(customWrap);
+
+    // Update the visible hex-input + color swatch in each Custom picker row.
+    // Picker DOM was built once with initial seeds; switching themes must
+    // re-seed the rows so the user always starts adjustments from a known
+    // state (the default theme).
+    function syncCustomPickerDisplays(): void {
+        const rows: Array<[string, string]> = [
+            ['sd-color-shape-light', DEFAULT_COLORS.shapeLight],
+            ['sd-color-shape-dark',  DEFAULT_COLORS.shapeDark],
+            ['sd-color-line-light',  DEFAULT_COLORS.lineLight],
+            ['sd-color-line-dark',   DEFAULT_COLORS.lineDark],
+        ];
+        for (const [id, value] of rows) {
+            const input = customWrap.querySelector<HTMLInputElement>(`#${id}`);
+            if (!input) continue;
+            const rowEl = input.closest('.nr-sd-hex-color-row');
+            if (!rowEl) continue;
+            const hexInput = rowEl.querySelector<HTMLInputElement>('.nr-sd-hex-input');
+            const swatch   = rowEl.querySelector<HTMLElement>('.nr-sd-hex-color-btn');
+            const picker   = rowEl.querySelector<HTMLInputElement>('.nr-sd-hex-hidden-picker');
+            if (hexInput) { hexInput.value = value; hexInput.classList.remove('nr-sd-hex-input--default'); }
+            if (swatch)   { swatch.style.backgroundColor = value; swatch.innerHTML = ''; }
+            if (picker)   { picker.value = value; }
+        }
+    }
+
+    function applyTheme(theme: ColorTheme) {
+        const lyr = layers[selectedLayerIndex];
+        if (!lyr) return;
+        lyr.style.colorTheme = theme;
+        if (theme === 'custom') {
+            // Always start from the Default state when entering Custom — the
+            // user adjusts from a known baseline, not from whatever vendor
+            // preset happened to be active before.
+            const sL = deriveFaceShades(DEFAULT_COLORS.shapeLight);
+            const sD = deriveFaceShades(DEFAULT_COLORS.shapeDark);
+            lyr.style.topColor = sL.top; lyr.style.frontColor = sL.front; lyr.style.sideColor = sL.side;
+            lyr.style.topColorDark = sD.top; lyr.style.frontColorDark = sD.front; lyr.style.sideColorDark = sD.side;
+            lyr.style.strokeColor     = DEFAULT_COLORS.lineLight;
+            lyr.style.strokeColorDark = DEFAULT_COLORS.lineDark;
+            syncCustomPickerDisplays();
+        } else {
+            // Default + vendor themes (azure/aws/gcp): write the derived
+            // tokens from the per-theme tuning into the layer's style so
+            // applyShapeStyle uses them instead of falling back to the
+            // hardcoded STYLE_TEMPLATE_DEFAULTS.
+            const preset = THEME_COLORS[theme];
+            if (preset) {
+                const sL = deriveFaceShades(preset.shapeLight);
+                const sD = deriveFaceShades(preset.shapeDark);
+                lyr.style.topColor = sL.top; lyr.style.frontColor = sL.front; lyr.style.sideColor = sL.side;
+                lyr.style.topColorDark = sD.top; lyr.style.frontColorDark = sD.front; lyr.style.sideColorDark = sD.side;
+                lyr.style.strokeColor     = preset.lineLight;
+                lyr.style.strokeColorDark = preset.lineDark;
+            } else {
+                // Defensive: if the theme has no preset (shouldn't happen),
+                // wipe customs so we at least fall back to template defaults.
+                clearColor();
             }
         }
-    };
-    container.appendChild(buildHexColorRow('Light Mode', 'sd-color-light', current, applyColor, clearColor));
-    container.appendChild(buildHexColorRow('Dark Mode', 'sd-color-dark', current, applyColor, clearColor));
+        const s = layerShapes[selectedLayerIndex], s2D = layerShapes2D[selectedLayerIndex];
+        if (s)   applyShapeStyle(s,   lyr.style);
+        if (s2D) applyShapeStyle(s2D, lyr.style);
+        customWrap.style.display = theme === 'custom' ? '' : 'none';
+        markDirty();
+    }
+
+    themeSelect.addEventListener('change', () => applyTheme(themeSelect.value as ColorTheme));
 
     const colorResetBtn = document.createElement('button');
     colorResetBtn.type = 'button';
     colorResetBtn.className = 'nr-sd-reset-btn';
-    colorResetBtn.title = 'Reset to default';
+    colorResetBtn.title = 'Reset to default theme';
     colorResetBtn.innerHTML = 'Reset to default';
     colorResetBtn.addEventListener('click', () => {
-        clearColor();
-        // Update both color row displays to "None" without rebuilding
-        container.querySelectorAll<HTMLInputElement>('.nr-sd-hex-input').forEach(inp => {
-            inp.value = 'None';
-            inp.classList.add('nr-sd-hex-input--default');
-        });
-        container.querySelectorAll<HTMLElement>('.nr-sd-hex-color-btn').forEach(btn => {
-            btn.style.backgroundColor = '';
-            btn.innerHTML = '<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><line x1="3" y1="13" x2="13" y2="3"/></svg>';
-        });
-        markDirty();
+        themeSelect.value = 'default';
+        applyTheme('default');
     });
     container.appendChild(colorResetBtn);
 }
@@ -2843,27 +3114,8 @@ function buildInspectorPanel() {
     overflowWrap.appendChild(overflowBtn);
     overflowWrap.appendChild(overflowMenu);
 
-    const adminToggleBtn = document.createElement('button');
-    adminToggleBtn.type = 'button';
-    adminToggleBtn.className = 'nr-save-btn' + (adminMode ? ' nr-save-btn--active' : '');
-    adminToggleBtn.title = adminMode ? 'Hide admin controls' : 'Show admin controls';
-    adminToggleBtn.innerHTML = carbonIconToString((adminMode ? View16 : ViewOff16) as CarbonIcon);
-    adminToggleBtn.addEventListener('click', () => {
-        adminMode = !adminMode;
-        adminToggleBtn.innerHTML = carbonIconToString((adminMode ? View16 : ViewOff16) as CarbonIcon);
-        adminToggleBtn.classList.toggle('nr-save-btn--active', adminMode);
-        adminToggleBtn.title = adminMode ? 'Hide admin controls' : 'Show admin controls';
-        if (setDefaultBtn) setDefaultBtn.style.display = adminMode ? '' : 'none';
-        // Toggle admin-only icon fields and modifier fields
-        document.querySelectorAll<HTMLElement>('[data-icon-admin]').forEach(el => {
-            el.style.display = adminMode ? '' : 'none';
-        });
-        syncModifierVisibility();
-    });
-
     const headerActions = document.createElement('div');
     headerActions.className = 'nr-header-actions';
-    headerActions.appendChild(adminToggleBtn);
     headerActions.appendChild(overflowWrap);
     headerActions.appendChild(headerSaveBtn);
     header.appendChild(headerActions);
@@ -2900,9 +3152,25 @@ function buildInspectorPanel() {
     shapeNameInput.id = 'sd-shape-name';
     shapeNameInput.type = 'text';
     shapeNameInput.className = 'cds--text-input cds--text-input--sm';
-    shapeNameInput.value = ShapeRegistry[currentShapeId]?.displayName ?? formatLabel(currentShapeId);
+    // Read from the live label on layer 0 first. The label IS the draft —
+    // setShapeLabel writes to it on every keystroke, so it always carries
+    // the user's in-progress name. The registry is only consulted as a
+    // fallback for first build (no layer cell yet). This prevents the
+    // rebuild-resets-input drift that happens when buildInspectorPanel
+    // runs after the user has typed but not saved (e.g. on layer add).
+    const liveLabel = layerShapes[0]?.attr('label/text') as string | undefined;
+    shapeNameInput.value = (liveLabel && liveLabel.trim())
+        || ShapeRegistry[currentShapeId]?.displayName
+        || formatLabel(currentShapeId);
     shapeNameInput.addEventListener('input', () => {
-        setShapeLabel(shapeNameInput.value);
+        const newName = shapeNameInput.value;
+        // Update the cell label on the design canvas (live visual feedback)
+        // AND the palette tree row label on the left (so the user sees the
+        // in-progress name everywhere immediately). Persistence to the
+        // registry still happens only on Save — this is a UI mirror, not a
+        // commit.
+        setShapeLabel(newName);
+        componentPanelHandle?.updateLabel?.(currentShapeId, newName);
     });
 
     // Component Type dropdown
@@ -3210,6 +3478,10 @@ function buildInspectorPanel() {
             if (!entry) return;
             popupEl!.innerHTML = '';
             popupEl!.style.display = '';
+            // Reset the populator registry — DOM is about to be rebuilt and
+            // any populators from a previously-open entry now point at stale
+            // nodes. Build code below will re-register against the new DOM.
+            clearPopulators();
             // Position popup aligned with the Icons section header
             const headerRect = iconsHeader.getBoundingClientRect();
             popupDesiredTop = headerRect.top - 1;
@@ -3244,6 +3516,27 @@ function buildInspectorPanel() {
                 inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') inp.blur(); });
             });
             closeRow.appendChild(closeTitle);
+
+            // Delete button in the popup header — mirrors the list-row remove
+            // button so the user can scrap an icon while it's open. Hidden for
+            // the shape-wide Main icon (which is never deletable).
+            if (!entry.isMain) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.type = 'button';
+                deleteBtn.className = 'nr-icon-editor-close';
+                deleteBtn.title = 'Delete icon from shape';
+                deleteBtn.style.color = 'var(--cds-support-error, #da1e28)';
+                deleteBtn.innerHTML = carbonIconToString(TrashCan16 as CarbonIcon);
+                deleteBtn.addEventListener('click', () => {
+                    removeIcon(entry.id);
+                    popupEl.style.display = 'none';
+                    editingIconIndex = -1;
+                    clearPopulators();
+                    renderIconsList();
+                });
+                closeRow.appendChild(deleteBtn);
+            }
+
             const closeBtn = document.createElement('button');
             closeBtn.type = 'button';
             closeBtn.className = 'nr-icon-editor-close';
@@ -3252,36 +3545,29 @@ function buildInspectorPanel() {
             closeBtn.addEventListener('click', () => {
                 popupEl.style.display = 'none';
                 editingIconIndex = -1;
+                clearPopulators();
                 renderIconsList();
             });
             closeRow.appendChild(closeBtn);
             popupEl.appendChild(closeRow);
+
+            // (Legacy globals pre-seed block fully removed — the popup's
+            // populators read straight from the entry.)
 
             // Icon selector (reuse existing buildIconContent into the popup)
             const iconContentWrap = document.createElement('div');
             buildIconContent(iconContentWrap);
             popupEl.appendChild(iconContentWrap);
 
-            // Sync the legacy icon state from this entry so the existing controls work
-            selectedIcon = entry.iconId || null;
-            selectedIconFace = entry.face;
-            selectedIconSize = entry.size;
-            selectedIconOffsetX = entry.offsetX;
-            selectedIconOffsetY = entry.offsetY;
-            selectedIconSkewX = entry.skewX;
-            selectedIconSkewY = entry.skewY;
-            selectedIconBgEnabled = entry.bgEnabled;
-            selectedIconBgColor = entry.bgColor;
-            selectedIconBgShape = entry.bgShape;
-            selectedIconBgSize = entry.bgSize;
-            selectedIconBgRadius = entry.bgRadius;
-            selectedIconBgChamfer = entry.bgChamfer;
-            selectedIconMonochrome = entry.monochrome;
-
             // Background controls
             const bgContentWrap = document.createElement('div');
             buildIconBackgroundContent(bgContentWrap);
             popupEl.appendChild(bgContentWrap);
+
+            // Fill values from the Draft (the entry) into every input
+            // registered above. Idempotent — run again after any mutation via
+            // the chokepoint pattern.
+            populate();
         };
 
         const renderIconsList = renderIconsListFn = () => {
@@ -3362,17 +3648,16 @@ function buildInspectorPanel() {
                 dragHandle.innerHTML = carbonIconToString(Draggable16 as CarbonIcon).replace('width="16"', 'width="12"').replace('height="16"', 'height="12"');
                 row.appendChild(dragHandle);
 
-                // Preview thumbnail
+                // Preview thumbnail — recognition surface. Lookup via the
+                // shared icon-renderer so the rules (no monochrome here, no
+                // inline tile color, just an opt-out class for color-bearing
+                // sources) match the trees and palette.
                 const preview = document.createElement('div');
                 preview.className = 'nr-icon-entry-preview';
-                if (entry.iconId) {
-                    const iconData = getIconById(entry.iconId);
-                    if (iconData) {
-                        preview.innerHTML = iconData.svg;
-                        const isColor = iconData.source === 'aws' && !entry.monochrome
-                            || iconData.source === 'azure' || iconData.source === 'gcp';
-                        if (isColor) preview.classList.add('nr-icon-entry-preview--color');
-                    }
+                const rendered = renderIcon(entry.iconId, 'list');
+                if (rendered) {
+                    preview.innerHTML = rendered.html;
+                    if (rendered.cssClass) preview.classList.add(rendered.cssClass);
                 }
                 row.appendChild(preview);
 
@@ -3437,29 +3722,34 @@ function buildInspectorPanel() {
                 settingsBtn.addEventListener('click', () => { openIconEditor(idx); renderIconsList(); });
                 row.appendChild(settingsBtn);
 
-                // Remove button
-                const removeBtn = document.createElement('button');
-                removeBtn.type = 'button';
-                removeBtn.className = 'nr-icon-entry-btn nr-icon-entry-btn--danger';
-                removeBtn.title = 'Remove icon';
-                removeBtn.innerHTML = carbonIconToString(Subtract16 as CarbonIcon);
-                removeBtn.addEventListener('click', () => {
-                    removeIcon(entry.id);
-                    if (editingIconIndex === idx) { popupEl.style.display = 'none'; editingIconIndex = -1; }
-                    else if (editingIconIndex > idx) editingIconIndex--;
-                    const arr = currentIconsArray();
-                    if (arr.length === 0) { selectedIcon = null; selectedIconBgEnabled = false; }
-                    renderIconsList();
-                });
-                row.appendChild(removeBtn);
+                // Remove button — rendered for every non-Main icon. The
+                // shape-wide Main icon gets no minus at all (it's never
+                // deletable; the disabled button just confused users into
+                // thinking the action was supposed to work).
+                if (!entry.isMain) {
+                    const removeBtn = document.createElement('button');
+                    removeBtn.type = 'button';
+                    removeBtn.className = 'nr-icon-entry-btn nr-icon-entry-btn--danger';
+                    removeBtn.innerHTML = carbonIconToString(Subtract16 as CarbonIcon);
+                    removeBtn.title = 'Remove icon';
+                    removeBtn.addEventListener('click', () => {
+                        removeIcon(entry.id);
+                        if (editingIconIndex === idx) { popupEl.style.display = 'none'; editingIconIndex = -1; }
+                        else if (editingIconIndex > idx) editingIconIndex--;
+                        renderIconsList();
+                    });
+                    row.appendChild(removeBtn);
+                }
 
                 listEl.appendChild(row);
             }
         };
 
-        // Wire + button now that openIconEditor exists
+        // Wire + button now that openIconEditor exists. Seed every new entry
+        // with the default Cube glyph so a freshly-added icon never renders
+        // as an empty placeholder.
         iconsAddBtn.addEventListener('click', () => {
-            addIcon();
+            addIcon({ iconId: 'cube' });
             const arr = currentIconsArray();
             editingIconIndex = arr.length - 1;
             renderIconsList();
@@ -3686,8 +3976,8 @@ function buildInspectorPanel() {
             const el = hud.querySelector<HTMLInputElement>('#sd-hud-opacity');
             if (!el) return;
             const op = parseFloat(el.value) / 100;
-            for (const s of layerShapes) { const v = paper.findViewByModel(s); if (v) v.el.style.opacity = String(op); }
-            for (const s of layerShapes2D) { const v = paper2D.findViewByModel(s); if (v) v.el.style.opacity = String(op); }
+            for (const s of layerShapes)   { const v = paper.findViewByModel(s);   if (v) applyShapeFillOpacity(v, op); }
+            for (const s of layerShapes2D) { const v = paper2D.findViewByModel(s); if (v) applyShapeFillOpacity(v, op); }
         },
         hud, '%');
 
@@ -3727,16 +4017,27 @@ function buildInspectorPanel() {
 
     const applyThemeFromHud = (dark: boolean) => {
         localStorage.setItem('nr-theme', dark ? 'dark' : 'light');
-        document.documentElement.classList.toggle('cds--g100', dark);
-        document.documentElement.classList.toggle('cds--white', !dark);
         lightBtn.classList.toggle('nr-seg-btn--selected', !dark);
         darkBtn.classList.toggle('nr-seg-btn--selected', dark);
-        const navBtn = document.getElementById('nav-theme');
-        if (navBtn) navBtn.click();
+        // applyTheme owns the class toggle, the nr-theme-change dispatch AND
+        // the nav-theme icon swap — calling it directly avoids the double-
+        // toggle bug that the previous `navBtn.click()` caused (the click
+        // handler reads the state we just set and inverts it).
+        applyTheme(dark);
     };
 
     lightBtn.addEventListener('click', () => applyThemeFromHud(false));
     darkBtn.addEventListener('click', () => applyThemeFromHud(true));
+
+    // Sync the switcher when the theme is changed elsewhere (e.g. the app
+    // header's theme toggle). Without this, the HUD selection drifts away
+    // from the actual mode until the inspector is rebuilt.
+    const syncFromCurrentTheme = () => {
+        const dark = document.documentElement.classList.contains('cds--g100');
+        lightBtn.classList.toggle('nr-seg-btn--selected', !dark);
+        darkBtn.classList.toggle('nr-seg-btn--selected', dark);
+    };
+    window.addEventListener('nr-theme-change', syncFromCurrentTheme);
 
     themeSwitcher.appendChild(lightBtn);
     themeSwitcher.appendChild(darkBtn);
@@ -3771,7 +4072,7 @@ function buildInspectorPanel() {
         hud.appendChild(hudHitAreaItem);
 
         const haDefSize = getHitAreaSize();
-        buildSliderField('Width', 'sd-hud-ha-w', 10, 400, 5,
+        buildSliderField('Width', 'sd-hud-ha-w', 10, 400, 10,
             (el) => { el.value = String(haDefSize.width); },
             () => {},
             () => {
@@ -3781,7 +4082,7 @@ function buildInspectorPanel() {
                 hitAreaShape.resize(w, hitAreaShape.size().height);
             },
             hitSizeWrap, 'px');
-        buildSliderField('Height', 'sd-hud-ha-h', 10, 400, 5,
+        buildSliderField('Height', 'sd-hud-ha-h', 10, 400, 10,
             (el) => { el.value = String(haDefSize.height); },
             () => {},
             () => {
@@ -3798,14 +4099,12 @@ function buildInspectorPanel() {
     syncAllInspectorFields();
 }
 
-// All form factors except 'cuboid' require width === height (square base).
-function requiresSquareBase(baseShape: string): boolean {
-    return baseShape !== 'cuboid' && baseShape !== 'custom' && baseShape !== 'tube' && baseShape !== 'pipe' && baseShape !== 'duct' && baseShape !== 'channel';
-}
+// `requiresSquareBase`, `isRotatedForm`, `isTubeFamily`, `dimensionsFor`,
+// `getSupportedModifiers` are imported from shape-capabilities (ADR-0004).
 
 // Form factors that expose the corner radius slider.
 function supportsCornerRadius(baseShape: string): boolean {
-    return baseShape === 'cuboid';
+    return baseShape === 'rectangle';
 }
 
 // Returns true when a layer is rendered from an uploaded SVG.
@@ -3820,65 +4119,76 @@ function isLayerCustomVerts(layer: ShapeLayer): boolean {
     return layer.baseShape === 'custom' || layer.baseShape === 'svgPolygon';
 }
 
-function applyCornerRadiusToCurrentShape() {
+// ── Per-modifier chokepoints ────────────────────────────────────────────────
+// Each function is the only sanctioned write path for its modifier. Takes
+// the value as a parameter (no global read), writes to the layer model AND
+// to both layer cells, and marks dirty. Lighter than the full `updateLayer`
+// chokepoint because modifier changes don't need a layout re-render — only
+// the affected cell's attribute changes, JointJS re-renders that cell.
+
+function applyCornerRadiusToCurrentShape(v: number) {
     const layer = layers[selectedLayerIndex];
-    if (layer) layer.cornerRadius = selectedCornerRadius;
-    layerShapes[selectedLayerIndex]?.set('cornerRadius', selectedCornerRadius);
-    layerShapes2D[selectedLayerIndex]?.set('cornerRadius', selectedCornerRadius);
+    if (!layer) return;
+    layer.cornerRadius = v;
+    layerShapes[selectedLayerIndex]?.set('cornerRadius', v);
+    layerShapes2D[selectedLayerIndex]?.set('cornerRadius', v);
+    markDirty();
 }
 
-function applyChamferSizeToCurrentShape() {
+function applyChamferSizeToCurrentShape(v: number) {
     const layer = layers[selectedLayerIndex];
-    if (layer) layer.chamferSize = selectedChamferSize;
-    layerShapes[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
-    layerShapes2D[selectedLayerIndex]?.set('chamferSize', selectedChamferSize);
+    if (!layer) return;
+    layer.chamferSize = v;
+    layerShapes[selectedLayerIndex]?.set('chamferSize', v);
+    layerShapes2D[selectedLayerIndex]?.set('chamferSize', v);
+    markDirty();
 }
 
-function applyChamferStartToCurrentShape() {
+function applyChamferStartToCurrentShape(v: number) {
     const layer = layers[selectedLayerIndex];
-    if (layer) layer.chamferStart = selectedChamferStart;
-    layerShapes[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
-    layerShapes2D[selectedLayerIndex]?.set('chamferStart', selectedChamferStart);
+    if (!layer) return;
+    layer.chamferStart = v;
+    layerShapes[selectedLayerIndex]?.set('chamferStart', v);
+    layerShapes2D[selectedLayerIndex]?.set('chamferStart', v);
+    markDirty();
 }
 
-function applyChamferBottomSizeToCurrentShape() {
+function applyChamferBottomSizeToCurrentShape(v: number) {
     const layer = layers[selectedLayerIndex];
-    if (layer) layer.chamferBottomSize = selectedChamferBottomSize;
-    layerShapes[selectedLayerIndex]?.set('chamferBottomSize', selectedChamferBottomSize);
-    layerShapes2D[selectedLayerIndex]?.set('chamferBottomSize', selectedChamferBottomSize);
+    if (!layer) return;
+    layer.chamferBottomSize = v;
+    layerShapes[selectedLayerIndex]?.set('chamferBottomSize', v);
+    layerShapes2D[selectedLayerIndex]?.set('chamferBottomSize', v);
+    markDirty();
 }
 
-function applyChamferBottomStartToCurrentShape() {
+function applyChamferBottomStartToCurrentShape(v: number) {
     const layer = layers[selectedLayerIndex];
-    if (layer) layer.chamferBottomStart = selectedChamferBottomStart;
-    layerShapes[selectedLayerIndex]?.set('chamferBottomStart', selectedChamferBottomStart);
-    layerShapes2D[selectedLayerIndex]?.set('chamferBottomStart', selectedChamferBottomStart);
+    if (!layer) return;
+    layer.chamferBottomStart = v;
+    layerShapes[selectedLayerIndex]?.set('chamferBottomStart', v);
+    layerShapes2D[selectedLayerIndex]?.set('chamferBottomStart', v);
+    markDirty();
 }
 
-function applyShedRoofToCurrentShape() {
+function applyShedRoofToCurrentShape(drop: number, direction: string) {
     const layer = layers[selectedLayerIndex];
-    if (layer) {
-        layer.shedRoofDrop = selectedShedRoofDrop;
-        layer.shedRoofDirection = selectedShedRoofDirection;
-    }
-    layerShapes[selectedLayerIndex]?.set('shedRoofDrop', selectedShedRoofDrop);
-    layerShapes[selectedLayerIndex]?.set('shedRoofDirection', selectedShedRoofDirection);
-    layerShapes2D[selectedLayerIndex]?.set('shedRoofDrop', selectedShedRoofDrop);
-    layerShapes2D[selectedLayerIndex]?.set('shedRoofDirection', selectedShedRoofDirection);
+    if (!layer) return;
+    layer.shedRoofDrop = drop;
+    layer.shedRoofDirection = direction;
+    layerShapes[selectedLayerIndex]?.set('shedRoofDrop', drop);
+    layerShapes[selectedLayerIndex]?.set('shedRoofDirection', direction);
+    layerShapes2D[selectedLayerIndex]?.set('shedRoofDrop', drop);
+    layerShapes2D[selectedLayerIndex]?.set('shedRoofDirection', direction);
+    markDirty();
 }
 
-const ALL_MODIFIERS = new Set(['cornerRadius', 'chamfer', 'chamferHeight', 'chamferBottom', 'chamferBottomHeight', 'taper', 'twist', 'scaleTopX', 'scaleTopY', 'shedRoof', 'shedRoofDir']);
-const HIDDEN_MODIFIERS: Record<string, Set<string>> = {
-    cylinder: new Set(['cornerRadius', 'chamfer', 'chamferHeight', 'twist']),
-    tube:     ALL_MODIFIERS,
-    pipe:     ALL_MODIFIERS,
-    duct:     ALL_MODIFIERS,
-    channel:  ALL_MODIFIERS,
-};
+// "Which modifier inputs to show" is owned by the shape capability registry
+// in src/shapes/shape-capabilities.ts (see ADR-0004).
 
 const BASE_SHAPE_LABELS: Record<string, string> = {
-    cuboid: 'Square', cylinder: 'Circle', octagon: 'Octagon', pyramid: 'Pyramid',
-    tube: 'Tube', pipe: 'Pipe (Tube rotated)', duct: 'Duct', channel: 'Channel (Duct rotated)', custom: 'Complex',
+    rectangle: 'Rectangle', circle: 'Circle', octagon: 'Octagon',
+    tube: 'Pipe', pipe: 'Pipe_rotated', duct: 'Pipe', channel: 'Pipe_rotated', custom: 'Complex',
 };
 
 const ROTATE_PAIR: Record<string, string> = {
@@ -3886,8 +4196,6 @@ const ROTATE_PAIR: Record<string, string> = {
     duct: 'channel', channel: 'duct',
 };
 
-const ROTATED_FORMS = new Set(['pipe', 'channel']);
-const TUBE_FAMILY = new Set(['tube', 'pipe', 'duct', 'channel']);
 
 function updateResizeTools() {
     paper.removeTools();
@@ -3906,79 +4214,104 @@ function rotateShape90() {
     return;
 }
 
-function applyRotation() {
-    for (const s of layerShapes) s?.set('shapeRotation', selectedRotation);
-    for (const s of layerShapes2D) s?.set('shapeRotation', selectedRotation);
+function applyRotation(angle: number) {
+    selectedRotation = angle;
+    for (const s of layerShapes) s?.set('shapeRotation', angle);
+    for (const s of layerShapes2D) s?.set('shapeRotation', angle);
+    markDirty();
 }
 
-function apply3DModifiers() {
-    const attrs: Record<string, number> = {
-        taper: selectedTaper, twist: selectedTwist,
-        scaleTopX: selectedScaleTopX, scaleTopY: selectedScaleTopY,
-    };
+function applyTwistToCurrentShape(v: number) {
     const layer = layers[selectedLayerIndex];
-    if (layer) {
-        layer.taper = selectedTaper;
-        layer.twist = selectedTwist;
-        layer.scaleTopX = selectedScaleTopX;
-        layer.scaleTopY = selectedScaleTopY;
-    }
-    const s = layerShapes[selectedLayerIndex];
-    const s2 = layerShapes2D[selectedLayerIndex];
-    if (s) for (const [k, v] of Object.entries(attrs)) s.set(k, v);
-    if (s2) for (const [k, v] of Object.entries(attrs)) s2.set(k, v);
+    if (!layer) return;
+    layer.twist = v;
+    layerShapes[selectedLayerIndex]?.set('twist', v);
+    layerShapes2D[selectedLayerIndex]?.set('twist', v);
+    markDirty();
+}
+
+function applyScaleTopXToCurrentShape(v: number) {
+    const layer = layers[selectedLayerIndex];
+    if (!layer) return;
+    layer.scaleTopX = v;
+    layerShapes[selectedLayerIndex]?.set('scaleTopX', v);
+    layerShapes2D[selectedLayerIndex]?.set('scaleTopX', v);
+    markDirty();
+}
+
+function applyScaleTopYToCurrentShape(v: number) {
+    const layer = layers[selectedLayerIndex];
+    if (!layer) return;
+    layer.scaleTopY = v;
+    layerShapes[selectedLayerIndex]?.set('scaleTopY', v);
+    layerShapes2D[selectedLayerIndex]?.set('scaleTopY', v);
+    markDirty();
 }
 
 // Enforce square-base (height = width) and pyramid min-depth constraints.
 function updateDimensionLock() {
     if (!heightInput) return;
-    const locked = requiresSquareBase(selectedBaseShape);
-    heightInput.disabled = locked;
-    heightInput.style.opacity = locked ? '0.4' : '';
+    const locked = requiresSquareBase(currentBaseShape());
+    const heightRow = heightInput.closest('.nr-sd-number-row') as HTMLElement | null;
+    heightRow?.classList.toggle('nr-sd-number-row--readonly', locked);
     if (locked) {
         heightInput.value = widthInput.value;
         if (heightValueEl) {
             heightValueEl.textContent = `${Math.round(parseFloat(widthInput.value))} px`;
         }
+        // Sync the visible display element (drag-to-scrub input) — it has its
+        // own value separate from the hidden numeric input.
+        const display = heightRow?.querySelector('.nr-sd-number-display') as HTMLInputElement | null;
+        if (display) display.value = `${Math.round(parseFloat(widthInput.value))}px`;
     }
 
-    const minDepth = selectedBaseShape === 'pyramid' ? 60 : 0;
-    depthInput.min = String(minDepth);
-    if (parseFloat(depthInput.value) < minDepth) {
-        depthInput.value = String(minDepth);
-        if (depthValueEl) depthValueEl.textContent = `${minDepth} px`;
-    }
+    depthInput.min = '0';
 
     // Corner radius and chamfer are only available for built-in polygon shapes,
     // not for SVG-footprint layers (SVG vertices are always used without rounding).
     const currentSvgLayer = layers[selectedLayerIndex] ?? null;
     const hasSvgLayer     = currentSvgLayer !== null && isLayerSvg(currentSvgLayer);
-    if (rotationAccordionLi) rotationAccordionLi.style.display = selectedBaseShape !== 'cuboid' ? '' : 'none';
+    if (rotationAccordionLi) rotationAccordionLi.style.display = currentBaseShape() !== 'rectangle' ? '' : 'none';
     if (modifiersSvgInfoEl) modifiersSvgInfoEl.style.display = hasSvgLayer ? '' : 'none';
-    const showBehaviour = selectedBaseShape === 'duct' || selectedBaseShape === 'pipe'
-        || selectedBaseShape === 'tube' || selectedBaseShape === 'channel';
+    const showBehaviour = currentBaseShape() === 'duct' || currentBaseShape() === 'pipe'
+        || currentBaseShape() === 'tube' || currentBaseShape() === 'channel';
     if (dimBehaviourRowEl) dimBehaviourRowEl.style.display = showBehaviour ? '' : 'none';
-    if (hudRotateItemEl) hudRotateItemEl.style.display = ROTATE_PAIR[selectedBaseShape] ? '' : 'none';
+    if (hudRotateItemEl) hudRotateItemEl.style.display = ROTATE_PAIR[currentBaseShape()] ? '' : 'none';
 
     syncModifierVisibility();
 }
 
 // Update dimension sliders and value displays from the shape's current state.
+// Universal rows (e.g. shapeOpacity) live outside the per-shape capability
+// gate — every shape gets them.
+const UNIVERSAL_MODIFIERS = new Set<string>(['shapeOpacity']);
+
 function syncModifierVisibility(): void {
-    const hidden = HIDDEN_MODIFIERS[selectedBaseShape] ?? new Set<string>();
-    if (modifiersAccordionLi) {
-        let allHidden = true;
-        ALL_MODIFIERS.forEach(m => { if (!hidden.has(m)) allHidden = false; });
-        modifiersAccordionLi.style.display = allHidden ? 'none' : '';
-        if (!allHidden) {
-            modifiersAccordionLi.querySelectorAll<HTMLElement>('[data-modifier]').forEach(el => {
-                const mod = el.dataset.modifier!;
-                const isHidden = hidden.has(mod);
-                const isAdminOnly = mod === 'cornerRadius';
-                el.style.display = (isHidden || (isAdminOnly && !adminMode)) ? 'none' : '';
+    if (!modifiersAccordionLi) return;
+    const layer = layers[selectedLayerIndex];
+    const supported = layer
+        ? getSupportedModifiers(layer.baseShape, layer)
+        : new Set<string>();
+    const pipeGroup = !!layer && isPipeGroup(layer.baseShape);
+    const anyVisible = supported.size > 0 || UNIVERSAL_MODIFIERS.size > 0 || pipeGroup;
+    modifiersAccordionLi.style.display = anyVisible ? '' : 'none';
+    if (!anyVisible) return;
+    // Pipe-variant row: only for pipe-group shapes; highlight current variant.
+    const variantRow = modifiersAccordionLi.querySelector<HTMLElement>('[data-pipe-variant-row]');
+    if (variantRow) {
+        variantRow.style.display = pipeGroup ? '' : 'none';
+        if (pipeGroup && layer) {
+            const variant = pipeVariantOf(layer.baseShape);
+            variantRow.querySelectorAll<HTMLButtonElement>('.nr-seg-btn').forEach(btn => {
+                btn.classList.toggle('nr-seg-btn--selected', btn.dataset.variant === variant);
             });
         }
     }
+    modifiersAccordionLi.querySelectorAll<HTMLElement>('[data-modifier]').forEach(el => {
+        const mod = el.dataset.modifier!;
+        const isCapable = UNIVERSAL_MODIFIERS.has(mod) || supported.has(mod as never);
+        el.style.display = isCapable ? '' : 'none';
+    });
 }
 
 function dimDisplayValue(px: number): string {
@@ -3990,40 +4323,40 @@ function syncAllInspectorFields() {
     syncModifierFields();
     syncIconBgColorDisplay();
     applyIconToCurrentShape();
-    if (setDefaultBtn) {
-        const shapeLabel = BASE_SHAPE_LABELS[selectedBaseShape] || selectedBaseShape;
-        setDefaultBtn.textContent = `Set as default for ${shapeLabel}`;
-    }
 }
 
 function syncModifierFields() {
-    if (cornerRadiusInput) { cornerRadiusInput.value = String(selectedCornerRadius); setSliderFill(cornerRadiusInput); }
-    if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${selectedCornerRadius} px`;
-    if (chamferSizeInput) { chamferSizeInput.value = String(selectedChamferSize); setSliderFill(chamferSizeInput); }
-    if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${selectedChamferSize} px`;
-    if (taperInput) { taperInput.value = String(selectedTaper); setSliderFill(taperInput); }
-    if (taperValueEl) taperValueEl.textContent = selectedTaper.toFixed(2);
-    if (twistInput) { twistInput.value = String(selectedTwist); setSliderFill(twistInput); }
-    if (twistValueEl) twistValueEl.textContent = selectedTwist.toFixed(2);
-    if (stxInput) { stxInput.value = String(selectedScaleTopX); setSliderFill(stxInput); }
-    if (stxValueEl) stxValueEl.textContent = selectedScaleTopX.toFixed(2);
-    if (styInput) { styInput.value = String(selectedScaleTopY); setSliderFill(styInput); }
-    if (styValueEl) styValueEl.textContent = selectedScaleTopY.toFixed(2);
+    const layer = layers[selectedLayerIndex];
+    const cr = layer?.cornerRadius ?? 0;
+    const cs = layer?.chamferSize ?? 0;
+    const tw = layer?.twist ?? 0;
+    const sx = layer?.scaleTopX ?? 1;
+    const sy = layer?.scaleTopY ?? 1;
+    if (cornerRadiusInput) { cornerRadiusInput.value = String(cr); setSliderFill(cornerRadiusInput); }
+    if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${cr} px`;
+    if (chamferSizeInput) { chamferSizeInput.value = String(cs); setSliderFill(chamferSizeInput); }
+    if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${cs} px`;
+    if (twistInput) { twistInput.value = String(tw); setSliderFill(twistInput); }
+    if (twistValueEl) twistValueEl.textContent = tw.toFixed(2);
+    if (stxInput) { stxInput.value = String(sx); setSliderFill(stxInput); }
+    if (stxValueEl) stxValueEl.textContent = sx.toFixed(2);
+    if (styInput) { styInput.value = String(sy); setSliderFill(styInput); }
+    if (styValueEl) styValueEl.textContent = sy.toFixed(2);
 }
 
 function syncFormFromShape(shape: IsometricShape) {
     const { width, height } = shape.size();
     const depth = shape.get('isometricHeight') ?? 0;
-    const swapped = ROTATED_FORMS.has(selectedBaseShape);
+    const swapped = isRotatedForm(currentBaseShape());
     const wPx = swapped ? height : width;
-    const isTube = TUBE_FAMILY.has(selectedBaseShape);
+    const isTube = isTubeFamily(currentBaseShape());
 
     if (isTube) {
         widthInput.value  = String(wPx);
         heightInput.value = String(depth);
         depthInput.value  = String(depth);
-        if (widthDisplayEl)  widthDisplayEl.value  = String(Math.round(wPx));
-        if (heightDisplayEl) heightDisplayEl.value = String(Math.round(depth));
+        if (widthDisplayEl)  widthDisplayEl.value  = `${Math.round(wPx)}px`;
+        if (heightDisplayEl) heightDisplayEl.value = `${Math.round(depth)}px`;
         if (widthValueEl)  widthValueEl.textContent  = `${Math.round(wPx)} px`;
         if (heightValueEl) heightValueEl.textContent = `${Math.round(depth)} px`;
     } else {
@@ -4031,9 +4364,9 @@ function syncFormFromShape(shape: IsometricShape) {
         widthInput.value  = String(wPx);
         heightInput.value = String(hPx);
         depthInput.value  = String(depth);
-        if (widthDisplayEl)  widthDisplayEl.value  = String(Math.round(wPx));
-        if (heightDisplayEl) heightDisplayEl.value = String(Math.round(hPx));
-        if (depthDisplayEl)  depthDisplayEl.value  = String(Math.round(depth));
+        if (widthDisplayEl)  widthDisplayEl.value  = `${Math.round(wPx)}px`;
+        if (heightDisplayEl) heightDisplayEl.value = `${Math.round(hPx)}px`;
+        if (depthDisplayEl)  depthDisplayEl.value  = `${Math.round(depth)}px`;
         if (widthValueEl)  widthValueEl.textContent  = `${Math.round(wPx)} px`;
         if (heightValueEl) heightValueEl.textContent = `${Math.round(hPx)} px`;
         if (depthValueEl)  depthValueEl.textContent  = `${Math.round(depth)} px`;
@@ -4048,115 +4381,72 @@ function syncExtrasFromShape(id: string) {
     const layer0 = defaults?.layers?.[0];
     const icon0 = layer0?.icons?.[0];
 
-    selectedBaseShape   = (layer0?.baseShape ?? BASE_SHAPE_BY_ID[id] ?? 'cuboid') as BaseShape;
-    selectedIconFace    = icon0?.face ?? 'top';
-    selectedIcon        = icon0?.iconId || null;
-    selectedIconSize    = icon0?.size ?? 1.5;
+    // baseShape and style live on layer0 itself — they are read directly
+    // via currentBaseShape() / currentStyle() everywhere; no module-level
+    // mirroring needed. BASE_SHAPE_BY_ID[id] used to provide a fallback
+    // here for legacy shapes that didn't have a baseShape on their layer;
+    // that fallback is now in currentBaseShape() (which defaults to
+    // 'rectangle'). If a legacy shape still relies on the registry-id-based
+    // default, fix it at load time by patching layer0.baseShape before
+    // syncExtrasFromShape runs.
     iconLayerIndex      = 0;
-    selectedIconBgEnabled  = icon0?.bgEnabled ?? false;
-    selectedIconAdaptive   = false;
-    selectedIconBgColor = icon0?.bgColor ?? PRIMARY_COLORS[0].base;
-    selectedIconBgShape  = (icon0?.bgShape ?? 'circle') as 'circle' | 'square' | 'octagon';
-    selectedIconBgRadius = icon0?.bgRadius ?? 6;
-    selectedIconBgChamfer = icon0?.bgChamfer ?? 0.18;
-    selectedIconBgSize = icon0?.bgSize ?? (icon0?.size ?? 1.5);
+    /* Icon-background defaults flow from icon0 to entry.bg* directly via
+     * `iconEntries = layer0?.icons ?? []` below; no parallel global cache. */
 
     // Live reference to the layer's icon array (no copy). Mutations to
     // iconEntries are mutations to layers[0].icons.
     iconEntries = layer0?.icons ?? [];
     editingIconIndex = -1;
-
-    selectedStyle     = {
-        topColor:    layer0?.style?.topColor    ?? '',
-        sideColor:   layer0?.style?.sideColor   ?? '',
-        frontColor:  layer0?.style?.frontColor  ?? '',
-        strokeColor: layer0?.style?.strokeColor ?? '',
-    };
     selectedRotation  = defaults?.defaultRotation  ?? 0;
     dimensionYAdjustable = defaults?.dimYAdjustable ?? false;
-    selectedTaper     = layer0?.taper     ?? 0;
-    selectedTwist     = layer0?.twist     ?? 0;
-    selectedScaleTopX = layer0?.scaleTopX ?? 1;
-    selectedScaleTopY = layer0?.scaleTopY ?? 1;
+    // Per-layer modifier values (twist/scaleTopX/Y) used to be mirrored
+    // into module globals here. They aren't anymore — the layer itself is
+    // the source of truth and the modifier panel reads from it on rebuild.
 
     // Sync radio buttons
     inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-form-factor"]').forEach(r => {
-        r.checked = r.value === selectedBaseShape;
+        r.checked = r.value === currentBaseShape();
     });
     syncFormFactorTiles();
     syncFormFactorDropdown();
 
-    // Sync icon selection — no-icon button has data-icon-id="" which maps to selectedIcon===null
-    inspectorEl.querySelectorAll<HTMLElement>('.nr-sd-icon-btn').forEach(btn => {
-        const match = selectedIcon === null
-            ? btn.dataset.iconId === ''
-            : btn.dataset.iconId === selectedIcon;
-        btn.classList.toggle('nr-sd-icon-btn--selected', match);
-    });
+    // Icon selection state used to be synced here by querying
+    // .nr-sd-icon-btn under inspectorEl, but the icon picker grid lives in
+    // the floating popup (appended to document.body), never under
+    // inspectorEl. The query iterated zero elements — dead code, removed.
+    // The popup's own populator (registerPopulator(populateGrid)) handles
+    // selection state from the entry.
 
-    // Sync icon size slider
-    const sizeSlider = inspectorEl.querySelector<HTMLInputElement>('#sd-icon-size');
-    const sizeValueEl = inspectorEl.querySelector<HTMLElement>('#sd-icon-size-value');
-    if (sizeSlider) { sizeSlider.value = String(selectedIconSize); setSliderFill(sizeSlider); }
-    if (sizeValueEl) sizeValueEl.textContent = `${selectedIconSize.toFixed(1)} cells`;
-    // Sync icon background size slider (independent)
-    const bgSizeSlider = inspectorEl.querySelector<HTMLInputElement>('#sd-icon-bg-size');
-    const bgSizeValueEl = inspectorEl.querySelector<HTMLElement>('#sd-icon-bg-size-value');
-    if (bgSizeSlider) { bgSizeSlider.value = String(selectedIconBgSize); setSliderFill(bgSizeSlider); }
-    if (bgSizeValueEl) bgSizeValueEl.textContent = `${selectedIconBgSize.toFixed(1)} cells`;
-
-    // Sync icon background: no-bg swatch + color swatches + custom color picker
-    if (iconBgNoBackgroundBtnEl) {
-        iconBgNoBackgroundBtnEl.classList.toggle('nr-sd-swatch-btn--selected', !selectedIconBgEnabled);
-    }
-    for (const { btn, colorBase } of iconBgSwatchRefs) {
-        btn.classList.toggle('nr-sd-swatch-btn--selected', selectedIconBgEnabled && colorBase === selectedIconBgColor);
-    }
-
-    // Sync icon background shape radio
-    inspectorEl.querySelectorAll<HTMLInputElement>('input[name="sd-icon-bg-shape"]').forEach(r => {
-        r.checked = r.value === selectedIconBgShape;
-    });
-
-    // Sync corner roundness slider visibility and value
-    if (iconBgCornerRadiusRowEl) {
-        iconBgCornerRadiusRowEl.style.display = selectedIconBgShape === 'square' ? '' : 'none';
-    }
-    if (iconBgCornerRadiusInputRef) {
-        iconBgCornerRadiusInputRef.value = String(selectedIconBgRadius);
-        setSliderFill(iconBgCornerRadiusInputRef);
-    }
-
-    // Sync octagon cut depth slider visibility and value
-    if (iconBgChamferRowEl) {
-        iconBgChamferRowEl.style.display = selectedIconBgShape === 'octagon' ? '' : 'none';
-    }
-    if (iconBgChamferInputRef) {
-        iconBgChamferInputRef.value = String(selectedIconBgChamfer);
-        setSliderFill(iconBgChamferInputRef);
-        const ocValueEl = document.getElementById('sd-icon-bg-chamfer-value');
-        if (ocValueEl) ocValueEl.textContent = `${Math.round(selectedIconBgChamfer * 100)}%`;
-    }
-
-    // Sync icon background color display
-    syncIconBgColorDisplay();
+    // The icon-related DOM-sync blocks that used to live here queried
+    // inspectorEl for popup elements (sliders, switchers, swatches) that
+    // actually live in the floating popup appended to document.body, so
+    // they iterated zero elements. The remaining live cases (popup open
+    // during a shape switch) are out of scope of "load a new shape" — the
+    // popup is rebuilt on its next open, and its populators read directly
+    // from the entry. Removed.
 
     // Sync single color input
-    const representativeColor = selectedStyle.topColor || selectedStyle.frontColor || selectedStyle.sideColor || '#e0e0e0';
+    const cs = currentStyle();
+    const representativeColor = cs.topColor || cs.frontColor || cs.sideColor || '#e0e0e0';
     if (colorPickerRef) colorPickerRef.value = representativeColor;
 
-    // Apply dimension lock now that selectedBaseShape has been updated.
+    // Apply dimension lock now that currentBaseShape() has been updated.
     updateDimensionLock();
     syncAllSliderFills();
 
+    // Shape load is a "selection change" at the Shape level — fire all
+    // registered populators so any field that reads from Shape-level state
+    // (e.g. the rotation switcher) refreshes against the newly-loaded
+    // values.
+    populate();
 }
 
 // Swap the canvas shape to match the selected form factor, preserving current dimensions.
 function applyFormFactorToCanvas() {
     const layer = layers[selectedLayerIndex];
     if (!layer) return;
-    const willBePolygon = selectedBaseShape === 'custom' || selectedBaseShape === 'svgPolygon';
-    layer.baseShape = selectedBaseShape;
+    const willBePolygon = currentBaseShape() === 'custom' || currentBaseShape() === 'svgPolygon';
+    layer.baseShape = currentBaseShape();
     // Clear polygon-specific data when leaving a polygon-based form factor.
     if (!willBePolygon) {
         delete layer.normalizedVerts;
@@ -4165,7 +4455,7 @@ function applyFormFactorToCanvas() {
         delete layer.svgBillboard;
     }
     markDirty();
-    if (requiresSquareBase(selectedBaseShape)) {
+    if (requiresSquareBase(currentBaseShape())) {
         layer.height = layer.width;
         heightInput.value = String(layer.width);
         if (heightValueEl) heightValueEl.textContent = `${Math.round(layer.width)} px`;
@@ -4185,9 +4475,20 @@ function onFieldChange() {
     if (requiresSquareBase(layer.baseShape)) {
         heightInput.value = String(w);
         if (heightValueEl) heightValueEl.textContent = `${Math.round(w)} px`;
+        const heightRow = heightInput.closest('.nr-sd-number-row') as HTMLElement | null;
+        const display = heightRow?.querySelector('.nr-sd-number-display') as HTMLInputElement | null;
+        if (display) display.value = `${Math.round(w)}px`;
     }
-    const h = parseFloat(heightInput.value);
-    const d = parseFloat(depthInput.value);
+    let h = parseFloat(heightInput.value);
+    let d = parseFloat(depthInput.value);
+    // Pipe-group shapes (tube/pipe/duct/channel) have a single "Diameter"
+    // stepper that drives both the model height AND depth — Y and Z stay
+    // locked together so the cross-section stays circular/octagonal.
+    if (isTubeFamily(layer.baseShape)) {
+        d = h;
+        depthInput.value = String(d);
+        if (depthDisplayEl) depthDisplayEl.value = `${Math.round(d)}px`;
+    }
     if (isNaN(w) || isNaN(h) || isNaN(d) || w < 1 || h < 1 || d < 0) return;
     layer.width  = w;
     layer.height = h;
@@ -4207,58 +4508,17 @@ function onFieldChange() {
 
 // Persist all template values to the Shape Registry.
 function collectCurrentDef(): Partial<ShapeDefinition> {
-    let iconHref: string | undefined;
-    if (selectedIcon) {
-        const iconEntry = getIconById(selectedIcon);
-        if (iconEntry) {
-            const isAwsEntry = iconEntry.source === 'aws';
-            const isAwsMono = isAwsEntry && selectedIconMonochrome;
-            let iSvg: string, iBg: string | null, iWhite: boolean, iPad: 'normal' | 'compact' | 'tight' | 'none', iClip: boolean;
-            if (isAwsEntry && !isAwsMono) {
-                iSvg = iconEntry.svg;
-                iBg = selectedIconBgEnabled ? selectedIconBgColor : null;
-                iWhite = false;
-                iPad = 'normal';
-                iClip = false;
-            } else if (isAwsMono) {
-                iSvg = iconEntry.svgMono || iconEntry.svg;
-                iBg = selectedIconBgEnabled ? selectedIconBgColor : null;
-                iWhite = selectedIconBgEnabled ? true : isDarkMode();
-                iPad = 'compact';
-                iClip = false;
-            } else if (iconEntry.source === 'azure' || iconEntry.source === 'gcp') {
-                iSvg = iconEntry.svg;
-                iBg = selectedIconBgEnabled ? selectedIconBgColor : null;
-                iWhite = false;
-                iPad = 'normal';
-                iClip = false;
-            } else {
-                iSvg = iconEntry.svg;
-                iBg = selectedIconBgEnabled ? selectedIconBgColor : null;
-                iWhite = selectedIconBgEnabled ? true : isDarkMode();
-                iPad = 'normal';
-                iClip = false;
-            }
-            const cGU = Math.max(selectedIconSize, selectedIconBgSize);
-            const cPx = cGU * GRID_SIZE;
-            const iPx = selectedIconSize * GRID_SIZE;
-            const bPx = selectedIconBgSize * GRID_SIZE;
-            const svg = buildCompositeIconSvg(iSvg, iBg, selectedIconBgShape, iWhite, selectedIconBgRadius, selectedIconBgChamfer, iPad, iClip, cPx, iPx, bPx);
-            iconHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
-        }
-    }
-
-    // Cache the baked iconHref onto the first IconEntry (for instance-spawn use).
-    // The composite SVG building above prepares `iconHref` from the legacy selectedIcon* state;
-    // if we have IconEntries, the first one's href is updated to match.
-
     // Every loaded Shape has at least one Layer (loadShapeIntoCanvas refuses
-    // otherwise), so this branch is the only path.
+    // otherwise). Each IconEntry already carries its baked `href` — set by
+    // applyIconToCurrentShape during the user's edits and re-set on every
+    // chokepoint mutation. collectCurrentDef therefore does NO re-baking; it
+    // is a pure projection of the current Draft.
+    //
+    // (The old legacy bake here used the selectedIcon/selectedIconBg* globals
+    // to re-derive an href and overwrite icons[0].href. That created a
+    // one-save-behind drift bug whenever the entry-side state moved before
+    // the globals did — see the input-sync ADR.)
     const layersOut = layers.map(l => ({ ...l, style: { ...l.style }, icons: l.icons.map(e => ({ ...e })) }));
-    // Apply the freshly-baked iconHref to the first icon of layer 0 if present.
-    if (iconHref && layersOut[0]?.icons.length > 0) {
-        layersOut[0].icons[0].href = iconHref;
-    }
     return {
         displayName: shapeNameInput?.value.trim() || formatLabel(currentShapeId),
         componentType: componentTypeSelect?.value || undefined,
@@ -4370,40 +4630,59 @@ function centerShapeOnCanvas(shape: IsometricShape, shape2D: IsometricShape | nu
 // centre — the previous implementation kept the composite bbox centred,
 // which also moved Layer 0 whenever other layers got elevation/offsets.
 //
-// The user wants the main layer anchored at the ground regardless of what
-// the other layers do. So we now translate all layers by the delta needed
-// to place Layer 0's *ground* centre (i.e. canvas centre plus L0's own
-// offsets, but ignoring its baseElevation) at the canvas centre. Other
-// layers' relative positions (including their elevation) are preserved.
+// All Layers are equal (CONTEXT.md). The composite is centered by aligning
+// the floor-layer bbox (= the Hit Area footprint) with the canvas centre.
+// Floor layers are those with baseElevation === 0; if none, use all layers.
+// No Layer is privileged as the anchor — the floor footprint is.
 function recenterCompositeShape() {
     if (layerShapes.length === 0 || layers.length === 0) return;
 
     const gridPx  = CD_GRID_COUNT * GRID_SIZE;
     const centerX = gridPx / 2;
     const centerY = gridPx / 2;
-    const L0      = layers[0];
 
-    // Ground target = where Layer 0's footprint should sit on the floor plane,
-    // regardless of how much Layer 0 is elevated. This is the un-elevated
-    // (ground) position — every layer's footprint stays anchored to the floor
-    // independent of its own baseElevation.
-    const targetX = centerX + L0.offsetX;
-    const targetY = centerY + L0.offsetY;
+    const hasFloor = layers.some(l => l.baseElevation === 0);
+    const indices: number[] = [];
+    for (let i = 0; i < layers.length; i++) {
+        if (!hasFloor || layers[i].baseElevation === 0) indices.push(i);
+    }
 
     const translate = (shapes: IsometricShape[], isIso: boolean) => {
         if (shapes.length === 0) return;
-        const anchor    = shapes[0];
-        const { x, y }  = anchor.position();
-        const { width: w, height: h } = anchor.size();
-        // In iso view the layer is rendered offset by (-baseElevation, -baseElevation)
-        // for the elevation "lift". To compare against the ground target, add the
-        // elevation back so we recover the ground-plane center of Layer 0.
-        // In 2D view, no elevation offset is applied — the rendered position IS the ground.
-        const elev = isIso ? L0.baseElevation : 0;
-        const anchorGroundCX  = x + w / 2 + elev;
-        const anchorGroundCY  = y + h / 2 + elev;
-        const dx = targetX - anchorGroundCX;
-        const dy = targetY - anchorGroundCY;
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        for (const idx of indices) {
+            const s = shapes[idx];
+            if (!s) continue;
+            const { x, y } = s.position();
+            const { width: w, height: h } = s.size();
+            // In iso view the layer is rendered offset by (-elev, -elev) for
+            // the elevation "lift". Add elev back to recover the ground-plane
+            // position. Floor layers have elev=0 so this is a no-op for them.
+            const elev = isIso ? (layers[idx].baseElevation ?? 0) : 0;
+            // Subtract the per-layer offset so the bbox reflects the layer's
+            // "neutral" (offset-free) position. Otherwise recenter would treat
+            // the offset as drift and cancel it out — user-entered offsets
+            // would silently snap back to zero (reported bug, 2026-05-24).
+            //
+            // 2D paper deliberately ignores `layer.offsetX/Y` when placing the
+            // shape (renderLayersOnCanvas) — so for 2D the position IS already
+            // neutral and we must NOT subtract the offset a second time, or
+            // multilayer shapes drift sideways in 2D.
+            const ox = isIso ? (layers[idx].offsetX ?? 0) : 0;
+            const oy = isIso ? (layers[idx].offsetY ?? 0) : 0;
+            const gx = x + elev - ox;
+            const gy = y + elev - oy;
+            if (gx        < minX) minX = gx;
+            if (gy        < minY) minY = gy;
+            if (gx + w    > maxX) maxX = gx + w;
+            if (gy + h    > maxY) maxY = gy + h;
+        }
+        if (!Number.isFinite(minX)) return;
+        const cx = (minX + maxX) / 2;
+        const cy = (minY + maxY) / 2;
+        const dx = centerX - cx;
+        const dy = centerY - cy;
         if (dx === 0 && dy === 0) return;
         for (const s of shapes) {
             const p = s.position();
@@ -4422,19 +4701,20 @@ function recenterCompositeShape() {
 
 function getHitAreaSize(): { width: number; height: number } {
     const reg = ShapeRegistry[currentShapeId];
-    if (reg?.hitAreaSize) return { ...reg.hitAreaSize };
-    const L0 = layers[0];
-    if (!L0) return { width: GRID_SIZE * 2, height: GRID_SIZE * 2 };
-    let minX = 0, minY = 0, maxX = L0.width, maxY = L0.height;
-    for (const l of layers) {
-        const lx = l.offsetX - L0.width / 2 + l.width / 2;
-        const ly = l.offsetY - L0.height / 2 + l.height / 2;
-        minX = Math.min(minX, lx - l.width / 2);
-        minY = Math.min(minY, ly - l.height / 2);
-        maxX = Math.max(maxX, lx + l.width / 2 + L0.width / 2);
-        maxY = Math.max(maxY, ly + l.height / 2 + L0.height / 2);
+    // Synthesize a ShapeDefinition view of the editor's live state so the
+    // facade rule (CONTEXT.md → Hit Area) is the single source of truth.
+    const def: ShapeDefinition = {
+        displayName: reg?.displayName ?? '',
+        hitAreaSize: reg?.hitAreaSize,
+        layers,
+    };
+    const size = getHitArea(def);
+    // Editor-only safety net: a brand-new Shape with no Layers should still
+    // show a non-zero overlay rather than a degenerate point.
+    if (size.width === 0 && size.height === 0) {
+        return { width: GRID_SIZE * 2, height: GRID_SIZE * 2 };
     }
-    return { width: maxX - minX, height: maxY - minY };
+    return size;
 }
 
 function centerHitArea(area: IsometricShape, g: dia.Graph) {
@@ -4469,16 +4749,25 @@ function showHitAreaOverlay() {
 
     hitAreaShape.on('change:size', () => {
         if (!hitAreaShape) return;
+        // Snap to HIT_AREA_STEP (10px). If the snapped size differs, write it
+        // back — this triggers another change:size, but the next pass sees the
+        // already-snapped value and is a no-op, so no infinite loop.
+        const raw = hitAreaShape.size();
+        const snappedW = Math.round(raw.width  / HIT_AREA_STEP) * HIT_AREA_STEP;
+        const snappedH = Math.round(raw.height / HIT_AREA_STEP) * HIT_AREA_STEP;
+        if (snappedW !== raw.width || snappedH !== raw.height) {
+            hitAreaShape.resize(snappedW, snappedH);
+            return;
+        }
         centerHitArea(hitAreaShape, graph);
-        const s = hitAreaShape.size();
         if (hitAreaShape2D) {
-            hitAreaShape2D.resize(s.width, s.height);
+            hitAreaShape2D.resize(snappedW, snappedH);
             centerHitArea(hitAreaShape2D, graph2D);
         }
         const wEl = document.getElementById('sd-hud-ha-w') as HTMLInputElement | null;
         const hEl = document.getElementById('sd-hud-ha-h') as HTMLInputElement | null;
-        if (wEl) { wEl.value = String(Math.round(s.width)); const d = wEl.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display'); if (d) d.value = `${Math.round(s.width)}px`; }
-        if (hEl) { hEl.value = String(Math.round(s.height)); const d = hEl.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display'); if (d) d.value = `${Math.round(s.height)}px`; }
+        if (wEl) { wEl.value = String(snappedW); const d = wEl.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display'); if (d) d.value = `${snappedW}px`; }
+        if (hEl) { hEl.value = String(snappedH); const d = hEl.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display'); if (d) d.value = `${snappedH}px`; }
         markDirty();
     });
 }
@@ -4721,9 +5010,9 @@ function onRemoveSvgFootprint() {
     const layer = layers[selectedLayerIndex];
     if (!layer) return;
 
-    // Reverting from 'svgPolygon': fall back to cuboid (a sane default). The
+    // Reverting from 'svgPolygon': fall back to rectangle (a sane default). The
     // user can change to any other base shape via the form-factor picker.
-    if (layer.baseShape === 'svgPolygon') layer.baseShape = 'cuboid';
+    if (layer.baseShape === 'svgPolygon') layer.baseShape = 'rectangle';
     delete layer.svgFootprint;
     delete layer.normalizedVerts;
     delete layer.svgFootprintName;
@@ -4753,6 +5042,29 @@ function layerBasePos(): { x: number; y: number } {
     return { x: gridPx / 2, y: gridPx / 2 };
 }
 
+/**
+ * Centre of the union bbox of all floor layers (baseElevation === 0), in
+ * shape-coords (offsetX/Y are relative to the shape origin). Used to keep
+ * the visual cluster centred on the canvas when layer offsets are
+ * asymmetric. Mirror of `shapeBboxCentre` in complex-component.ts — the two
+ * designers must agree on this geometry or the same shape renders at
+ * different positions in CD vs SD.
+ */
+function layerUnionCentre(ls: ReadonlyArray<ShapeLayer>): { x: number; y: number } {
+    const floors = ls.filter(l => l.baseElevation === 0);
+    const considered = floors.length > 0 ? floors : ls;
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    for (const l of considered) {
+        if (l.offsetX - l.width  / 2 < minX) minX = l.offsetX - l.width  / 2;
+        if (l.offsetX + l.width  / 2 > maxX) maxX = l.offsetX + l.width  / 2;
+        if (l.offsetY - l.height / 2 < minY) minY = l.offsetY - l.height / 2;
+        if (l.offsetY + l.height / 2 > maxY) maxY = l.offsetY + l.height / 2;
+    }
+    if (!Number.isFinite(minX)) return { x: 0, y: 0 };
+    return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+}
+
 function renderLayersOnCanvas() {
     paper.removeTools();
     graph.clear();
@@ -4764,11 +5076,17 @@ function renderLayersOnCanvas() {
 
     const { x: bx, y: by } = layerBasePos();
 
+    // Centre the layer union on the canvas — without this, asymmetric layer
+    // offsets shift the visual cluster sideways from (bx, by). Same logic as
+    // SD's ComplexComponent.shapeBboxCentre so the two designers stay in sync.
+    // Single-layer shapes preserve user-set offset as-is.
+    const isoBbox = layers.length > 1 ? layerUnionCentre(layers) : { x: 0, y: 0 };
+
     // Build all shapes first (not yet in the graph) so we control insertion order.
     for (let idx = 0; idx < layers.length; idx++) {
         const layer = layers[idx];
-        const isoX = bx - layer.width  / 2 + layer.offsetX - layer.baseElevation;
-        const isoY = by - layer.height / 2 + layer.offsetY - layer.baseElevation;
+        const isoX = bx - layer.width  / 2 + (layer.offsetX - isoBbox.x) - layer.baseElevation;
+        const isoY = by - layer.height / 2 + (layer.offsetY - isoBbox.y) - layer.baseElevation;
 
         let shape: IsometricShape;
         if (isLayerCustomVerts(layer)) {
@@ -4776,7 +5094,7 @@ function renderLayersOnCanvas() {
             svgShape.set('normalizedVerts', layer.normalizedVerts!);
             shape = svgShape;
         } else {
-            shape = (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['cuboid'])();
+            shape = (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['rectangle'])();
         }
         shape.resize(layer.width, layer.height);
         shape.set('isometricHeight',        layer.depth);
@@ -4787,7 +5105,6 @@ function renderLayersOnCanvas() {
         if (layer.chamferStart) shape.set('chamferStart', layer.chamferStart);
         if (layer.chamferBottomSize) shape.set('chamferBottomSize', layer.chamferBottomSize);
         if (layer.chamferBottomStart) shape.set('chamferBottomStart', layer.chamferBottomStart);
-        if (layer.taper) shape.set('taper', layer.taper);
         if (layer.twist) shape.set('twist', layer.twist);
         if (layer.scaleTopX !== undefined && layer.scaleTopX !== 1) shape.set('scaleTopX', layer.scaleTopX);
         if (layer.scaleTopY !== undefined && layer.scaleTopY !== 1) shape.set('scaleTopY', layer.scaleTopY);
@@ -4808,8 +5125,13 @@ function renderLayersOnCanvas() {
         if (idx > 0) shape.attr('label/text', '');
         layerShapes.push(shape);
 
-        const x2D = bx - layer.width  / 2 + layer.offsetX;
-        const y2D = by - layer.height / 2 + layer.offsetY;
+        // 2D paper: layer.offsetX/Y are deliberately NOT applied here. The
+        // 2D representation is a single composite icon centred on the canvas
+        // — no per-layer offset, no secondary layers spreading out sideways.
+        // Non-main layers are hidden below; only the layer carrying the
+        // shape-wide isMain icon stays visible.
+        const x2D = bx - layer.width  / 2;
+        const y2D = by - layer.height / 2;
 
         let shape2D: IsometricShape;
         if (isLayerCustomVerts(layer)) {
@@ -4817,7 +5139,7 @@ function renderLayersOnCanvas() {
             svgShape2D.set('normalizedVerts', layer.normalizedVerts!);
             shape2D = svgShape2D;
         } else {
-            shape2D = (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['cuboid'])();
+            shape2D = (FORM_FACTOR_PREVIEWS[layer.baseShape] ?? FORM_FACTOR_PREVIEWS['rectangle'])();
         }
         shape2D.resize(layer.width, layer.height);
         shape2D.set('isometricHeight',        layer.depth);
@@ -4828,7 +5150,6 @@ function renderLayersOnCanvas() {
         if (layer.chamferStart) shape2D.set('chamferStart', layer.chamferStart);
         if (layer.chamferBottomSize) shape2D.set('chamferBottomSize', layer.chamferBottomSize);
         if (layer.chamferBottomStart) shape2D.set('chamferBottomStart', layer.chamferBottomStart);
-        if (layer.taper) shape2D.set('taper', layer.taper);
         if (layer.twist) shape2D.set('twist', layer.twist);
         if (layer.scaleTopX !== undefined && layer.scaleTopX !== 1) shape2D.set('scaleTopX', layer.scaleTopX);
         if (layer.scaleTopY !== undefined && layer.scaleTopY !== 1) shape2D.set('scaleTopY', layer.scaleTopY);
@@ -4937,12 +5258,9 @@ function buildLayersPanel() {
             const edPopup = document.getElementById('nr-icon-editor-popup');
             if (edPopup) edPopup.style.display = 'none';
             selectedLayerIndex = i;
-            selectedBaseShape = layers[i]?.baseShape ?? 'cuboid';
             currentShape   = layerShapes[i]   ?? null;
             currentShape2D = layerShapes2D[i] ?? null;
             iconEntries = layers[i]?.icons ?? [];
-            selectedIcon = null;
-            selectedIconBgEnabled = false;
             buildLayersPanel();
             buildInspectorPanel();
             syncInspectorToLayer(i);
@@ -5121,10 +5439,31 @@ function applyAllLayerIcons() {
     const savedEntries = iconEntries;
     const savedShape = currentShape;
     const savedShape2D = currentShape2D;
+
+    // 2D representation is a single composite icon: only the layer holding
+    // the shape-wide isMain icon renders into the 2D paper. All other
+    // layers' shape2Ds get their visuals hidden so they don't ghost over
+    // the main icon when the user hovers (no secondary outline, no offset
+    // duplicates).
+    const mainLayerIdx = Math.max(0, layers.findIndex(l => l.icons?.some(e => e.isMain)));
+
     for (let idx = 0; idx < layers.length; idx++) {
         const layerIcons = layers[idx].icons;
         const shape = layerShapes[idx];
         const shape2D = layerShapes2D[idx];
+        const is2DVisible = idx === mainLayerIdx;
+
+        if (shape2D && !is2DVisible) {
+            // Hide secondary-layer 2D shapes by toggling their cellView's root
+            // group display directly. JointJS doesn't expose a `root` selector
+            // we can drive via attrs, so reach into the rendered DOM instead.
+            const view2D = paper2D.findViewByModel(shape2D);
+            if (view2D?.el) (view2D.el as SVGElement).style.display = 'none';
+        } else if (shape2D && is2DVisible) {
+            const view2D = paper2D.findViewByModel(shape2D);
+            if (view2D?.el) (view2D.el as SVGElement).style.display = '';
+        }
+
         if (!layerIcons || !layerIcons.some(e => !!e.iconId || e.bgEnabled)) {
             shape?.attr(noIconAttrs);
             shape2D?.attr(noIconAttrs);
@@ -5132,7 +5471,7 @@ function applyAllLayerIcons() {
         }
         iconEntries = layerIcons;
         currentShape = shape ?? null;
-        currentShape2D = shape2D ?? null;
+        currentShape2D = is2DVisible ? (shape2D ?? null) : null;
         applyIconToCurrentShape();
     }
     iconEntries = savedEntries;
@@ -5145,7 +5484,8 @@ function syncInspectorToLayer(index: number) {
     const layer = layers[index];
     if (!layer) return;
 
-    selectedBaseShape = layer.baseShape;
+    // baseShape is read directly from the layer via currentBaseShape() now;
+    // no module-level cache to keep in sync.
 
     // Complex shape sliders always operate in pixels.
     widthInput.value  = String(layer.width);
@@ -5157,9 +5497,9 @@ function syncInspectorToLayer(index: number) {
     if (widthValueEl)  widthValueEl.textContent  = `${Math.round(layer.width)} px`;
     if (heightValueEl) heightValueEl.textContent = `${Math.round(layer.height)} px`;
     if (depthValueEl)  depthValueEl.textContent  = `${Math.round(layer.depth)} px`;
-    if (widthDisplayEl)  widthDisplayEl.value  = String(Math.round(layer.width));
-    if (heightDisplayEl) heightDisplayEl.value = String(Math.round(layer.height));
-    if (depthDisplayEl)  depthDisplayEl.value  = String(Math.round(layer.depth));
+    if (widthDisplayEl)  widthDisplayEl.value  = `${Math.round(layer.width)}px`;
+    if (heightDisplayEl) heightDisplayEl.value = `${Math.round(layer.height)}px`;
+    if (depthDisplayEl)  depthDisplayEl.value  = `${Math.round(layer.depth)}px`;
 
     if (offsetXInput)        {
         offsetXInput.value = String(layer.offsetX);
@@ -5191,77 +5531,52 @@ function syncInspectorToLayer(index: number) {
     });
     syncFormFactorTiles();
 
-    // Sync color picker
-    selectedStyle = {
-        topColor:    layer.style.topColor    ?? '',
-        sideColor:   layer.style.sideColor   ?? '',
-        frontColor:  layer.style.frontColor  ?? '',
-        strokeColor: layer.style.strokeColor ?? '',
-    };
+    // Sync color picker — read directly from the layer's style (no module
+    // mirror).
     const repColor = layer.style.topColor || layer.style.frontColor || layer.style.sideColor || '#e0e0e0';
     if (colorPickerRef) colorPickerRef.value = repColor;
 
-    // Sync corner radius and chamfer (may be overridden/hidden for SVG layers by updateDimensionLock)
-    const cr = layer.cornerRadius ?? 0;
-    selectedCornerRadius = cr;
-    if (cornerRadiusInput) {
-        cornerRadiusInput.value = String(cr);
-        setSliderFill(cornerRadiusInput);
-        const d = cornerRadiusInput.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
-        if (d) d.value = `${cr}px`;
-    }
-    if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${cr} px`;
-
-    const cs = layer.chamferSize ?? 0;
-    selectedChamferSize = cs;
-    if (chamferSizeInput) {
-        chamferSizeInput.value = String(cs);
-        setSliderFill(chamferSizeInput);
-        const d = chamferSizeInput.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
-        if (d) d.value = `${cs}px`;
-    }
-    if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${cs} px`;
-
-    const syncSlider = (input: HTMLInputElement | null, val: number) => {
+    // Sync corner radius and chamfer (may be overridden/hidden for SVG layers
+    // by updateDimensionLock). Reads come straight from the layer model —
+    // there is no parallel `selected*` cache.
+    const syncSlider = (input: HTMLInputElement | null, val: number, displaySuffix = 'px') => {
         if (!input) return;
         input.value = String(val);
         setSliderFill(input);
         const d = input.closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
-        if (d) d.value = `${val}px`;
+        if (d) d.value = `${val}${displaySuffix}`;
     };
 
-    selectedChamferStart = layer.chamferStart ?? 0;
-    syncSlider(chamferStartInput, selectedChamferStart);
+    const cr = layer.cornerRadius ?? 0;
+    syncSlider(cornerRadiusInput, cr);
+    if (cornerRadiusValueEl) cornerRadiusValueEl.textContent = `${cr} px`;
 
-    selectedChamferBottomSize = layer.chamferBottomSize ?? 0;
-    syncSlider(chamferBottomSizeInput, selectedChamferBottomSize);
+    const cs = layer.chamferSize ?? 0;
+    syncSlider(chamferSizeInput, cs);
+    if (chamferSizeValueEl) chamferSizeValueEl.textContent = `${cs} px`;
 
-    selectedChamferBottomStart = layer.chamferBottomStart ?? 0;
-    syncSlider(chamferBottomStartInput, selectedChamferBottomStart);
+    syncSlider(chamferStartInput, layer.chamferStart ?? 0);
+    syncSlider(chamferBottomSizeInput, layer.chamferBottomSize ?? 0);
+    syncSlider(chamferBottomStartInput, layer.chamferBottomStart ?? 0);
 
-    selectedTaper = layer.taper ?? 0;
-    syncSlider(taperInput, selectedTaper);
-    if (taperValueEl) taperValueEl.textContent = selectedTaper.toFixed(2);
+    const twist = layer.twist ?? 0;
+    syncSlider(twistInput, twist);
+    if (twistValueEl) twistValueEl.textContent = `${twist}°`;
 
-    selectedTwist = layer.twist ?? 0;
-    syncSlider(twistInput, selectedTwist);
-    if (twistValueEl) twistValueEl.textContent = `${selectedTwist}°`;
+    const sx = layer.scaleTopX ?? 1;
+    syncSlider(stxInput, sx);
+    if (stxValueEl) stxValueEl.textContent = sx.toFixed(2);
 
-    selectedScaleTopX = layer.scaleTopX ?? 1;
-    syncSlider(stxInput, selectedScaleTopX);
-    if (stxValueEl) stxValueEl.textContent = selectedScaleTopX.toFixed(2);
+    const sy = layer.scaleTopY ?? 1;
+    syncSlider(styInput, sy);
+    if (styValueEl) styValueEl.textContent = sy.toFixed(2);
 
-    selectedScaleTopY = layer.scaleTopY ?? 1;
-    syncSlider(styInput, selectedScaleTopY);
-    if (styValueEl) styValueEl.textContent = selectedScaleTopY.toFixed(2);
+    syncSlider(shedDropInput, layer.shedRoofDrop ?? 0);
 
-    selectedShedRoofDrop = layer.shedRoofDrop ?? 0;
-    syncSlider(shedDropInput, selectedShedRoofDrop);
-
-    selectedShedRoofDirection = (layer.shedRoofDirection as string) ?? 'front';
+    const shedDir = (layer.shedRoofDirection as string) ?? 'front';
     if (shedDirSwitcherEl) {
         shedDirSwitcherEl.querySelectorAll('.nr-seg-btn').forEach((b, i) =>
-            b.classList.toggle('nr-seg-btn--selected', ['front', 'right', 'back', 'left'][i] === selectedShedRoofDirection));
+            b.classList.toggle('nr-seg-btn--selected', ['front', 'right', 'back', 'left'][i] === shedDir));
     }
 
     // SVG footprint section: clear any stale parse error, then refresh
@@ -5327,10 +5642,7 @@ function onAddLayer() {
     });
     layers.push(newLayer);
     selectedLayerIndex = layers.length - 1;
-    selectedBaseShape = newLayer.baseShape;
     iconEntries = newLayer.icons;   // live reference to the new layer's icon array
-    selectedIcon = null;
-    selectedIconBgEnabled = false;
     markDirty();
     renderLayersOnCanvas();
     buildLayersPanel();
@@ -5349,10 +5661,7 @@ function onDeleteLayer(index: number) {
     layers.splice(index, 1);
     if (selectedLayerIndex >= layers.length) selectedLayerIndex = layers.length - 1;
     if (iconLayerIndex    >= layers.length) iconLayerIndex    = 0;
-    selectedBaseShape = layers[selectedLayerIndex]?.baseShape ?? 'cuboid';
     iconEntries = layers[selectedLayerIndex]?.icons ?? [];
-    selectedIcon = null;
-    selectedIconBgEnabled = false;
     renderLayersOnCanvas();
     buildLayersPanel();
     // Layers panel stays visible — even at 1 Layer, it shows that one Layer
@@ -5394,11 +5703,21 @@ function onMoveLayerDown(index: number) {
 
 function onDuplicateLayer(index: number) {
     const source = layers[index];
+    // Deep-clone icons so the copy doesn't share entries with the source —
+    // shallow `...source` would alias `icons` (same array reference),
+    // meaning subsequent edits to either layer would mutate both.
+    // Strip `isMain` on every copied icon: a Shape has exactly one Main
+    // icon (the original), so the duplicated layer must not carry the flag.
     const copy: ShapeLayer = {
         ...source,
-        id:   `layer-${Date.now()}`,
+        id:   `layer-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
         name: `${source.name} Copy`,
         style: { ...source.style },
+        icons: source.icons.map(ie => ({
+            ...ie,
+            id: `icon-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+            isMain: false,
+        })),
     };
     layers.splice(index + 1, 0, copy);
     selectedLayerIndex = index + 1;
@@ -5455,6 +5774,11 @@ function onCreateShape(name: string, componentType?: string) {
             width: GRID_SIZE * 2,
             height: GRID_SIZE * 2,
             depth: GRID_SIZE * 0.5,
+            icons: [defaultIconEntry({
+                id: `icon-${id}-main`,
+                iconId: 'cube',
+                isMain: true,
+            })],
         })],
     });
     saveRegistryToStorage();
@@ -5729,6 +6053,148 @@ function showNewShapeModal() {
     nameInput.focus();
 }
 
+interface FolderModalOptions {
+    mode: 'create' | 'rename';
+    folderId?: string;
+    initialName?: string;
+}
+
+function showFolderModal(opts: FolderModalOptions): void {
+    const isRename = opts.mode === 'rename';
+    const submitLabel = isRename ? 'Rename Folder' : 'Create Folder';
+    const headingText = isRename ? 'Rename Folder' : 'New Folder';
+
+    const modalEl = document.createElement('div');
+    modalEl.className = 'cds--modal is-visible';
+    modalEl.setAttribute('role', 'dialog');
+    modalEl.setAttribute('aria-modal', 'true');
+    modalEl.setAttribute('aria-labelledby', 'nr-cd-folder-modal-heading');
+
+    const containerEl = document.createElement('div');
+    containerEl.className = 'cds--modal-container cds--modal-container--sm';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'cds--modal-header';
+
+    const headingEl = document.createElement('p');
+    headingEl.className = 'cds--modal-header__heading';
+    headingEl.id = 'nr-cd-folder-modal-heading';
+    headingEl.textContent = headingText;
+
+    const closeBtnWrapper = document.createElement('div');
+    closeBtnWrapper.className = 'cds--modal-close-button';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'cds--modal-close';
+    closeBtn.type = 'button';
+    closeBtn.title = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = CDS_ICON_CLOSE;
+    closeBtn.addEventListener('click', () => modalEl.remove());
+    closeBtnWrapper.appendChild(closeBtn);
+
+    headerEl.appendChild(headingEl);
+    headerEl.appendChild(closeBtnWrapper);
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'cds--modal-content';
+
+    const formItem = document.createElement('div');
+    formItem.className = 'cds--form-item';
+
+    const inputWrapper = document.createElement('div');
+    inputWrapper.className = 'cds--text-input-wrapper';
+
+    const label = document.createElement('label');
+    label.className = 'cds--label';
+    label.setAttribute('for', 'nr-cd-folder-name-input');
+    label.textContent = 'Folder Name';
+
+    const outerWrapper = document.createElement('div');
+    outerWrapper.className = 'cds--text-input__field-outer-wrapper';
+
+    const fieldWrapper = document.createElement('div');
+    fieldWrapper.className = 'cds--text-input__field-wrapper';
+
+    const nameInput = document.createElement('input');
+    nameInput.id = 'nr-cd-folder-name-input';
+    nameInput.type = 'text';
+    nameInput.className = 'cds--text-input';
+    nameInput.placeholder = 'e.g. Networking';
+    nameInput.value = opts.initialName ?? '';
+
+    const errorEl = document.createElement('div');
+    errorEl.className = 'cds--form-requirement';
+    errorEl.style.display = 'none';
+
+    fieldWrapper.appendChild(nameInput);
+    outerWrapper.appendChild(fieldWrapper);
+    inputWrapper.appendChild(label);
+    inputWrapper.appendChild(outerWrapper);
+    inputWrapper.appendChild(errorEl);
+    formItem.appendChild(inputWrapper);
+    bodyEl.appendChild(formItem);
+
+    const footerEl = document.createElement('div');
+    footerEl.className = 'cds--modal-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => modalEl.remove());
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'cds--btn cds--btn--primary';
+    submitBtn.type = 'button';
+    submitBtn.textContent = submitLabel;
+
+    const setInvalid = (msg: string) => {
+        fieldWrapper.setAttribute('data-invalid', 'true');
+        nameInput.className = 'cds--text-input cds--text-input--invalid';
+        nameInput.setAttribute('aria-invalid', 'true');
+        if (!fieldWrapper.querySelector('.cds--text-input__invalid-icon')) {
+            fieldWrapper.insertAdjacentHTML('beforeend', CDS_ICON_WARNING);
+        }
+        errorEl.textContent = msg;
+        errorEl.style.display = '';
+        nameInput.focus();
+    };
+
+    submitBtn.addEventListener('click', () => {
+        const name = nameInput.value.trim();
+        if (name.length < 1) { setInvalid('Please enter a name.'); return; }
+        if (userFolderNameExists(name, opts.folderId)) { setInvalid('A folder with this name already exists.'); return; }
+        modalEl.remove();
+        if (isRename && opts.folderId) {
+            renameUserFolder(opts.folderId, name);
+        } else {
+            createUserFolder(name);
+        }
+        buildPalettePanel();
+    });
+
+    nameInput.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Enter') submitBtn.click();
+        if (e.key === 'Escape') modalEl.remove();
+    });
+
+    footerEl.appendChild(cancelBtn);
+    footerEl.appendChild(submitBtn);
+
+    containerEl.appendChild(headerEl);
+    containerEl.appendChild(bodyEl);
+    containerEl.appendChild(footerEl);
+    modalEl.appendChild(containerEl);
+    document.body.appendChild(modalEl);
+
+    modalEl.addEventListener('mousedown', (e: MouseEvent) => {
+        if (e.target === modalEl) modalEl.remove();
+    });
+
+    nameInput.focus();
+    nameInput.select();
+}
+
 function cleanSvgForExport(clone: SVGSVGElement): void {
     clone.querySelectorAll('[data-grid], .joint-back-layer').forEach(el => el.remove());
     clone.querySelectorAll('.joint-port').forEach(el => el.remove());
@@ -5996,7 +6462,11 @@ function onDeleteShape(id: string) {
 }
 
 
-let componentPanelHandle: { rebuild: () => void } | null = null;
+let componentPanelHandle: {
+    rebuild: () => void;
+    setSearchTerm?: (term: string) => void;
+    updateLabel?: (shapeId: string, newLabel: string) => void;
+} | null = null;
 
 function buildPalettePanel() {
     paletteEl.innerHTML = '';
@@ -6017,32 +6487,31 @@ function buildPalettePanel() {
 
     for (const id of userIds) {
         const def = ShapeRegistry[id];
-        const catId = def?.layers?.[0]?.icons?.[0]?.iconId;
-        const iconEntry = catId ? getIconById(catId) : undefined;
-        const isV = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
+        // Use the Shape-wide Main IconEntry (CONTEXT.md: isMain is per-Shape).
+        // Matches the SD palette + element tree. Querying `layers[0].icons[0]`
+        // here previously caused the CD tree and SD tree to disagree whenever
+        // the user's Main IconEntry was not the first entry of the first Layer.
+        const catId = def ? getPaletteIcon(def)?.iconId : undefined;
+        const rendered = renderIcon(catId, 'tree');
         items.push({
             id,
             label: def?.displayName ?? formatLabel(id),
-            iconSvg: iconEntry?.svg,
-            iconSvgMono: isV ? iconEntry.svgMono : undefined,
-            iconBgColor: isV ? iconEntry.bgColor : undefined,
-            iconIsVendor: !!isV,
-            collection: 'User Components',
+            iconSvg: rendered?.html,
+            iconCssClass: rendered?.cssClass,
+            collection: USER_CREATED_COLLECTION,
+            userFolderId: def?.userFolderId,
         });
     }
 
     for (const collectionName of getComponentCollections()) {
         for (const s of (byCollection.get(collectionName) ?? [])) {
-            const catId = s.definition.layers?.[0]?.icons?.[0]?.iconId;
-            const iconEntry = catId ? getIconById(catId) : undefined;
-            const isV = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
+            const catId = getPaletteIcon(s.definition)?.iconId;
+            const rendered = renderIcon(catId, 'tree');
             items.push({
                 id: s.id,
                 label: s.definition.displayName ?? formatLabel(s.id),
-                iconSvg: iconEntry?.svg,
-                iconSvgMono: isV ? iconEntry.svgMono : undefined,
-                iconBgColor: isV ? iconEntry.bgColor : undefined,
-                iconIsVendor: !!isV,
+                iconSvg: rendered?.html,
+                iconCssClass: rendered?.cssClass,
                 collection: collectionName,
                 data: s.definition,
             });
@@ -6070,8 +6539,125 @@ function buildPalettePanel() {
         onSelect: selectShape_,
         selectedId: () => currentShapeId,
         showCreateButton: true,
-        onCreateClick: showNewShapeModal,
+        onCreateComponent: showNewShapeModal,
+        onCreateFolder: () => showFolderModal({ mode: 'create' }),
+        userFolders: listUserFolders().map(f => ({ id: f.id, name: f.name })),
+        onRenameUserFolder: (folderId) => {
+            const f = listUserFolders().find(x => x.id === folderId);
+            if (!f) return;
+            showFolderModal({ mode: 'rename', folderId, initialName: f.name });
+        },
+        onDeleteUserFolder: (folderId) => onDeleteUserFolderConfirm(folderId),
+        onMoveShapeToUserFolder: (shapeId, folderId) => onMoveUserShape(shapeId, folderId),
     });
+}
+
+function onMoveUserShape(shapeId: string, folderId: string | null): void {
+    const def = ShapeRegistry[shapeId];
+    if (!def || BUILT_IN_SHAPE_IDS.has(shapeId)) return;
+    // User-generated shapes (the only ones movable into user folders) are not
+    // stored in shapeStore('general'); they live directly in the registry.
+    if (folderId) def.userFolderId = folderId;
+    else delete def.userFolderId;
+    saveRegistryToStorage();
+    buildPalettePanel();
+}
+
+function onDeleteUserFolderConfirm(folderId: string): void {
+    const folder = listUserFolders().find(f => f.id === folderId);
+    if (!folder) return;
+
+    // Count shapes currently inside the folder so the warning copy reflects
+    // the real impact ("X components will move back to User Created").
+    const containedShapes = Object.keys(ShapeRegistry).filter(id =>
+        !BUILT_IN_SHAPE_IDS.has(id) && ShapeRegistry[id]?.userFolderId === folderId,
+    );
+
+    const modalEl = document.createElement('div');
+    modalEl.className = 'cds--modal is-visible';
+    modalEl.setAttribute('role', 'dialog');
+    modalEl.setAttribute('aria-modal', 'true');
+    modalEl.setAttribute('aria-labelledby', 'nr-del-folder-heading');
+
+    const containerEl = document.createElement('div');
+    containerEl.className = 'cds--modal-container cds--modal-container--sm';
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'cds--modal-header';
+
+    const headingEl = document.createElement('p');
+    headingEl.className = 'cds--modal-header__heading';
+    headingEl.id = 'nr-del-folder-heading';
+    headingEl.textContent = 'Delete Folder';
+
+    const closeBtnWrapper = document.createElement('div');
+    closeBtnWrapper.className = 'cds--modal-close-button';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'cds--modal-close';
+    closeBtn.type = 'button';
+    closeBtn.setAttribute('aria-label', 'Close');
+    closeBtn.innerHTML = CDS_ICON_CLOSE;
+    closeBtn.addEventListener('click', () => modalEl.remove());
+    closeBtnWrapper.appendChild(closeBtn);
+
+    headerEl.appendChild(headingEl);
+    headerEl.appendChild(closeBtnWrapper);
+
+    const bodyEl = document.createElement('div');
+    bodyEl.className = 'cds--modal-content';
+
+    const msg = document.createElement('p');
+    msg.style.cssText = 'font-size:0.875rem;line-height:1.5;margin:0;';
+    const countLine = containedShapes.length === 0
+        ? `The folder is empty.`
+        : containedShapes.length === 1
+            ? `<strong>1 component</strong> will move back to <strong>User Created</strong>.`
+            : `<strong>${containedShapes.length} components</strong> will move back to <strong>User Created</strong>.`;
+    msg.innerHTML =
+        `Delete the folder <strong>${folder.name}</strong>?<br><br>` +
+        `Only the folder structure is removed — your components are not deleted. ${countLine}`;
+    bodyEl.appendChild(msg);
+
+    const footerEl = document.createElement('div');
+    footerEl.className = 'cds--modal-footer';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'cds--btn cds--btn--secondary';
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', () => modalEl.remove());
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'cds--btn cds--btn--danger';
+    confirmBtn.type = 'button';
+    confirmBtn.textContent = 'Delete Folder';
+    confirmBtn.addEventListener('click', () => {
+        modalEl.remove();
+        for (const id of containedShapes) {
+            delete ShapeRegistry[id].userFolderId;
+        }
+        saveRegistryToStorage();
+        deleteUserFolder(folderId);
+        buildPalettePanel();
+    });
+
+    footerEl.appendChild(cancelBtn);
+    footerEl.appendChild(confirmBtn);
+
+    containerEl.appendChild(headerEl);
+    containerEl.appendChild(bodyEl);
+    containerEl.appendChild(footerEl);
+    modalEl.appendChild(containerEl);
+    document.body.appendChild(modalEl);
+
+    modalEl.addEventListener('mousedown', (e: MouseEvent) => {
+        if (e.target === modalEl) modalEl.remove();
+    });
+    modalEl.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Escape') modalEl.remove();
+    });
+
+    cancelBtn.focus();
 }
 
 // ── Canvas shape loading ───────────────────────────────────────────────────────
@@ -6091,6 +6677,34 @@ function loadShapeIntoCanvas(id: string) {
     const displayName   = savedDefaults?.displayName ?? formatLabel(id);
     if (shapeNameInput) shapeNameInput.value = displayName;
 
+    // Reassign the working `layers` array FIRST — downstream syncs read from
+    // it (via currentBaseShape() / currentStyle() / layers[selectedLayerIndex])
+    // so they must see the new shape's layers, not the old ones. Legacy
+    // shapes whose layer0 has no `baseShape` used to fall back to
+    // BASE_SHAPE_BY_ID at read time; patch it here so currentBaseShape()
+    // returns the right value.
+    if (savedDefaults?.layers?.length) {
+        layers             = savedDefaults.layers.map(l => ({ ...l, style: { ...l.style }, icons: l.icons.map(e => ({ ...e })) }));
+        selectedLayerIndex = 0;
+        if (layers[0] && !layers[0].baseShape) {
+            layers[0].baseShape = (BASE_SHAPE_BY_ID[id] ?? 'rectangle') as BaseShape;
+        }
+        // Normalize isMain: exactly one Main icon across the whole Shape.
+        // Old saved Shapes can have multiple `isMain: true` entries (e.g. from
+        // the previous layer-duplicate path which carried the flag forward) —
+        // keep the first, clear the rest so the UI shows only one minus-less
+        // protected icon.
+        let seenMain = false;
+        for (const l of layers) {
+            for (const ie of l.icons) {
+                if (ie.isMain) {
+                    if (seenMain) ie.isMain = false;
+                    else seenMain = true;
+                }
+            }
+        }
+    }
+
     // Restore icon/style/baseShape fields (common to both simple and complex paths)
     syncExtrasFromShape(id);
     syncIconBgColorDisplay();
@@ -6106,23 +6720,18 @@ function loadShapeIntoCanvas(id: string) {
     const complexToggleDiv = complexToggleBtn?.closest<HTMLElement>('.nr-toggle') ?? null;
 
     const layer0 = savedDefaults?.layers?.[0];
-    selectedCornerRadius = layer0?.cornerRadius ?? 0;
-    selectedChamferSize  = layer0?.chamferSize ?? 0;
-    selectedChamferStart = layer0?.chamferStart ?? 0;
 
-    // Sync 3D modifier sliders with loaded values
-    if (taperInput) { taperInput.value = String(selectedTaper); taperValueEl.textContent = selectedTaper.toFixed(2); }
-    if (twistInput) { twistInput.value = String(selectedTwist); twistValueEl.textContent = `${selectedTwist}°`; }
-    if (stxInput) { stxInput.value = String(selectedScaleTopX); stxValueEl.textContent = selectedScaleTopX.toFixed(2); }
-    if (styInput) { styInput.value = String(selectedScaleTopY); styValueEl.textContent = selectedScaleTopY.toFixed(2); }
+    // Sync modifier sliders with loaded values from layer0 (which is the
+    // selected layer right after a fresh shape load, since selectedLayerIndex
+    // is reset to 0 above).
+    const tw = layer0?.twist ?? 0;
+    const sx = layer0?.scaleTopX ?? 1;
+    const sy = layer0?.scaleTopY ?? 1;
+    if (twistInput) { twistInput.value = String(tw); if (twistValueEl) twistValueEl.textContent = `${tw}°`; }
+    if (stxInput)   { stxInput.value   = String(sx); if (stxValueEl)   stxValueEl.textContent   = sx.toFixed(2); }
+    if (styInput)   { styInput.value   = String(sy); if (styValueEl)   styValueEl.textContent   = sy.toFixed(2); }
 
-    // Every Shape is layered now — there's no "simple shape" path. A Shape with
-    // one Layer is the natural minimum; the Layers panel is hidden in that case
-    // to reduce UI clutter, but the underlying state model is uniform.
     if (savedDefaults?.layers?.length) {
-        layers             = savedDefaults.layers.map(l => ({ ...l, style: { ...l.style }, icons: l.icons.map(e => ({ ...e })) }));
-        selectedLayerIndex = 0;
-
         iconEntries = layers[0]?.icons ?? [];
 
         // The complex toggle is obsolete but still exists in the DOM — set it
@@ -6202,6 +6811,10 @@ function syncEmptyState(): void {
     if (el) el.style.display = currentShapeId ? 'none' : '';
     const vtEl = document.getElementById('cd2-view-toggle-container');
     if (vtEl) vtEl.style.display = currentShapeId ? '' : 'none';
+    // Keep the Layers panel in sync with the editor state. Without this it
+    // stuck around after the user navigated back to the picker (resetSelection)
+    // or hopped into the CD without picking a shape first.
+    if (currentShapeId) showLayersPanel(); else hideLayersPanel();
 }
 
 // ── Initialise ────────────────────────────────────────────────────────────────
@@ -6210,3 +6823,12 @@ buildInspectorPanel();
 buildPalettePanel();
 if (currentShapeId) loadShapeIntoCanvas(currentShapeId);
 syncEmptyState();
+
+// Vendor catalogs (AWS/Azure/GCP) load asynchronously. The initial palette
+// build sees empty entries for vendor icons and renders rows without their
+// SVGs; without this listener the CD palette stays stale while the SD palette
+// (which has its own onCatalogChange hook) refreshes correctly. Same hook here
+// keeps the two trees in sync.
+onCatalogChange(() => {
+    buildPalettePanel();
+});

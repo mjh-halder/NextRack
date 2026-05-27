@@ -5,14 +5,15 @@
 // Wiring: initAdmin() is called once from index.ts. show()/hide() are driven by
 // the app-level view switcher in index.ts.
 
-import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon, addAwsIcons, removeAllAwsIcons, getAwsIconCount, addGcpIcons, removeAllGcpIcons, getGcpIconCount, addAzureIcons, removeAllAzureIcons, getAzureIconCount, addGridIcon, removeGridIcon, getGridIconCount, onCatalogChange, ensureFullCatalog, ensureCarbonIcons } from './icon-catalog';
-import { unzipSync } from 'fflate';
+import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon, addAwsIcons, removeAllAwsIcons, getAwsIconCount, addGcpIcons, removeAllGcpIcons, getGcpIconCount, addAzureIcons, removeAllAzureIcons, getAzureIconCount, addGridIcon, removeGridIcon, getGridIconCount, onCatalogChange, ensureFullCatalog, ensureCarbonIcons, extractSvgEntriesFromZip } from './icon-catalog';
+import { renderIcon } from './icon-renderer';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Edit16 from '@carbon/icons/es/edit/16.js';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Upload16 from '@carbon/icons/es/upload/16.js';
 import SubtractAlt16 from '@carbon/icons/es/subtract--alt/16.js';
 import Download16 from '@carbon/icons/es/download/16.js';
+import { getPaletteIcon } from './shape-query';
 
 const ACTION_ICON_EDIT    = carbonIconToString(Edit16 as CarbonIcon);
 const ACTION_ICON_DELETE  = carbonIconToString(TrashCan16 as CarbonIcon);
@@ -24,7 +25,7 @@ import {
     setIconScope,
     IconScope,
 } from './icon-config';
-import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, deleteShape, saveRegistryToStorage } from './shapes/shape-registry';
+import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, deleteShape, saveRegistryToStorage, addShape } from './shapes/shape-registry';
 import { shapeStore } from './shape-store';
 import { componentStore, ComponentDefinition } from './component-store';
 import { listInventory, removeFromInventory, isDarkMode, SvgInventoryEntry } from './svg-inventory';
@@ -138,10 +139,204 @@ function renderComponentLibrary(container: HTMLElement): void {
 
     const render = () => {
         host.innerHTML = '';
+        buildBackupSection(host, render);
         buildGeneralComponentsSection(host, render);
         buildUserComponentsSection(host, render);
     };
     render();
+}
+
+// ── Backup / Restore ─────────────────────────────────────────────────────────
+//
+// Two flows:
+//   1. Export/Import JSON — non-developer backup. Download a JSON snapshot of
+//      every non-built-in Shape, re-upload to restore after a localStorage
+//      clear or a move to a different machine/browser.
+//   2. Export as code — developer flow. Produces a TS snippet to paste into a
+//      seed file so the Shapes ship in code and survive every reset.
+
+function getUserShapeEntries(): Array<[string, ShapeDefinition]> {
+    return Object.entries(ShapeRegistry).filter(([id]) => !BUILT_IN_SHAPE_IDS.has(id));
+}
+
+function downloadFile(filename: string, content: string, mime = 'application/json'): void {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function buildBackupSection(host: HTMLElement, rerender: () => void): void {
+    const heading = document.createElement('h2');
+    heading.className = 'nr-admin__heading';
+    heading.textContent = 'Backup & Restore';
+    host.appendChild(heading);
+
+    const desc = document.createElement('p');
+    desc.className = 'nr-admin__desc';
+    desc.textContent = 'Components you build in the Component Designer live in your browser\'s localStorage. Clearing site data wipes them — back them up first.';
+    host.appendChild(desc);
+
+    const row = document.createElement('div');
+    row.style.display = 'flex';
+    row.style.gap = '8px';
+    row.style.flexWrap = 'wrap';
+    row.style.marginBottom = '16px';
+    host.appendChild(row);
+
+    const userShapes = getUserShapeEntries();
+    const count = userShapes.length;
+
+    // Export JSON
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+    exportBtn.textContent = `Export ${count} component${count === 1 ? '' : 's'} (JSON)`;
+    exportBtn.disabled = count === 0;
+    exportBtn.addEventListener('click', () => {
+        const payload = {
+            version: 1,
+            exportedAt: new Date().toISOString(),
+            shapes: Object.fromEntries(userShapes),
+        };
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        downloadFile(`nextrack-shapes-${ts}.json`, JSON.stringify(payload, null, 2));
+    });
+    row.appendChild(exportBtn);
+
+    // Import JSON
+    const importBtn = document.createElement('button');
+    importBtn.type = 'button';
+    importBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    importBtn.textContent = 'Import (JSON)';
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = 'application/json,.json';
+    fileInput.style.display = 'none';
+    importBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files?.[0];
+        if (!file) return;
+        try {
+            const text = await file.text();
+            const parsed = JSON.parse(text);
+            const shapes: Record<string, ShapeDefinition> | undefined = parsed?.shapes ?? parsed;
+            if (!shapes || typeof shapes !== 'object') {
+                alert('Import failed: file does not contain a "shapes" object.');
+                return;
+            }
+            let added = 0;
+            let skipped = 0;
+            for (const [id, def] of Object.entries(shapes)) {
+                if (BUILT_IN_SHAPE_IDS.has(id)) { skipped++; continue; }
+                if (ShapeRegistry[id] && !confirm(`Shape "${(def as ShapeDefinition).displayName || id}" already exists. Overwrite?`)) {
+                    skipped++;
+                    continue;
+                }
+                addShape(id, def as ShapeDefinition);
+                added++;
+            }
+            saveRegistryToStorage();
+            document.dispatchEvent(new CustomEvent('nextrack:registry-changed'));
+            alert(`Imported ${added} component${added === 1 ? '' : 's'}${skipped > 0 ? `, ${skipped} skipped` : ''}.`);
+            rerender();
+        } catch (e) {
+            alert(`Import failed: ${(e as Error).message}`);
+        } finally {
+            fileInput.value = '';
+        }
+    });
+    row.appendChild(importBtn);
+    row.appendChild(fileInput);
+
+    // Export as code (developer flow — paste into a seed file).
+    const codeBtn = document.createElement('button');
+    codeBtn.type = 'button';
+    codeBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    codeBtn.textContent = 'Export as code';
+    codeBtn.title = 'Generate a TS snippet to paste into src/shape-seed.ts — components seeded in code survive every localStorage clear.';
+    codeBtn.disabled = count === 0;
+    row.appendChild(codeBtn);
+
+    const codePanel = document.createElement('div');
+    codePanel.style.display = 'none';
+    codePanel.style.marginBottom = '16px';
+    host.appendChild(codePanel);
+
+    const codeHint = document.createElement('p');
+    codeHint.style.fontSize = '12px';
+    codeHint.style.color = 'var(--cds-text-helper, #6f6f6f)';
+    codeHint.style.margin = '0 0 6px';
+    codeHint.textContent = 'Paste this into src/shape-seed.ts (create the file if it doesn\'t exist) and import-then-call seedUserShapesFromCode() once on startup. Components seeded this way survive every localStorage clear.';
+    codePanel.appendChild(codeHint);
+
+    const codeArea = document.createElement('textarea');
+    codeArea.readOnly = true;
+    codeArea.spellcheck = false;
+    codeArea.style.width = '100%';
+    codeArea.style.minHeight = '320px';
+    codeArea.style.fontFamily = 'monospace';
+    codeArea.style.fontSize = '11px';
+    codeArea.style.padding = '8px';
+    codeArea.style.border = '1px solid var(--cds-border-subtle-01, #e0e0e0)';
+    codeArea.style.borderRadius = '2px';
+    codeArea.style.background = 'var(--cds-layer-01, #f4f4f4)';
+    codePanel.appendChild(codeArea);
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    copyBtn.textContent = 'Copy to clipboard';
+    copyBtn.style.marginTop = '6px';
+    copyBtn.addEventListener('click', () => {
+        try {
+            navigator.clipboard?.writeText(codeArea.value);
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy to clipboard'; }, 1200);
+        } catch { /* ignore */ }
+    });
+    codePanel.appendChild(copyBtn);
+
+    codeBtn.addEventListener('click', () => {
+        codeArea.value = buildSeedCode(userShapes);
+        codePanel.style.display = '';
+        codeArea.select();
+    });
+}
+
+function buildSeedCode(entries: Array<[string, ShapeDefinition]>): string {
+    const body = entries.map(([id, def]) => `    ${JSON.stringify(id)}: ${JSON.stringify(def, null, 4).replace(/\n/g, '\n    ')},`).join('\n');
+    return [
+        '// Auto-generated by the Admin "Export as code" action. Paste / commit',
+        '// to seed user components in code so they survive every localStorage',
+        '// clear. Call seedUserShapesFromCode() once on app startup (e.g. from',
+        '// index.ts, right after loadRegistryFromStorage()).',
+        '',
+        'import { ShapeDefinition, ShapeRegistry, addShape, saveRegistryToStorage } from \'./shapes/shape-registry\';',
+        '',
+        'export const SEEDED_USER_SHAPES: Record<string, ShapeDefinition> = {',
+        body,
+        '};',
+        '',
+        'export function seedUserShapesFromCode(): void {',
+        '    let touched = false;',
+        '    for (const [id, def] of Object.entries(SEEDED_USER_SHAPES)) {',
+        '        // Only seed when the registry doesn\'t already have a (possibly',
+        '        // edited) copy — never clobber user changes made after this',
+        '        // file was generated.',
+        '        if (!ShapeRegistry[id]) {',
+        '            addShape(id, def);',
+        '            touched = true;',
+        '        }',
+        '    }',
+        '    if (touched) saveRegistryToStorage();',
+        '}',
+    ].join('\n');
 }
 
 function buildInventoryCard(entry: SvgInventoryEntry, container: HTMLElement): HTMLElement {
@@ -265,10 +460,13 @@ function buildShapeRow(
 
     const tdThumb = document.createElement('td');
     tdThumb.className = 'nr-admin__table-thumb';
-    const catId = def.layers?.[0]?.icons?.[0]?.iconId;
+    const catId = getPaletteIcon(def)?.iconId;
     if (catId) {
-        const entry = getIconById(catId);
-        if (entry) tdThumb.innerHTML = entry.svg;
+        const rendered = renderIcon(catId, 'tree');
+        if (rendered) {
+            tdThumb.innerHTML = rendered.html;
+            if (rendered.cssClass) tdThumb.classList.add(rendered.cssClass);
+        }
     }
     tr.appendChild(tdThumb);
 
@@ -524,6 +722,377 @@ function renderUserSettings(container: HTMLElement): void {
     h.className = 'nr-admin__heading';
     h.textContent = 'User Settings';
     container.appendChild(h);
+    renderColorAdjustmentSection(container);
+    renderIconRenderingSection(container);
+}
+
+// ── Color Adjustment (live tuning of the theme colour derivation) ──────────
+// Per-theme tuning UI: pick Default / AWS / GCP / Azure → tweak sliders for
+// just that theme. The result (the four hex tokens) is what the rest of the
+// app consumes; the derivation parameters are internal to this UI.
+
+function renderColorAdjustmentSection(container: HTMLElement): void {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const cd = require('./color-derivation') as typeof import('./color-derivation');
+    const sc = require('./shapes/shape-capabilities') as typeof import('./shapes/shape-capabilities');
+    /* eslint-enable @typescript-eslint/no-require-imports */
+
+    type ThemeKey = import('./color-derivation').TunableTheme;
+    type Settings = import('./color-derivation').ColorDerivationSettings;
+
+    const THEMES: Array<{ key: ThemeKey; label: string }> = [
+        { key: 'default', label: 'Default' },
+        { key: 'aws',     label: 'AWS (Amazon Yellow)' },
+        { key: 'gcp',     label: 'GCP (Google Neutral)' },
+        { key: 'azure',   label: 'Azure (Microsoft Blue)' },
+    ];
+
+    let activeTheme: ThemeKey = 'default';
+
+    const wrap = document.createElement('section');
+    wrap.style.marginTop = '24px';
+    wrap.style.padding = '16px';
+    wrap.style.border = '1px solid var(--cds-border-subtle-01, #e0e0e0)';
+    wrap.style.borderRadius = '2px';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Color Adjustment';
+    title.style.margin = '0 0 4px';
+    wrap.appendChild(title);
+
+    const sub = document.createElement('p');
+    sub.style.margin = '0 0 16px';
+    sub.style.fontSize = '12px';
+    sub.style.color = 'var(--cds-text-helper, #6f6f6f)';
+    sub.textContent = 'Pick a theme, then tune its OKLCH-based derivation parameters. The resulting hex tokens are stored per theme and consumed by the rest of the app — the derivation logic itself is just the tuning tool here.';
+    wrap.appendChild(sub);
+
+    // ── Theme switcher ─────────────────────────────────────────────────
+    const switcher = document.createElement('div');
+    switcher.style.display = 'flex';
+    switcher.style.gap = '4px';
+    switcher.style.marginBottom = '16px';
+    const switcherBtns: Partial<Record<ThemeKey, HTMLButtonElement>> = {};
+    for (const t of THEMES) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cds--btn cds--btn--sm ' + (t.key === activeTheme ? 'cds--btn--primary' : 'cds--btn--tertiary');
+        btn.textContent = t.label;
+        btn.addEventListener('click', () => {
+            activeTheme = t.key;
+            for (const [k, b] of Object.entries(switcherBtns)) {
+                if (!b) continue;
+                b.className = 'cds--btn cds--btn--sm ' + (k === activeTheme ? 'cds--btn--primary' : 'cds--btn--tertiary');
+            }
+            refreshKnobs();
+            refreshActivePreview();
+        });
+        switcherBtns[t.key] = btn;
+        switcher.appendChild(btn);
+    }
+    wrap.appendChild(switcher);
+
+    // ── Base hex display ───────────────────────────────────────────────
+    const baseRow = document.createElement('div');
+    baseRow.style.fontSize = '12px';
+    baseRow.style.margin = '0 0 12px';
+    baseRow.style.color = 'var(--cds-text-secondary, #525252)';
+    wrap.appendChild(baseRow);
+
+    // ── Slider grid for the active theme ───────────────────────────────
+    interface Knob { key: keyof Settings; label: string; min: number; max: number; step: number; neutralOnly?: boolean; coloredOnly?: boolean }
+    const knobs: Knob[] = [
+        { key: 'lightFillLightnessDelta',   label: 'Light Mode Fill Adjustment',  min: -0.5, max: 0.5, step: 0.01, coloredOnly: true },
+        { key: 'darkFillLightnessDelta',    label: 'Dark Mode Fill Adjustment',   min: -0.5, max: 0.5, step: 0.01, coloredOnly: true },
+        { key: 'lightEdgeLightnessDelta',   label: 'Light Mode Edge Contrast',    min: -0.5, max: 0.5, step: 0.01, coloredOnly: true },
+        { key: 'darkEdgeLightnessDelta',    label: 'Dark Mode Edge Contrast',     min: -0.5, max: 0.5, step: 0.01, coloredOnly: true },
+        { key: 'lightChromaMultiplier',     label: 'Chroma Adjustment Light',     min:  0,   max: 2,   step: 0.05, coloredOnly: true },
+        { key: 'darkChromaMultiplier',      label: 'Chroma Adjustment Dark',      min:  0,   max: 2,   step: 0.05, coloredOnly: true },
+        { key: 'neutralLightFillLightness', label: 'Neutral Light Fill Lightness',min:  0,   max: 1,   step: 0.01, neutralOnly: true },
+        { key: 'neutralDarkFillLightness',  label: 'Neutral Dark Fill Lightness', min:  0,   max: 1,   step: 0.01, neutralOnly: true },
+        { key: 'neutralLightEdgeDelta',     label: 'Neutral Light Edge Delta',    min: -0.5, max: 0.5, step: 0.01, neutralOnly: true },
+        { key: 'neutralDarkEdgeDelta',      label: 'Neutral Dark Edge Delta',     min: -0.5, max: 0.5, step: 0.01, neutralOnly: true },
+    ];
+
+    const grid = document.createElement('div');
+    grid.style.display = 'grid';
+    grid.style.gridTemplateColumns = '1fr auto auto';
+    grid.style.gap = '6px 12px';
+    grid.style.alignItems = 'center';
+    grid.style.marginBottom = '16px';
+    wrap.appendChild(grid);
+
+    const knobRows: Map<Knob['key'], { row: HTMLElement[]; input: HTMLInputElement; valueEl: HTMLSpanElement }> = new Map();
+    for (const k of knobs) {
+        const lbl = document.createElement('label');
+        lbl.textContent = k.label;
+        lbl.style.fontSize = '12px';
+        grid.appendChild(lbl);
+
+        const range = document.createElement('input');
+        range.type = 'range';
+        range.min = String(k.min); range.max = String(k.max); range.step = String(k.step);
+        range.style.width = '200px';
+        range.addEventListener('input', () => {
+            cd.setDerivationSettings(activeTheme, { [k.key]: parseFloat(range.value) } as Partial<Settings>);
+            knobRows.get(k.key)!.valueEl.textContent = parseFloat(range.value).toFixed(2);
+            refreshActivePreview();
+            refreshStatus();
+        });
+        grid.appendChild(range);
+
+        const valEl = document.createElement('span');
+        valEl.style.fontFamily = 'monospace';
+        valEl.style.fontSize = '12px';
+        valEl.style.minWidth = '40px';
+        valEl.style.textAlign = 'right';
+        grid.appendChild(valEl);
+
+        knobRows.set(k.key, { row: [lbl, range, valEl], input: range, valueEl: valEl });
+    }
+
+    // ── Persistence indicator + action row ─────────────────────────────
+    const actionRow = document.createElement('div');
+    actionRow.style.display = 'flex';
+    actionRow.style.alignItems = 'center';
+    actionRow.style.gap = '8px';
+    actionRow.style.flexWrap = 'wrap';
+    actionRow.style.marginBottom = '20px';
+
+    const statusEl = document.createElement('span');
+    statusEl.style.fontSize = '12px';
+    statusEl.style.padding = '4px 8px';
+    statusEl.style.borderRadius = '2px';
+    statusEl.style.fontWeight = '500';
+    actionRow.appendChild(statusEl);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    resetBtn.textContent = 'Reset this theme to baked defaults';
+    resetBtn.addEventListener('click', () => {
+        cd.resetDerivationSettings(activeTheme);
+        refreshKnobs();
+        refreshActivePreview();
+        refreshStatus();
+    });
+    actionRow.appendChild(resetBtn);
+
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+    exportBtn.textContent = 'Export as code defaults';
+    exportBtn.title = 'Produces a TypeScript snippet to paste into BAKED_THEME_SETTINGS in color-derivation.ts';
+    actionRow.appendChild(exportBtn);
+
+    wrap.appendChild(actionRow);
+
+    // Hidden code-export panel that pops in when "Export" is clicked.
+    const exportPanel = document.createElement('div');
+    exportPanel.style.display = 'none';
+    exportPanel.style.marginBottom = '20px';
+    const exportHint = document.createElement('p');
+    exportHint.style.fontSize = '12px';
+    exportHint.style.color = 'var(--cds-text-helper, #6f6f6f)';
+    exportHint.style.margin = '0 0 6px';
+    exportHint.textContent = 'Paste this into src/color-derivation.ts (replace the BAKED_THEME_SETTINGS block) to commit the current tuning as the new app baseline. Auto-save to localStorage stays — this is the developer-side commit step.';
+    const exportArea = document.createElement('textarea');
+    exportArea.readOnly = true;
+    exportArea.spellcheck = false;
+    exportArea.style.width = '100%';
+    exportArea.style.minHeight = '320px';
+    exportArea.style.fontFamily = 'monospace';
+    exportArea.style.fontSize = '11px';
+    exportArea.style.padding = '8px';
+    exportArea.style.border = '1px solid var(--cds-border-subtle-01, #e0e0e0)';
+    exportArea.style.borderRadius = '2px';
+    exportArea.style.background = 'var(--cds-layer-01, #f4f4f4)';
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    copyBtn.textContent = 'Copy to clipboard';
+    copyBtn.style.marginTop = '6px';
+    copyBtn.addEventListener('click', () => {
+        try { navigator.clipboard?.writeText(exportArea.value); copyBtn.textContent = 'Copied!'; setTimeout(() => { copyBtn.textContent = 'Copy to clipboard'; }, 1200); }
+        catch { /* ignore */ }
+    });
+    exportPanel.appendChild(exportHint);
+    exportPanel.appendChild(exportArea);
+    exportPanel.appendChild(copyBtn);
+    wrap.appendChild(exportPanel);
+
+    exportBtn.addEventListener('click', () => {
+        exportArea.value = cd.exportBakedThemeSettingsCode();
+        exportPanel.style.display = '';
+        exportArea.select();
+    });
+
+    function refreshStatus(): void {
+        const anyDirty = (['default', 'azure', 'aws', 'gcp'] as ThemeKey[]).some(t => cd.isDirty(t));
+        if (anyDirty) {
+            statusEl.textContent = 'Modified — auto-saved to localStorage (commit via Export to bake into app defaults)';
+            statusEl.style.background = 'rgba(255, 176, 0, 0.15)';
+            statusEl.style.color = 'var(--cds-text-primary, #161616)';
+        } else {
+            statusEl.textContent = 'In sync with baked code defaults';
+            statusEl.style.background = 'rgba(36, 161, 72, 0.15)';
+            statusEl.style.color = 'var(--cds-text-primary, #161616)';
+        }
+    }
+
+    // ── Active-theme preview ───────────────────────────────────────────
+    const activePreview = document.createElement('div');
+    activePreview.style.marginBottom = '24px';
+    wrap.appendChild(activePreview);
+
+    // ── Resulting tokens for ALL themes (summary) ──────────────────────
+    const summaryTitle = document.createElement('h4');
+    summaryTitle.textContent = 'Resulting hex tokens — all themes';
+    summaryTitle.style.margin = '16px 0 8px';
+    summaryTitle.style.fontSize = '13px';
+    wrap.appendChild(summaryTitle);
+
+    const summaryWrap = document.createElement('div');
+    summaryWrap.style.fontFamily = 'monospace';
+    summaryWrap.style.fontSize = '11px';
+    summaryWrap.style.background = 'var(--cds-layer-01, #f4f4f4)';
+    summaryWrap.style.padding = '12px';
+    summaryWrap.style.borderRadius = '2px';
+    summaryWrap.style.whiteSpace = 'pre';
+    wrap.appendChild(summaryWrap);
+
+    function refreshKnobs(): void {
+        const def = sc.SEMANTIC_COLOR_BASES[activeTheme];
+        const isNeutral = !!def?.options?.neutral;
+        baseRow.textContent = `Base: ${def?.base ?? '(none)'} · ${isNeutral ? 'neutral (uses absolute lightness)' : 'colored (uses relative deltas)'}`;
+        const settings = cd.getDerivationSettings(activeTheme);
+        for (const k of knobs) {
+            const row = knobRows.get(k.key)!;
+            const visible = (k.coloredOnly && !isNeutral) || (k.neutralOnly && isNeutral);
+            for (const el of row.row) (el as HTMLElement).style.display = visible ? '' : 'none';
+            row.input.value = String(settings[k.key]);
+            row.valueEl.textContent = settings[k.key].toFixed(2);
+        }
+    }
+
+    function refreshActivePreview(): void {
+        activePreview.replaceChildren();
+        const def = sc.SEMANTIC_COLOR_BASES[activeTheme];
+        if (!def) return;
+        const settings = cd.getDerivationSettings(activeTheme);
+        const tok = cd.createThemeColor(def.base, def.options, settings);
+        activePreview.appendChild(buildActivePreviewBlock(activeTheme, tok));
+        refreshSummary();
+    }
+
+    function buildActivePreviewBlock(theme: ThemeKey, tok: import('./color-derivation').ThemeColorToken): HTMLElement {
+        const block = document.createElement('div');
+        block.style.display = 'flex';
+        block.style.gap = '16px';
+        block.style.alignItems = 'flex-start';
+        block.style.flexWrap = 'wrap';
+
+        // Light + dark big mini-previews
+        block.appendChild(buildMiniPreview(tok.light.fill, tok.light.edge, '#ffffff', 'Light mode', theme));
+        block.appendChild(buildMiniPreview(tok.dark.fill,  tok.dark.edge,  '#262626', 'Dark mode', theme));
+
+        // Hex swatch column
+        const swCol = document.createElement('div');
+        swCol.style.display = 'grid';
+        swCol.style.gridTemplateColumns = 'auto auto';
+        swCol.style.gap = '6px 10px';
+        swCol.style.alignItems = 'center';
+        const addRow = (label: string, hex: string) => {
+            const sw = document.createElement('div');
+            sw.style.width = '36px'; sw.style.height = '24px';
+            sw.style.background = hex;
+            sw.style.border = '1px solid rgba(0,0,0,0.18)';
+            sw.style.borderRadius = '2px';
+            swCol.appendChild(sw);
+            const t = document.createElement('div');
+            t.style.fontFamily = 'monospace';
+            t.style.fontSize = '12px';
+            t.textContent = `${label}  ${hex}`;
+            swCol.appendChild(t);
+        };
+        addRow('base       ', tok.base);
+        addRow('light.fill ', tok.light.fill);
+        addRow('light.edge ', tok.light.edge);
+        addRow('dark.fill  ', tok.dark.fill);
+        addRow('dark.edge  ', tok.dark.edge);
+        const lShades = cd.deriveFaceShades(tok.light.fill);
+        const dShades = cd.deriveFaceShades(tok.dark.fill);
+        addRow('light.top  ', lShades.top);
+        addRow('light.side ', lShades.side);
+        addRow('light.front', lShades.front);
+        addRow('dark.top   ', dShades.top);
+        addRow('dark.side  ', dShades.side);
+        addRow('dark.front ', dShades.front);
+        block.appendChild(swCol);
+
+        return block;
+    }
+
+    function buildMiniPreview(fill: string, edge: string, bg: string, label: string, theme: ThemeKey): HTMLElement {
+        void theme;
+        const card = document.createElement('div');
+        card.style.display = 'flex';
+        card.style.flexDirection = 'column';
+        card.style.alignItems = 'center';
+        card.style.gap = '6px';
+        const box = document.createElement('div');
+        box.style.width = '220px';
+        box.style.height = '160px';
+        box.style.background = bg;
+        box.style.borderRadius = '2px';
+        box.style.display = 'flex';
+        box.style.alignItems = 'center';
+        box.style.justifyContent = 'center';
+        // Tiny isometric cuboid: top brightest, side mid, front darkest —
+        // matches the light-from-above shading applied to real shapes.
+        const shades = cd.deriveFaceShades(fill);
+        box.innerHTML = `<svg viewBox="0 0 200 140" width="180" height="130">
+            <!-- top face -->
+            <polygon points="100,15 175,55 100,95 25,55"
+                     fill="${shades.top}" stroke="${edge}" stroke-width="1.5" stroke-linejoin="round"/>
+            <!-- front face -->
+            <polygon points="25,55 100,95 100,135 25,95"
+                     fill="${shades.front}" stroke="${edge}" stroke-width="1.5" stroke-linejoin="round"/>
+            <!-- side face -->
+            <polygon points="175,55 100,95 100,135 175,95"
+                     fill="${shades.side}" stroke="${edge}" stroke-width="1.5" stroke-linejoin="round"/>
+        </svg>`;
+        const cap = document.createElement('div');
+        cap.textContent = label;
+        cap.style.fontSize = '12px';
+        cap.style.fontWeight = '500';
+        cap.style.color = 'var(--cds-text-secondary, #525252)';
+        card.appendChild(box); card.appendChild(cap);
+        return card;
+    }
+
+    function refreshSummary(): void {
+        const lines: string[] = [];
+        for (const t of THEMES) {
+            const def = sc.SEMANTIC_COLOR_BASES[t.key];
+            if (!def) continue;
+            const settings = cd.getDerivationSettings(t.key);
+            const tok = cd.createThemeColor(def.base, def.options, settings);
+            lines.push(
+                `${t.label}`,
+                `  base       ${tok.base}`,
+                `  light.fill ${tok.light.fill}      light.edge ${tok.light.edge}`,
+                `  dark.fill  ${tok.dark.fill}      dark.edge  ${tok.dark.edge}`,
+                ``,
+            );
+        }
+        summaryWrap.textContent = lines.join('\n').trimEnd();
+    }
+
+    refreshKnobs();
+    refreshActivePreview();
+    refreshStatus();
+    container.appendChild(wrap);
 }
 
 function matchesSearch(entry: IconCatalogEntry, term: string): boolean {
@@ -626,27 +1195,7 @@ function renderIconConfig(container: HTMLElement): void {
                 statusEl.textContent = 'Extracting…';
                 try {
                     const buf = await file.arrayBuffer();
-                    const unzipped = unzipSync(new Uint8Array(buf));
-                    const entries: Array<{ label: string; svg: string }> = [];
-                    for (const [path, data] of Object.entries(unzipped)) {
-                        if (!path.endsWith('.svg') || path.startsWith('__MACOSX')) continue;
-                        const name = path.split('/').pop()!.replace(/\.svg$/, '');
-                        let svg = new TextDecoder().decode(data);
-                        const parser = new DOMParser();
-                        const doc = parser.parseFromString(svg, 'image/svg+xml');
-                        const svgEl = doc.querySelector('svg');
-                        if (svgEl) {
-                            if (!svgEl.getAttribute('viewBox')) {
-                                const w = svgEl.getAttribute('width') || '80';
-                                const hh = svgEl.getAttribute('height') || '80';
-                                svgEl.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(hh)}`);
-                            }
-                            svgEl.removeAttribute('width');
-                            svgEl.removeAttribute('height');
-                            svg = new XMLSerializer().serializeToString(svgEl);
-                        }
-                        entries.push({ label: name, svg });
-                    }
+                    const entries = extractSvgEntriesFromZip(buf);
                     const result = await pack.addFn(entries);
                     statusEl.textContent = result.error || `${result.added} imported (${pack.getCount()} total)`;
                     removeBtn.style.display = pack.getCount() > 0 ? '' : 'none';
@@ -1172,4 +1721,417 @@ function toggleAndRerender(iconId: string, target: IconScope): void {
     if (!sectionsHost) return;
     sectionsHost.innerHTML = '';
     buildSections(sectionsHost);
+}
+
+// ── Icon Rendering (per vendor × per mode 2D composition tuning) ───────────
+//
+// Mirrors renderColorAdjustmentSection's UX: pick a vendor, tweak the two
+// modes side-by-side, see the result live on a sample tile, save to local-
+// Storage, export as code defaults.
+
+const DEMO_GLYPHS: Record<import('./icon-rendering').IconVendor, string> = {
+    // Carbon — line glyph, designed to be tinted.
+    carbon: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path fill="none" stroke="#000" stroke-width="2" d="M16 4 L28 11 L28 22 L16 29 L4 22 L4 11 Z M16 4 L16 29 M4 11 L28 22 M28 11 L4 22"/></svg>',
+    // AWS — orange panel + dark-blue cube glyph. The dark glyph stays visible
+    // even when the user toggles "Strip vendor bg", so the effect of every
+    // option is observable in the preview.
+    aws: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80"><rect width="80" height="80" fill="#FF9900"/><g fill="#232F3E"><path d="M40 18 L60 28 L40 38 L20 28 Z"/><path d="M20 28 L20 52 L40 62 L40 38 Z"/><path d="M60 28 L60 52 L40 62 L40 38 Z" fill-opacity="0.75"/></g></svg>',
+    // Azure — a coloured fill icon (square + accent), already self-coloured.
+    azure: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><path fill="#0078D4" d="M14 4 L4 24 L10 24 L18 9 Z"/><path fill="#50E6FF" d="M18 9 L28 24 L14 24 L18 16 L14 14 Z"/></svg>',
+    // GCP — multi-coloured (the classic 4-tone Google look).
+    gcp: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="10" r="5" fill="#4285F4"/><circle cx="10" cy="20" r="5" fill="#34A853"/><circle cx="22" cy="20" r="5" fill="#FBBC05"/><circle cx="16" cy="26" r="3" fill="#EA4335"/></svg>',
+};
+
+function renderIconRenderingSection(container: HTMLElement): void {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const ir = require('./icon-rendering') as typeof import('./icon-rendering');
+    const u  = require('./utils')          as typeof import('./utils');
+    /* eslint-enable @typescript-eslint/no-require-imports */
+
+    type Vendor = import('./icon-rendering').IconVendor;
+    type Mode   = import('./icon-rendering').IconMode;
+
+    const VENDORS: Array<{ key: Vendor; label: string }> = [
+        { key: 'carbon', label: 'Carbon' },
+        { key: 'aws',    label: 'AWS' },
+        { key: 'azure',  label: 'Azure' },
+        { key: 'gcp',    label: 'GCP' },
+    ];
+
+    let activeVendor: Vendor = 'carbon';
+
+    const wrap = document.createElement('section');
+    wrap.style.marginTop = '24px';
+    wrap.style.padding = '16px';
+    wrap.style.border = '1px solid var(--cds-border-subtle-01, #e0e0e0)';
+    wrap.style.borderRadius = '2px';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Icon Rendering';
+    title.style.margin = '0 0 4px';
+    wrap.appendChild(title);
+
+    const sub = document.createElement('p');
+    sub.style.margin = '0 0 16px';
+    sub.style.fontSize = '12px';
+    sub.style.color = 'var(--cds-text-helper, #6f6f6f)';
+    sub.textContent = 'Pick a vendor, then tune how its icons look in light and dark mode in the 2D view. Settings auto-save to localStorage; export the snippet when you want to commit a new baseline.';
+    wrap.appendChild(sub);
+
+    const tip = document.createElement('p');
+    tip.style.margin = '0 0 16px';
+    tip.style.fontSize = '11px';
+    tip.style.color = 'var(--cds-text-helper, #6f6f6f)';
+    tip.innerHTML = '<strong>Icon tint:</strong> "Original" keeps the source SVG\'s own colours (use for vendor logos). "Black"/"White" forces a flat tint (use for mono line art). "Custom" lets you pick a specific hex.';
+    wrap.appendChild(tip);
+
+    // ── Vendor switcher ───────────────────────────────────────────────
+    const switcher = document.createElement('div');
+    switcher.style.display = 'flex';
+    switcher.style.gap = '4px';
+    switcher.style.marginBottom = '16px';
+    const switcherBtns: Partial<Record<Vendor, HTMLButtonElement>> = {};
+    for (const v of VENDORS) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'cds--btn cds--btn--sm ' + (v.key === activeVendor ? 'cds--btn--primary' : 'cds--btn--tertiary');
+        btn.textContent = v.label;
+        btn.addEventListener('click', () => {
+            activeVendor = v.key;
+            for (const [k, b] of Object.entries(switcherBtns)) {
+                if (!b) continue;
+                b.className = 'cds--btn cds--btn--sm ' + (k === activeVendor ? 'cds--btn--primary' : 'cds--btn--tertiary');
+            }
+            refreshAll();
+        });
+        switcherBtns[v.key] = btn;
+        switcher.appendChild(btn);
+    }
+    wrap.appendChild(switcher);
+
+    // ── Two columns: Light + Dark, each with preview + knobs ──────────
+    const columns = document.createElement('div');
+    columns.style.display = 'grid';
+    columns.style.gridTemplateColumns = '1fr 1fr';
+    columns.style.gap = '16px';
+    columns.style.marginBottom = '16px';
+    wrap.appendChild(columns);
+
+    interface ModeRefs {
+        previewBox: HTMLDivElement;
+        tintSelect: HTMLSelectElement;
+        tintHexRow: HTMLDivElement;
+        tintHex: HTMLInputElement;
+        bgEnable: HTMLInputElement;
+        bgColor: HTMLInputElement;
+        bgShape: HTMLSelectElement;
+        bgRadius: HTMLInputElement;
+        bgRadiusValue: HTMLSpanElement;
+        stripBg: HTMLInputElement;
+        oversize: HTMLInputElement;
+        oversizeValue: HTMLSpanElement;
+    }
+    const refs: Partial<Record<Mode, ModeRefs>> = {};
+
+    function buildModeColumn(mode: Mode): HTMLElement {
+        const col = document.createElement('div');
+        col.style.padding = '12px';
+        col.style.background = mode === 'dark' ? '#262626' : '#f4f4f4';
+        col.style.color = mode === 'dark' ? '#f4f4f4' : '#161616';
+        col.style.borderRadius = '2px';
+        col.style.display = 'flex';
+        col.style.flexDirection = 'column';
+        col.style.gap = '10px';
+
+        const hdr = document.createElement('div');
+        hdr.style.fontWeight = '600';
+        hdr.style.fontSize = '13px';
+        hdr.textContent = mode === 'dark' ? 'Dark mode' : 'Light mode';
+        col.appendChild(hdr);
+
+        // Preview box
+        const previewBox = document.createElement('div');
+        previewBox.style.height = '88px';
+        previewBox.style.display = 'flex';
+        previewBox.style.alignItems = 'center';
+        previewBox.style.justifyContent = 'center';
+        previewBox.style.background = mode === 'dark' ? '#161616' : '#ffffff';
+        previewBox.style.border = '1px dashed ' + (mode === 'dark' ? '#525252' : '#c6c6c6');
+        col.appendChild(previewBox);
+
+        // Knobs
+        const grid = document.createElement('div');
+        grid.style.display = 'grid';
+        grid.style.gridTemplateColumns = '120px 1fr';
+        grid.style.gap = '6px 8px';
+        grid.style.alignItems = 'center';
+        grid.style.fontSize = '12px';
+        col.appendChild(grid);
+
+        function addLabel(text: string): void {
+            const l = document.createElement('label');
+            l.textContent = text;
+            grid.appendChild(l);
+        }
+
+        // Icon tint
+        addLabel('Icon tint');
+        const tintSelect = document.createElement('select');
+        for (const v of ['original', 'black', 'white', 'custom']) {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v.charAt(0).toUpperCase() + v.slice(1);
+            tintSelect.appendChild(opt);
+        }
+        grid.appendChild(tintSelect);
+
+        addLabel('Custom tint');
+        const tintHexRow = document.createElement('div');
+        tintHexRow.style.display = 'flex';
+        tintHexRow.style.gap = '6px';
+        tintHexRow.style.alignItems = 'center';
+        const tintHex = document.createElement('input');
+        tintHex.type = 'color';
+        tintHexRow.appendChild(tintHex);
+        grid.appendChild(tintHexRow);
+
+        // Background enable + colour
+        addLabel('Background');
+        const bgWrap = document.createElement('div');
+        bgWrap.style.display = 'flex';
+        bgWrap.style.gap = '6px';
+        bgWrap.style.alignItems = 'center';
+        const bgEnable = document.createElement('input');
+        bgEnable.type = 'checkbox';
+        bgWrap.appendChild(bgEnable);
+        const bgColor = document.createElement('input');
+        bgColor.type = 'color';
+        bgWrap.appendChild(bgColor);
+        grid.appendChild(bgWrap);
+
+        // BG shape
+        addLabel('Background shape');
+        const bgShape = document.createElement('select');
+        for (const s of ['square', 'circle', 'octagon']) {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+            bgShape.appendChild(opt);
+        }
+        grid.appendChild(bgShape);
+
+        // BG radius
+        addLabel('Background radius');
+        const radiusWrap = document.createElement('div');
+        radiusWrap.style.display = 'flex';
+        radiusWrap.style.gap = '6px';
+        radiusWrap.style.alignItems = 'center';
+        const bgRadius = document.createElement('input');
+        bgRadius.type = 'range';
+        bgRadius.min = '0'; bgRadius.max = '20'; bgRadius.step = '1';
+        radiusWrap.appendChild(bgRadius);
+        const bgRadiusValue = document.createElement('span');
+        bgRadiusValue.style.fontFamily = 'monospace';
+        radiusWrap.appendChild(bgRadiusValue);
+        grid.appendChild(radiusWrap);
+
+        // Strip vendor background
+        addLabel('Strip vendor bg');
+        const stripBg = document.createElement('input');
+        stripBg.type = 'checkbox';
+        grid.appendChild(stripBg);
+
+        // Oversize
+        addLabel('Icon oversize');
+        const oversizeWrap = document.createElement('div');
+        oversizeWrap.style.display = 'flex';
+        oversizeWrap.style.gap = '6px';
+        oversizeWrap.style.alignItems = 'center';
+        const oversize = document.createElement('input');
+        oversize.type = 'range';
+        oversize.min = '0.8'; oversize.max = '1.5'; oversize.step = '0.02';
+        oversizeWrap.appendChild(oversize);
+        const oversizeValue = document.createElement('span');
+        oversizeValue.style.fontFamily = 'monospace';
+        oversizeWrap.appendChild(oversizeValue);
+        grid.appendChild(oversizeWrap);
+
+        refs[mode] = {
+            previewBox, tintSelect, tintHexRow, tintHex,
+            bgEnable, bgColor, bgShape, bgRadius, bgRadiusValue,
+            stripBg, oversize, oversizeValue,
+        };
+
+        // Wiring
+        const onChange = () => {
+            const s = refs[mode]!;
+            const tintVal = s.tintSelect.value;
+            const tint: import('./icon-rendering').IconTint =
+                tintVal === 'custom' ? s.tintHex.value : (tintVal as 'original' | 'black' | 'white');
+            s.tintHexRow.style.display = tintVal === 'custom' ? '' : 'none';
+            const patch: Partial<import('./icon-rendering').IconRenderSettings> = {
+                iconTint: tint,
+                bgColor: s.bgEnable.checked ? s.bgColor.value : '',
+                bgShape: s.bgShape.value as import('./icon-rendering').BgShape,
+                bgRadius: parseInt(s.bgRadius.value, 10),
+                stripVendorBackground: s.stripBg.checked,
+                oversize: parseFloat(s.oversize.value),
+            };
+            ir.setIconRenderSettings(activeVendor, mode, patch);
+            s.bgRadiusValue.textContent = patch.bgRadius! + 'px';
+            s.oversizeValue.textContent = patch.oversize!.toFixed(2);
+            renderPreview(mode);
+            refreshStatus();
+        };
+
+        [tintSelect, tintHex, bgEnable, bgColor, bgShape, stripBg].forEach(el => el.addEventListener('input', onChange));
+        bgRadius.addEventListener('input', onChange);
+        oversize.addEventListener('input', onChange);
+
+        return col;
+    }
+
+    columns.appendChild(buildModeColumn('light'));
+    columns.appendChild(buildModeColumn('dark'));
+
+    // ── Status + actions ──────────────────────────────────────────────
+    const actionRow = document.createElement('div');
+    actionRow.style.display = 'flex';
+    actionRow.style.alignItems = 'center';
+    actionRow.style.gap = '8px';
+    actionRow.style.flexWrap = 'wrap';
+    actionRow.style.marginBottom = '12px';
+    const statusEl = document.createElement('span');
+    statusEl.style.fontSize = '12px';
+    statusEl.style.padding = '4px 8px';
+    statusEl.style.borderRadius = '2px';
+    statusEl.style.fontWeight = '500';
+    actionRow.appendChild(statusEl);
+
+    const resetBtn = document.createElement('button');
+    resetBtn.type = 'button';
+    resetBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    resetBtn.textContent = 'Reset this vendor to baked defaults';
+    resetBtn.addEventListener('click', () => {
+        ir.resetIconRenderSettings(activeVendor);
+        refreshAll();
+    });
+    actionRow.appendChild(resetBtn);
+
+    const exportBtn = document.createElement('button');
+    exportBtn.type = 'button';
+    exportBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+    exportBtn.textContent = 'Export as code defaults';
+    exportBtn.title = 'Produces a TypeScript snippet to paste into BAKED_VENDOR_RENDER_SETTINGS in icon-rendering.ts';
+    actionRow.appendChild(exportBtn);
+    wrap.appendChild(actionRow);
+
+    const exportPanel = document.createElement('div');
+    exportPanel.style.display = 'none';
+    const exportHint = document.createElement('p');
+    exportHint.style.fontSize = '12px';
+    exportHint.style.color = 'var(--cds-text-helper, #6f6f6f)';
+    exportHint.style.margin = '0 0 6px';
+    exportHint.textContent = 'Paste this into src/icon-rendering.ts (replace the BAKED_VENDOR_RENDER_SETTINGS block).';
+    const exportArea = document.createElement('textarea');
+    exportArea.readOnly = true;
+    exportArea.style.width = '100%';
+    exportArea.style.minHeight = '180px';
+    exportArea.style.fontFamily = 'monospace';
+    exportArea.style.fontSize = '11px';
+    exportPanel.appendChild(exportHint);
+    exportPanel.appendChild(exportArea);
+    wrap.appendChild(exportPanel);
+
+    exportBtn.addEventListener('click', () => {
+        exportArea.value = ir.exportBakedIconRenderingCode();
+        exportPanel.style.display = '';
+        exportArea.focus();
+        exportArea.select();
+    });
+
+    container.appendChild(wrap);
+
+    // ── Renderers ─────────────────────────────────────────────────────
+    function renderPreview(mode: Mode): void {
+        const s = refs[mode]; if (!s) return;
+        const settings = ir.getIconRenderSettings(activeVendor, mode);
+        const rawGlyph = DEMO_GLYPHS[activeVendor];
+        const glyph = settings.stripVendorBackground
+            ? stripDemoBackground(rawGlyph) // re-use the AWS stripper via dynamic require
+            : rawGlyph;
+        const tintHex = (() => {
+            const t = settings.iconTint;
+            if (t === 'original') return null;
+            if (t === 'black') return '#000000';
+            if (t === 'white') return '#ffffff';
+            return t.startsWith('#') ? t : null;
+        })();
+        const bg = settings.bgColor || null;
+        const shape = settings.bgShape === 'none' ? 'square' : settings.bgShape;
+        const size = 80;  // preview cell size
+        const iconPx = size * settings.oversize;
+        const svg = u.buildCompositeIconSvg(
+            glyph, bg, shape as 'square' | 'circle' | 'octagon', false,
+            settings.bgRadius, 0.18, 'none', false,
+            size, iconPx, size,
+            tintHex, 100, 100,
+        );
+        s.previewBox.innerHTML = svg;
+    }
+
+    function syncKnobsFromSettings(mode: Mode): void {
+        const s = refs[mode]; if (!s) return;
+        const settings = ir.getIconRenderSettings(activeVendor, mode);
+        const tint = settings.iconTint;
+        if (tint === 'original' || tint === 'black' || tint === 'white') {
+            s.tintSelect.value = tint;
+            s.tintHexRow.style.display = 'none';
+        } else {
+            s.tintSelect.value = 'custom';
+            s.tintHex.value = typeof tint === 'string' && tint.startsWith('#') ? tint : '#000000';
+            s.tintHexRow.style.display = '';
+        }
+        s.bgEnable.checked = !!settings.bgColor;
+        s.bgColor.value = settings.bgColor || '#ffffff';
+        s.bgShape.value = settings.bgShape === 'none' ? 'square' : settings.bgShape;
+        s.bgRadius.value = String(settings.bgRadius);
+        s.bgRadiusValue.textContent = settings.bgRadius + 'px';
+        s.stripBg.checked = settings.stripVendorBackground;
+        s.oversize.value = String(settings.oversize);
+        s.oversizeValue.textContent = settings.oversize.toFixed(2);
+    }
+
+    function refreshStatus(): void {
+        const dirty = ir.isIconRenderingDirty(activeVendor, 'light') || ir.isIconRenderingDirty(activeVendor, 'dark');
+        if (dirty) {
+            statusEl.textContent = '● localStorage override (not in code)';
+            statusEl.style.background = '#fff8e1';
+            statusEl.style.color = '#8a6d3b';
+        } else {
+            statusEl.textContent = '● matches baked defaults';
+            statusEl.style.background = '#e0f7e9';
+            statusEl.style.color = '#0e6027';
+        }
+    }
+
+    function refreshAll(): void {
+        for (const mode of ir.ICON_MODES) {
+            syncKnobsFromSettings(mode);
+            renderPreview(mode);
+        }
+        refreshStatus();
+    }
+
+    refreshAll();
+}
+
+// Inline copy of the AWS-strip routine adapted for inline demo SVGs in the
+// admin preview — keeps the preview self-contained even when the real
+// catalog hasn't loaded.
+function stripDemoBackground(svg: string): string {
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const ic = require('./icon-catalog') as typeof import('./icon-catalog');
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    try { return ic.stripAwsBackground(svg); } catch { return svg; }
 }
