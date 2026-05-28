@@ -1,11 +1,10 @@
 export type BaseShape =
-    | 'cuboid'
-    | 'cylinder'
+    | 'rectangle'
+    | 'circle'
     | 'tube'
     | 'pipe'
     | 'duct'
     | 'channel'
-    | 'pyramid'
     | 'octagon'
     | 'hexahedron'
     | 'custom'

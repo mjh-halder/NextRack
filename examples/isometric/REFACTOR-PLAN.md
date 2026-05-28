@@ -633,3 +633,113 @@ The grilling session before this plan resolved several non-obvious design calls:
 5. **Why `baseShape` discriminates `'custom'` vs `'svgPolygon'`** instead of having two separate fields. The old code conflated drawn polygons and uploaded SVGs into one `svgNormVerts` field, telling them apart only by "is `svgFootprint` set?". `baseShape` as the explicit discriminator removes the ambiguity at the type level.
 
 6. **Why no migration of old localStorage data**. The user has agreed that any existing Shapes in localStorage are throwaway (small number, easy to re-create). Storage keys bumped to `-v2` cause old data to be ignored, no migration code needed.
+
+---
+
+# Status
+
+**Phases A, B, C — Executed.** All Tasks 1–14 are complete on master. The dirty-marking bug is fixed; `isComplexShape`, `selectedIcon*` globals, the `iconEntries` editing buffer, the "Main Layer" status, and the old flat `ShapeDefinition` fields are gone.
+
+**Task 5 (label anchoring) — partially executed.** The Main-Layer privileges on baseElevation / move / delete were removed; the Layers panel no longer shows the "Main" tag; `collectCurrentDef` produces the new schema. **But the label itself is still pinned to `layerShapes[0]`** and uses `layers[0].baseElevation` for iso elevation compensation (see `component-designer.ts:417 setShapeLabel`). The label-to-Hit-Area move is the one remaining piece.
+
+---
+
+# Completed Since (2026-05-20 / 2026-05-21)
+
+Work outside the original plan's scope, building on the same architectural direction.
+
+## Shape Reader Facade (`src/shape-query.ts`)
+
+New module — small public surface, single source of truth for "how to read a `ShapeDefinition`":
+
+- `getPaletteIcon(def)` — the unique `isMain` IconEntry across all Layers, fallback to first found
+- `getHitArea(def)` — CONTEXT.md rule: explicit `hitAreaSize` ?? single Layer dims ?? bbox of floor Layers ?? bbox of all. Snaps up to `HIT_AREA_STEP = 10` in both dimensions.
+- `getCompositeIsoHeight(def)` — `max(over layers: baseElevation + depth)`
+- `HIT_AREA_STEP` constant
+
+Migrated 9 reader sites + 3 spawn-time `isometricHeight` sites across `shape-store.ts`, `inspector.ts`, `system-designer.ts`, `admin.ts`, `palette.ts`, `record-source.ts`, `utils.ts`, `component-designer.ts`.
+
+## Layer 0 privilege removed from geometry & lifecycle
+
+The conceptual rule "all Layers are equal" (CONTEXT.md) was contradicted by code that anchored on `layers[0]`. Removed from:
+
+- `createComplexLayers` in `utils.ts` — **deleted** (was dead code with an L0-anchor frame)
+- `recenterCompositeShape` in `component-designer.ts` — now anchors on the floor-layer bbox center (= Hit Area center)
+- `applyRegistryDefaults` in `utils.ts` — multi-Layer Shapes skip layer-specific resize/style/icon (ComplexComponent owns per-Layer rendering); single-Layer flows unchanged
+- the 3 instance-spawn sites (`system-designer.ts:1983`, `:2793`; `palette.ts:1144`) — `isometricHeight` and `defaultIsometricHeight` now use `getCompositeIsoHeight`, not `baseLayer.depth`. Painter's-sort z-order reflects the actual composite top.
+
+## `isMain` corrected to Shape-wide
+
+CONTEXT.md previously said `isMain` was per-Layer — that was a slip; it's per-Shape. Fixed:
+- CONTEXT.md (`IconEntry` definition)
+- `defaultIconEntry` comment in `shape-registry.ts`
+- `addIcon` chokepoint — new icon is `isMain` only if no other IconEntry in the *whole Shape* has it
+- `setMainIcon` chokepoint — clears `isMain` across all Layers when setting it on one
+
+## Hit Area UX
+
+- Stepper controls (Width / Height in the HUD): step `5 → 10`
+- All Number Stepper displays: `readOnly` — value control is via ±/drag only (no free text input)
+- Hit Area overlay drag: `change:size` handler snaps to nearest `HIT_AREA_STEP`
+- Latent bug fixed: `buildSliderField` created a hidden `<input id=...>` but never appended it to the DOM, breaking `document.getElementById` lookups in both directions of the Hit Area sync. Now appended with `display:none`.
+
+## Verification
+
+`yarn tsc --noEmit` is clean.
+
+---
+
+# Remaining Follow-ups
+
+## Task 5 (carryover): label → Hit Area floor anchor
+
+`component-designer.ts:417 setShapeLabel` still writes the label as an attr on `layerShapes[0]` and compensates for `layers[0].baseElevation`. The Hit Area overlay is toggleable, so it can't host the label as-is.
+
+Needs:
+1. A permanent floor-level anchor element in the editor (option A: make `hitAreaShape` always exist, toggle just changes stroke/fill visibility — option B: a separate invisible label anchor).
+2. `setShapeLabel` writes the label attr on that anchor.
+3. Delete the `layers[0].baseElevation` compensation.
+
+Out of scope of the Shape Reader Facade work — clean fix requires a new element in the editor's canvas setup.
+
+## Architectural candidates (see HTML report)
+
+`/var/folders/8v/tkhy2nj104x72q8jqth051c40000gn/T/architecture-review-20260520-232730.html`
+
+Self-contained report with 5 deepening candidates. Candidate 1 (this section) is done. Remaining:
+- **Candidate 2 (Strong, MVP)**: Icon rendering pipeline — consolidate `buildCompositeIconSvg`, `bakeIconHref`, `applyAccentColor` into one module
+- **Candidate 3 (Worth exploring, V1)**: Connection module — extract validation + metadata + styling from `system-designer.ts` / `inspector.ts`
+- **Candidate 4 (Worth exploring, MVP)**: Inspector panel adapters — split the 3,206-line PropertyPanel
+- **Candidate 5 (Speculative, V2)**: Catalog consolidation — `schema-registry` + `product-catalog` + `data-model`
+
+---
+
+# Completed Since (2026-05-21 cont'd) — Input Sync Protocol
+
+A second grilling session led to [ADR 0001](docs/adr/0001-input-sync-protocol.md). Implementation started; **Icon panel popup migrated, other sections carryover.**
+
+## Done
+
+- ADR 0001 defines the protocol (single SoT per editor, build/populate split, mutator chokepoints, drag commit-on-drop, cursor-jump guard).
+- `CONTEXT.md` gained three glossary entries: `Editor Draft`, `Populate`, `Mutator`.
+- `component-designer.ts`:
+  - Populator registry (`populators`, `registerPopulator`, `clearPopulators`, `populate`).
+  - All six chokepoints (`updateIcon`, `addIcon`, `removeIcon`, `setMainIcon`, `reorderIcons`, `updateLayer`) now call `populate()` after `markDirty` + render.
+  - `openIconEditor` rewired: `clearPopulators` before build, `populate()` after build, `clearPopulators` on close. The legacy globals pre-sync block (the 13-line "Sync legacy globals from the opened entry" block) is removed.
+  - Seven Icon-panel popup fields fully on the new pattern (build creates DOM only; populator reads entry and sets values; onChange writes via `updateIcon` with no parallel global write): Face switcher (the anchor bug), icon picker grid (catalog selection + AWS color/mono variant swap), adaptive toggle, AWS mono/color mode switcher, bg color display, bg shape switcher + per-shape control visibility.
+  - Rotation switcher (Shape Meta) on the populator pattern; `syncExtrasFromShape` now calls `populate()` at the end so shape-level state refreshes on shape load.
+- **One-save-behind bug fixed.** `collectCurrentDef` no longer re-bakes `iconHref` from globals; it is a pure projection of the current Draft. Each entry's `href` is set by `applyIconToCurrentShape` during edits.
+- **`applyIconToCurrentShape` legacy guard removed** — the early-exit that read `selectedIcon` + `selectedIconBgEnabled` is gone; the multi-icon path's `iconEntries.some(...)` check covers the same case correctly.
+- **All 13 icon-related globals deleted.** `selectedIcon`, `selectedIconFace`, `selectedIconSize`, `selectedIconOffsetX/Y`, `selectedIconSkewX/Y`, `selectedIconBgSize`, `selectedIconBgEnabled`, `selectedIconBgColor`, `selectedIconBgShape`, `selectedIconBgRadius`, `selectedIconBgChamfer`, `selectedIconMonochrome`, `selectedIconAdaptive`. All reads migrated to `currentEditingEntry()`-based; all writes were dead and removed. The dead helper `updateAdaptiveToggleVisibility` was deleted. The dead DOM-sync block in `syncExtrasFromShape` (queried inspectorEl for popup elements that live in document.body) was deleted.
+
+## Carryover
+
+- **Layer panel** — width/height/depth/offsets/baseElevation/color inputs in `buildDimensionsContent`. Reads from the JointJS cell (`currentShape.size()`). The existing `syncInspectorToLayer` already acts as a populator on layer switch — open/selection-drift is structurally adressed. Deferred until a concrete bug report.
+- **Modifier panel** (`buildModifiersContent`): `selectedCornerRadius` / chamfer / taper / twist / scaleTop / shedDrop globals. Same drift class as the deleted icon globals (open-drift on shape switch). Same recipe applies; not executed.
+- **Shape Meta — displayName**: Carbon text input has cursor-jump risk under a populator. Needs a focused-input guard before migration. Skip unless reported.
+- **Drag handlers** — commit-on-drop migration: deferred. No performance issue observed; JointJS per-cell render is local.
+- **Inspector** — `saveNode()` harvest preserves existing meta via spread, so no field-drop bug. Without a concrete Inspector bug report, refactor is speculative.
+
+## Verification
+
+`yarn tsc --noEmit` clean after every phase. After the full session: 13 icon globals removed, 0 type errors. Manual UI verification (Face/Front anchor bug + one-save-behind bug) is the user's check — the dev server is not started by the implementation per the project's verification rules.

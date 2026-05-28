@@ -1,6 +1,7 @@
 import { dia, g, elementTools } from '@joint/core';
-import { CenterBasedHeightControl, PyramidHeightControl, SizeControl, ProportionalSizeControl, CONNECT_TOOL_PRESET } from '../tools';
+import { CenterBasedHeightControl, SizeControl, ProportionalSizeControl, CONNECT_TOOL_PRESET } from '../tools';
 import { PORT_GROUPS, initPorts, updatePortPositions as syncPortPositions, PortView } from './ports';
+import { SHAPE_CELL_SIZE } from '../theme';
 
 export const ISOMETRIC_HEIGHT_KEY = 'isometric-height';
 export const SIZE_KEY = 'size';
@@ -22,13 +23,24 @@ export enum View {
     TwoDimensional = '2d',
 }
 
+/**
+ * Modifier keys recognised by the Component Designer's modifier panel.
+ * Which keys apply to which base shape is owned by `shape-capabilities.ts`
+ * (see ADR-0004) — this type is just the vocabulary.
+ */
+export type ModifierKey =
+    | 'cornerRadius'
+    | 'chamfer' | 'chamferHeight' | 'chamferBottom' | 'chamferBottomHeight'
+    | 'twist'
+    | 'scaleTopX' | 'scaleTopY'
+    | 'shedRoof' | 'shedRoofDir';
+
 export default class IsometricShape extends dia.Element<IsometricElementAttributes> {
 
     tools: Tools = {};
 
     private currentPortView: PortView = 'isometric';
 
-    get taper(): number { return this.get('taper') ?? 0; }
     get twist(): number { return this.get('twist') ?? 0; }
     get scaleTopX(): number { return this.get('scaleTopX') ?? 1; }
     get scaleTopY(): number { return this.get('scaleTopY') ?? 1; }
@@ -96,6 +108,10 @@ export default class IsometricShape extends dia.Element<IsometricElementAttribut
         const tools = [];
         for (const [key, tool] of Object.entries(this.tools)) {
             if (view === View.TwoDimensional && key === ISOMETRIC_HEIGHT_KEY) continue;
+            // Ports are the canonical link-drawing surface in this app —
+            // the connect arrow is redundant noise and was disabled in
+            // both views per user request.
+            if (key === CONNECT_KEY) continue;
             if (include && !include.includes(key as ToolKeys)) continue;
             tool.name = key;
             tools.push(tool);
@@ -107,12 +123,49 @@ export default class IsometricShape extends dia.Element<IsometricElementAttribut
 
     toggleView(view: View) {
         const isIsometric = view === View.Isometric;
+        this.set('viewMode', isIsometric ? 'iso' : '2d');
         this.attr({
             '2d':  { display: isIsometric ? 'none' : 'block' },
             'iso': { display: isIsometric ? 'block' : 'none' },
         });
+        this.apply2DHitArea(!isIsometric);
         this.currentPortView = isIsometric ? 'isometric' : '2d';
         if (this.usePorts()) this.updatePortPositions();
+        // Re-anchor the label to the visible block — 40×40 icon box in 2D, the
+        // iso volume in isometric.
+        const { applyLabelPosition } = require('../label-position');
+        applyLabelPosition(this);
+    }
+
+    /**
+     * Restrict the hit area to a centred 40×40 cell in 2D so the click/drag
+     * target matches the visual (the icon, also 40×40). In 3D the base falls
+     * back to the SVG template defaults via `null` attrs, which restores the
+     * full footprint as the hit surface.
+     *
+     * Affects `base` (rect — hexahedron-style shapes), `base2D` (path —
+     * tube/pipe/duct/channel), and `hitArea` (ComplexComponent's dedicated
+     * pointer-event surface).
+     */
+    protected apply2DHitArea(twoD: boolean): void {
+        const G = SHAPE_CELL_SIZE;
+        const { width: w, height: h } = this.size();
+        const x = (w - G) / 2;
+        const y = (h - G) / 2;
+        const hitPath = `M ${x} ${y} L ${x + G} ${y} L ${x + G} ${y + G} L ${x} ${y + G} Z`;
+        // `base` and `hitArea` stay at the full model-bbox in 2D (visually
+        // transparent for `base`) so the SVG bbox — which Manhattan reads for
+        // obstacle avoidance — matches the iso bbox. `base2D` (the path-based
+        // 2D visual on tube/pipe/etc.) keeps its centred 40×40 footprint.
+        this.attr({
+            base: twoD
+                ? { x: 0, y: 0, width: w, height: h, fillOpacity: 0, strokeOpacity: 0 }
+                : { x: null, y: null, width: null, height: null, fillOpacity: null, strokeOpacity: null },
+            base2D: twoD ? { d: hitPath } : { d: null },
+            hitArea: twoD
+                ? { x: 0, y: 0, width: w, height: h }
+                : { x: null, y: null, width: null, height: null },
+        });
     }
 }
 
@@ -173,11 +226,10 @@ export abstract class PolygonShape extends IsometricShape {
         const { width: w, height: h } = this.size();
         const cx = w / 2;
         const cy = h / 2;
-        const t = this.taper;
         const tw = this.twist * Math.PI / 180;
         const stx = this.scaleTopX;
         const sty = this.scaleTopY;
-        const hasMod = t !== 0 || tw !== 0 || stx !== 1 || sty !== 1;
+        const hasMod = tw !== 0 || stx !== 1 || sty !== 1;
         const rot = (this.get('shapeRotation') as number) ?? 0;
 
         return base.map(([x, y], i) => {
@@ -189,8 +241,8 @@ export abstract class PolygonShape extends IsometricShape {
             if (hasMod) {
                 let lx = x - cx;
                 let ly = y - cy;
-                lx *= stx * (1 - t);
-                ly *= sty * (1 - t);
+                lx *= stx;
+                ly *= sty;
                 if (tw !== 0) {
                     const cos = Math.cos(tw);
                     const sin = Math.sin(tw);
@@ -229,6 +281,10 @@ export abstract class PolygonShape extends IsometricShape {
         const dx = curr[0] - prev[0];
         const dy = curr[1] - prev[1];
         const len = Math.hypot(dx, dy);
+        // Degenerate edge (zero length, e.g. all top vertices collapsed to a
+        // pyramid apex via scaleTopX=scaleTopY=0): no direction to step along,
+        // return the vertex itself.
+        if (len === 0) return [curr[0], curr[1]];
         return [curr[0] - dx / len * rE, curr[1] - dy / len * rE];
     }
 
@@ -241,6 +297,7 @@ export abstract class PolygonShape extends IsometricShape {
         const dx = next[0] - curr[0];
         const dy = next[1] - curr[1];
         const len = Math.hypot(dx, dy);
+        if (len === 0) return [curr[0], curr[1]];
         return [curr[0] + dx / len * rE, curr[1] + dy / len * rE];
     }
 
@@ -499,7 +556,7 @@ export abstract class PolygonShape extends IsometricShape {
     }
 }
 
-// ── CuboidShape ───────────────────────────────────────────────────────────────
+// ── RectangleShape ───────────────────────────────────────────────────────────────
 // Extends PolygonShape so all faces — base, top, sides, corners — are derived
 // from the same footprintPath / arcEntry / arcExit pipeline.
 //
@@ -509,7 +566,7 @@ export abstract class PolygonShape extends IsometricShape {
 //   V2=(w,h)  bot-right  — visible (between right face and front face)
 //   V3=(0,h)  bot-left   — boundary (visible front face → hidden left edge)
 
-export class CuboidShape extends PolygonShape {
+export class RectangleShape extends PolygonShape {
     constructor(...args: any[]) {
         super(...args);
         const { defaultSize, defaultIsometricHeight } = this.attributes;
@@ -532,19 +589,20 @@ export class CuboidShape extends PolygonShape {
     }
 
     /** Hit-area / interaction base — always full rectangle. */
-    baseCuboidPath(): string {
+    baseRectanglePath(): string {
         return this.footprintPath(this.baseVertices(), this.cornerRadius);
     }
 
-    /** Isometric base — chamfered when chamferBottomSize > 0. */
-    baseCuboidPathIso(): string {
-        const cb = this.chamferBottomSize;
-        if (cb > 0) return this.chamferedFootprintPath(this.baseVertices(), cb);
+    /** Isometric base — omitted when chamferBottomSize > 0 because the chamfer
+     *  itself defines the bottom geometry; a separate base plate would leave
+     *  visible artefacts at the chamfered corners. */
+    baseRectanglePathIso(): string {
+        if (this.chamferBottomSize > 0) return 'M 0 0 Z';
         return this.footprintPath(this.baseVertices(), this.cornerRadius);
     }
 
     /** Isometric top face. Chamfered when chamferSize > 0. */
-    topCuboidPath(): string {
+    topRectanglePath(): string {
         const tv = this.topVertices();
         if (this.chamferSize > 0) return this.chamferedFootprintPath(tv, this.chamferSize);
         return this.footprintPath(tv, this.cornerRadius);
@@ -554,15 +612,15 @@ export class CuboidShape extends PolygonShape {
         return this.chamferSize > 0 || this.chamferBottomSize > 0;
     }
 
-    cuboidFrontPath(): string {
+    rectangleFrontPath(): string {
         return this.hasChamfer() ? this.chamferedSideFacePath(2, 3) : this.straightFacePath(2, 3);
     }
 
-    cuboidSidePath(): string {
+    rectangleSidePath(): string {
         return this.hasChamfer() ? this.chamferedSideFacePath(1, 2) : this.straightFacePath(1, 2);
     }
 
-    private cuboidCornerPath(i: number): string {
+    private rectangleCornerPath(i: number): string {
         if (!this.hasChamfer()) return this.cornerFacePath(i);
         const c = this.chamferSize;
         const cb = this.chamferBottomSize;
@@ -578,12 +636,12 @@ export class CuboidShape extends PolygonShape {
         return d || this.cornerFacePath(i);
     }
 
-    cuboidCornerV1Path(): string { return this.cuboidCornerPath(1); }
-    cuboidCornerV2Path(): string { return this.cuboidCornerPath(2); }
-    cuboidCornerV3Path(): string { return this.cuboidCornerPath(3); }
+    rectangleCornerV1Path(): string { return this.rectangleCornerPath(1); }
+    rectangleCornerV2Path(): string { return this.rectangleCornerPath(2); }
+    rectangleCornerV3Path(): string { return this.rectangleCornerPath(3); }
 }
 
-export class ProportionalCuboidShape extends CuboidShape {
+export class ProportionalRectangleShape extends RectangleShape {
     constructor(...args: any[]) {
         super(...args);
         const { defaultSize, defaultIsometricHeight } = this.attributes;
@@ -595,7 +653,7 @@ export class ProportionalCuboidShape extends CuboidShape {
     }
 }
 
-export class CylinderShape extends IsometricShape {
+export class CircleShape extends IsometricShape {
     constructor(...args: any[]) {
         super(...args);
         const { defaultSize, defaultIsometricHeight } = this.attributes;
@@ -608,12 +666,12 @@ export class CylinderShape extends IsometricShape {
 
     get topEllipseRx(): number {
         const { width } = this.size();
-        return (width / 2) * this.scaleTopX * (1 - this.taper);
+        return (width / 2) * this.scaleTopX;
     }
 
     get topEllipseRy(): number {
         const { height } = this.size();
-        return (height / 2) * this.scaleTopY * (1 - this.taper);
+        return (height / 2) * this.scaleTopY;
     }
 
     get sideData(): string {
@@ -652,28 +710,7 @@ export class CylinderShape extends IsometricShape {
     }
 }
 
-export class PyramidShape extends IsometricShape {
-    constructor(...args: any[]) {
-        super(...args);
-        const { defaultSize, defaultIsometricHeight } = this.attributes;
-        this.tools = {
-            [SIZE_KEY]: new ProportionalSizeControl({ defaultSize }),
-            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
-            [ISOMETRIC_HEIGHT_KEY]: new PyramidHeightControl({ defaultIsometricHeight }),
-        }
-    }
-
-    get topX(): number {
-        const rot = (this.get('shapeRotation') as number) ?? 0;
-        return rot === 90 ? this.size().width : this.size().width - this.isometricHeight;
-    }
-
-    get topY(): number {
-        return this.size().height - this.isometricHeight;
-    }
-}
-
-// ── Tube (horizontal cylinder / pipe) ─────────────────────────────────────
+// ── Tube (horizontal circle / pipe) ─────────────────────────────────────
 //
 // A circle of radius R in the 3D YZ-plane projects into 2D model space as the
 // conic 2u² − 2uv + v² = R².  Diagonalising the matrix [[2,−1],[−1,1]] gives
@@ -766,7 +803,7 @@ export class TubeShape extends IsometricShape {
     }
 }
 
-// ── Pipe (horizontal cylinder along model Y — front to back) ──────────────
+// ── Pipe (horizontal circle along model Y — front to back) ──────────────
 // Circle in the XZ-plane: conic u²−2uv+2v²=R².  Same eigenvalues as the
 // tube (λ=(3±√5)/2), but the major axis is along (1, 1/φ) → rotation ≈ 31.72°.
 // Tangent lines parallel to model-Y touch at offset (±R√2, ±R/√2).

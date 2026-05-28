@@ -7,6 +7,7 @@
 // C — (future) zone-based magnetic regions via custom connectionPoint.
 
 import { dia } from '@joint/core';
+import { SHAPE_CELL_SIZE } from '../theme';
 
 const PORT_RADIUS = 3;
 const PORT_COLOR  = 'rgba(0, 0, 0, 0.25)';
@@ -66,10 +67,24 @@ export type PortView = 'isometric' | '2d';
  * local coordinates) on the rectangular bbox edges. The paper's isometric
  * transformation matrix projects them to the correct visual screen positions
  * automatically — no separate iso-specific offsets needed.
+ *
+ * In 2D the shape collapses to a SHAPE_CELL_SIZE icon centered on the cell,
+ * so the ports follow that visual instead of the underlying cell footprint.
  */
 export function getPortPositions(
-    w: number, h: number, _iH: number, _view: PortView
+    w: number, h: number, _iH: number, view: PortView
 ): Record<string, { x: number; y: number }> {
+    if (view === '2d') {
+        const cx = w / 2;
+        const cy = h / 2;
+        const half = SHAPE_CELL_SIZE / 2;
+        return {
+            front: { x: cx,        y: cy + half },
+            back:  { x: cx,        y: cy - half },
+            left:  { x: cx - half, y: cy },
+            right: { x: cx + half, y: cy },
+        };
+    }
     return {
         front: { x: w / 2, y: h },
         back:  { x: w / 2, y: 0 },

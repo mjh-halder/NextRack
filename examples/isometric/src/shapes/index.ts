@@ -1,16 +1,9 @@
 import { shapes } from '@joint/core';
 
 import { Link } from './link/link'
-import { Switch } from './switch/switch'
-import { Router } from './router/router'
-import { Computer } from './computer/computer'
-import { Database } from './database/database'
-import { ActiveDirectory } from './active-directory/active-directory'
-import { User } from './user/user'
-import { Firewall } from './firewall/firewall'
+import { Rectangle } from './rectangle/rectangle'
+import { Circle } from './circle/circle'
 import { Frame } from './frame/frame'
-import { KubernetesWorkerNode } from './kubernetes-worker-node/kubernetes-worker-node'
-import { Pyramid } from './pyramid/pyramid'
 import { Octagon } from './octagon/octagon'
 import { Hexahedron } from './hexahedron/hexahedron'
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape'
@@ -27,20 +20,13 @@ import { ComplexComponent, ComplexComponentView } from './complex-component'
 export const cellNamespace = {
     ...shapes,
     Link,
-    Switch,
-    Router,
-    Computer,
-    Database,
-    ActiveDirectory,
-    User,
-    Firewall,
+    Rectangle,
+    Circle,
     Frame,
     Area,
     DoubleArrow,
     GridLabel,
     Icon,
-    KubernetesWorkerNode,
-    Pyramid,
     Octagon,
     Hexahedron,
     SvgPolygonShape,
@@ -58,20 +44,13 @@ export const cellNamespace = {
 
 export {
     Link,
-    Switch,
-    Router,
-    Computer,
-    Database,
-    ActiveDirectory,
-    User,
-    Firewall,
+    Rectangle,
+    Circle,
     Frame,
     Area,
     DoubleArrow,
     GridLabel,
     Icon,
-    KubernetesWorkerNode,
-    Pyramid,
     Octagon,
     Hexahedron,
     SvgPolygonShape,

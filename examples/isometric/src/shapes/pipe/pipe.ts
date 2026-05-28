@@ -1,10 +1,11 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './pipe.svg';
 import { PipeShape } from '../isometric-shape';
-import { GRID_SIZE } from '../../theme';
+import { defaultDimensionsFor } from '../shape-capabilities';
 
-const defaultSize = { width: GRID_SIZE * 2, height: GRID_SIZE * 3 };
-const defaultIsometricHeight = GRID_SIZE;
+const _defaults = defaultDimensionsFor('pipe');
+const defaultSize = { width: _defaults.width, height: _defaults.height };
+const defaultIsometricHeight = _defaults.depth;
 
 @Model({
     attributes: {

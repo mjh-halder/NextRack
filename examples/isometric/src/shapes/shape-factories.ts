@@ -1,6 +1,5 @@
 import IsometricShape from './isometric-shape';
-import { Computer, Database, Firewall, Switch, Router, KubernetesWorkerNode } from './index';
-import { Pyramid } from './pyramid/pyramid';
+import { Rectangle, Circle } from './index';
 import { Octagon } from './octagon/octagon';
 import { Tube } from './tube/tube';
 import { Pipe } from './pipe/pipe';
@@ -14,45 +13,41 @@ const DEFAULT_CUSTOM_VERTS: [number, number][] = [
 
 /** Maps built-in shape ids to their native JointJS class factory. */
 export const SHAPE_FACTORIES: Record<string, () => IsometricShape> = {
-    'firewall':               () => new Firewall(),
-    'switch':                 () => new Switch(),
-    'router':                 () => new Router(),
-    'computer':               () => new Computer(),
-    'database':               () => new Database(),
-    'kubernetes-worker-node': () => new KubernetesWorkerNode(),
+    'rectangle':   () => new Rectangle(),
+    'circle': () => new Circle(),
 };
 
 /** Maps built-in shape ids to their default form factor. */
 export const BASE_SHAPE_BY_ID: Record<string, string> = {
-    'firewall':               'cuboid',
-    'switch':                 'cuboid',
-    'router':                 'cylinder',
-    'computer':               'cuboid',
-    'database':               'cylinder',
-    'kubernetes-worker-node': 'octagon',
+    'rectangle':   'rectangle',
+    'circle': 'circle',
 };
 
-/** Maps form factor names to representative preview factories. */
+/** Maps form factor names to representative preview factories. Includes
+ *  the legacy aliases `hexahedron` (→ rectangle) and `svgPolygon` (→ custom)
+ *  so old saved Shapes with those base-shape values still resolve. */
 export const FORM_FACTOR_PREVIEWS: Record<string, () => IsometricShape> = {
-    'cuboid':    () => new Computer(),
-    'cylinder':  () => new Database(),
-    'pyramid':   () => new Pyramid(),
-    'tube':      () => new Tube(),
-    'pipe':      () => new Pipe(),
-    'duct':      () => new Duct(),
-    'channel':   () => new Channel(),
-    'octagon':   () => new Octagon(),
-    'custom':    () => { const s = new SvgPolygonShape(); s.set('normalizedVerts', DEFAULT_CUSTOM_VERTS); return s; },
+    'rectangle':  () => new Rectangle(),
+    'circle':     () => new Circle(),
+    'tube':       () => new Tube(),
+    'pipe':       () => new Pipe(),
+    'duct':       () => new Duct(),
+    'channel':    () => new Channel(),
+    'octagon':    () => new Octagon(),
+    'custom':     () => { const s = new SvgPolygonShape(); s.set('normalizedVerts', DEFAULT_CUSTOM_VERTS); return s; },
+    'hexahedron': () => new Rectangle(),
+    'svgPolygon': () => { const s = new SvgPolygonShape(); s.set('normalizedVerts', DEFAULT_CUSTOM_VERTS); return s; },
 };
 
 /**
  * Returns the right factory for a given shape id and base shape.
  * Uses the native class when the form factor matches the default,
- * otherwise falls back to the representative preview shape.
+ * otherwise falls back to the representative preview shape. Final fallback
+ * is the Rectangle preview so callers never receive undefined.
  */
 export function getPreviewFactory(shapeId: string, baseShape: string): () => IsometricShape {
-    if (baseShape === (BASE_SHAPE_BY_ID[shapeId] ?? 'cuboid')) {
-        return SHAPE_FACTORIES[shapeId] ?? FORM_FACTOR_PREVIEWS[baseShape];
+    if (baseShape === (BASE_SHAPE_BY_ID[shapeId] ?? 'rectangle')) {
+        return SHAPE_FACTORIES[shapeId] ?? FORM_FACTOR_PREVIEWS[baseShape] ?? FORM_FACTOR_PREVIEWS.rectangle;
     }
-    return FORM_FACTOR_PREVIEWS[baseShape] ?? SHAPE_FACTORIES[shapeId];
+    return FORM_FACTOR_PREVIEWS[baseShape] ?? SHAPE_FACTORIES[shapeId] ?? FORM_FACTOR_PREVIEWS.rectangle;
 }

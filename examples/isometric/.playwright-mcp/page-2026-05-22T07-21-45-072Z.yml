@@ -1,0 +1,22 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e3]:
+    - img [ref=e4]
+    - generic [ref=e12]: Xyronos
+  - banner "Application header"
+  - navigation "Application navigation" [ref=e13]:
+    - button "Design" [ref=e14]:
+      - img [ref=e15]
+    - button "Catalogs" [ref=e19]:
+      - img [ref=e20]
+    - button "Analysis" [ref=e24]:
+      - img [ref=e25]
+    - button "Switch to dark mode" [ref=e28]
+  - button "Element Table" [ref=e29]:
+    - img [ref=e30]
+  - generic [ref=e39]:
+    - generic [ref=e40]:
+      - img [ref=e41]
+      - paragraph [ref=e43]: No component selected
+      - paragraph [ref=e44]: Select a component from the list on the left to start editing, or create a new component.
+    - generic [ref=e45]: 2D
+    - generic [ref=e46]: Isometric

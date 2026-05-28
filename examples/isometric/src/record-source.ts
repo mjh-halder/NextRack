@@ -1,6 +1,6 @@
 import { dia } from '@joint/core';
 import { graph } from './system-designer';
-import { Computer, Frame } from './shapes';
+import { Rectangle, Frame } from './shapes';
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, addShape, deleteShape, saveRegistryToStorage, defaultShapeLayer } from './shapes/shape-registry';
 import { componentStore, ComponentDefinition } from './component-store';
 import { listCanvases, createCanvas, CanvasRecord } from './canvas-store';
@@ -37,7 +37,7 @@ function nodeAdapter(): RecordAdapter {
                 });
         },
         create(values) {
-            const node = new Computer();
+            const node = new Rectangle();
             node.position(GRID_SIZE * 2, GRID_SIZE * 2);
             const meta: Record<string, unknown> = {};
             const dt = getDataType('node');

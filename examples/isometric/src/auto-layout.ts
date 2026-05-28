@@ -60,6 +60,10 @@ export function initAutoLayout(
     // Alignment
     addBtn(container, ICON_H_CENTER, 'Align horizontal center', () => applyAlign('horizontal'));
     addBtn(container, ICON_V_CENTER, 'Align vertical center',   () => applyAlign('vertical'));
+
+    // Start hidden — the bar is shown only when the user has 3+ elements
+    // selected. Without this, all buttons would flash on first paint.
+    container.style.setProperty('display', 'none', 'important');
 }
 
 function addBtn(parent: HTMLElement, icon: string, tooltip: string, onClick: () => void): void {
@@ -245,9 +249,11 @@ function applyAlign(axis: 'horizontal' | 'vertical'): void {
 }
 
 export function showLayoutBar(): void {
-    if (toolbarEl) toolbarEl.style.display = '';
+    // setProperty with 'important' beats any external `display: none !important`
+    // CSS rule that may still hide the bar from a previous mode/state class.
+    if (toolbarEl) toolbarEl.style.setProperty('display', 'flex', 'important');
 }
 
 export function hideLayoutBar(): void {
-    if (toolbarEl) toolbarEl.style.display = 'none';
+    if (toolbarEl) toolbarEl.style.setProperty('display', 'none', 'important');
 }

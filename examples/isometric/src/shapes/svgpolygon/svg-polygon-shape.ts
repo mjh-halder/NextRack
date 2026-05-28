@@ -3,10 +3,11 @@ import { elementTools } from '@joint/core';
 import svg from './svg-polygon.svg';
 import { PolygonShape, SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
 import { SizeControl, CenterBasedHeightControl, CONNECT_TOOL_PRESET } from '../../tools';
-import { GRID_SIZE } from '../../theme';
+import { defaultDimensionsFor } from '../shape-capabilities';
 
-const defaultSize           = { width: GRID_SIZE * 2, height: GRID_SIZE * 2 };
-const defaultIsometricHeight = GRID_SIZE / 2;
+const _defaults = defaultDimensionsFor('svgPolygon');
+const defaultSize = { width: _defaults.width, height: _defaults.height };
+const defaultIsometricHeight = _defaults.depth;
 
 @Model({
     attributes: {
@@ -15,6 +16,8 @@ const defaultIsometricHeight = GRID_SIZE / 2;
         defaultIsometricHeight,
         isometricHeight:        defaultIsometricHeight,
         normalizedVerts:        [] as [number, number][],
+        // Open polylines drawn as a decoration on the top face only.
+        lines:                  [] as [number, number][][],
     },
     template: svg,
 })
@@ -70,11 +73,10 @@ export class SvgPolygonShape extends PolygonShape {
         const { width: w, height: h } = this.size();
         const cx = w / 2;
         const cy = h / 2;
-        const t = this.taper;
         const tw = this.twist * Math.PI / 180;
         const stx = this.scaleTopX;
         const sty = this.scaleTopY;
-        const hasMod = t !== 0 || tw !== 0 || stx !== 1 || sty !== 1;
+        const hasMod = tw !== 0 || stx !== 1 || sty !== 1;
         const rot = (this.get('shapeRotation') as number) ?? 0;
         const dx = rot === 90 ? 0 : -iH;
         const dy = -iH;
@@ -85,8 +87,8 @@ export class SvgPolygonShape extends PolygonShape {
             if (hasMod) {
                 let lx = x - cx;
                 let ly = y - cy;
-                lx *= stx * (1 - t);
-                ly *= sty * (1 - t);
+                lx *= stx;
+                ly *= sty;
                 if (tw !== 0) {
                     const cos = Math.cos(tw);
                     const sin = Math.sin(tw);
@@ -206,5 +208,41 @@ export class SvgPolygonShape extends PolygonShape {
         }
 
         return parts.length > 0 ? parts.join(' ') : 'M 0 0';
+    }
+
+    // ── Top-face line overlay ────────────────────────────────────────────
+    // Open polylines stored on the `lines` attribute, projected to the top
+    // face. Same scaling/offset as the polygon footprint so a line drawn at
+    // the same normalized coords sits exactly on the polygon's top surface.
+    private linesAsBasePaths(): [number, number][][] {
+        const lines = (this.get('lines') as [number, number][][]) ?? [];
+        if (lines.length === 0) return [];
+        const { width: w, height: h } = this.size();
+        const polyPaths = this.allNormPaths();
+        let maxNX = 0, maxNY = 0;
+        for (const path of polyPaths) {
+            for (const [nx, ny] of path) {
+                if (nx > maxNX) maxNX = nx;
+                if (ny > maxNY) maxNY = ny;
+            }
+        }
+        if (maxNX === 0 || maxNY === 0) {
+            return lines.map(l => l.map(([nx, ny]) => [nx * w, ny * h] as [number, number]));
+        }
+        const scale = Math.min(w / maxNX, h / maxNY);
+        const ox = (w - maxNX * scale) / 2;
+        const oy = (h - maxNY * scale) / 2;
+        return lines.map(l => l.map(([nx, ny]) => [nx * scale + ox, ny * scale + oy] as [number, number]));
+    }
+
+    @Function()
+    linesPath(): string {
+        const baseLines = this.linesAsBasePaths();
+        if (baseLines.length === 0) return '';
+        return baseLines.map(line => {
+            if (line.length < 2) return '';
+            const proj = this.baseToTop(line);
+            return proj.map(([x, y], i) => (i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`)).join(' ');
+        }).filter(Boolean).join(' ');
     }
 }

@@ -1,5 +1,6 @@
 import { ShapeDefinition, IconEntry, addShape, ShapeRegistry, defaultShapeLayer, defaultIconEntry } from './shapes/shape-registry';
 import { getIconById } from './icon-catalog';
+import { getPaletteIcon } from './shape-query';
 
 export type ShapeCategory = 'general' | 'user';
 
@@ -121,7 +122,7 @@ function ensureDefaults(): void {
     ];
     let changed = false;
     for (const d of defaults) {
-        const entry = d.definition.layers[0]?.icons[0];
+        const entry = getPaletteIcon(d.definition);
         if (entry && !entry.href) {
             entry.href = bakeIconHref(entry);
         }
@@ -145,3 +146,73 @@ function syncGeneralToRegistry(): void {
 syncGeneralToRegistry();
 
 export const shapeStore: ShapeStore = { list, get, save, remove };
+
+// ── User Folders ──────────────────────────────────────────────────────────────
+//
+// User-created sub-folders that group user-generated Shapes inside the
+// "User Created" section of the Component Designer palette. System
+// collections (General, Oracle, ...) are unaffected — those come from the
+// `component-collection` schema datatype.
+
+export interface UserFolder {
+    id: string;
+    name: string;
+    createdAt: number;
+}
+
+const USER_FOLDERS_KEY = 'nextrack-user-folders-v1';
+export const USER_FOLDERS_CHANGED_EVENT = 'nextrack:user-folders-changed';
+
+function readUserFolders(): UserFolder[] {
+    try {
+        const raw = localStorage.getItem(USER_FOLDERS_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeUserFolders(folders: UserFolder[]): void {
+    try {
+        localStorage.setItem(USER_FOLDERS_KEY, JSON.stringify(folders));
+        document.dispatchEvent(new CustomEvent(USER_FOLDERS_CHANGED_EVENT));
+    } catch (e) {
+        console.error('[nextrack] Failed to save user folders:', e);
+    }
+}
+
+function folderIdFromName(name: string): string {
+    const base = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    return `uf-${base || 'folder'}-${Date.now().toString(36)}`;
+}
+
+export function listUserFolders(): UserFolder[] {
+    return readUserFolders();
+}
+
+export function createUserFolder(name: string): UserFolder {
+    const folder: UserFolder = { id: folderIdFromName(name), name: name.trim(), createdAt: Date.now() };
+    const all = readUserFolders();
+    all.push(folder);
+    writeUserFolders(all);
+    return folder;
+}
+
+export function renameUserFolder(id: string, newName: string): void {
+    const all = readUserFolders();
+    const idx = all.findIndex(f => f.id === id);
+    if (idx < 0) return;
+    all[idx] = { ...all[idx], name: newName.trim() };
+    writeUserFolders(all);
+}
+
+export function deleteUserFolder(id: string): void {
+    writeUserFolders(readUserFolders().filter(f => f.id !== id));
+}
+
+export function userFolderNameExists(name: string, ignoreId?: string): boolean {
+    const norm = name.trim().toLowerCase();
+    return readUserFolders().some(f => f.name.toLowerCase() === norm && f.id !== ignoreId);
+}

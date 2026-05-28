@@ -2,10 +2,18 @@ import { GRID_SIZE } from '../theme';
 import { BaseShape } from './shape-definition';
 
 export interface ShapeStyle {
+    // Light-mode colors (existing fields)
     topColor?: string;
     sideColor?: string;
     frontColor?: string;
     strokeColor?: string;
+    // Dark-mode colors (new) — applied when document is in cds--g100
+    topColorDark?: string;
+    sideColorDark?: string;
+    frontColorDark?: string;
+    strokeColorDark?: string;
+    /** Selected color preset; 'default' = renderer defaults, 'custom' = user-defined fields. */
+    colorTheme?: 'default' | 'gcp' | 'aws' | 'azure' | 'custom';
 }
 
 /**
@@ -36,7 +44,7 @@ export interface IconEntry {
     adaptive: boolean;
     /** Override icon color (when no background). */
     iconColor?: string;
-    /** When true, this is the canonical icon shown in 2D view. Only one per layer. */
+    /** When true, this is the canonical icon shown in 2D view. Only one per Shape — chokepoints enforce uniqueness across all Layers. */
     isMain?: boolean;
     /** Pre-rendered composite href cached for instance-spawn. */
     href?: string;
@@ -69,7 +77,6 @@ export interface ShapeLayer {
     chamferStart?: number;
     chamferBottomSize?: number;
     chamferBottomStart?: number;
-    taper?: number;
     twist?: number;
     scaleTopX?: number;
     scaleTopY?: number;
@@ -78,6 +85,8 @@ export interface ShapeLayer {
 
     /** Normalized [0..1] vertices. Present iff baseShape === 'custom' || 'svgPolygon'. */
     normalizedVerts?: [number, number][];
+    /** Open polylines drawn as decoration on the top face (custom shapes only). */
+    lines?: [number, number][][];
     /** Raw uploaded SVG source. Present iff baseShape === 'svgPolygon'. */
     svgFootprint?: string;
     /** Original filename of uploaded SVG. Present iff baseShape === 'svgPolygon'. */
@@ -101,6 +110,12 @@ export interface ShapeDefinition {
     componentType?: string;
     /** Palette grouping. */
     collection?: string;
+    /**
+     * ID of the user-created sub-folder this Shape belongs to (only meaningful
+     * for user-generated Shapes shown under "User Created"). Empty/undefined
+     * means top-level inside "User Created".
+     */
+    userFolderId?: string;
     /** Whether Dimension Y is adjustable in the grid (tube/duct/pipe shapes). */
     dimYAdjustable?: boolean;
     /** Optional hit-area override (larger than layered bbox) for placement collision. */
@@ -111,7 +126,13 @@ export interface ShapeDefinition {
     turned90?: ShapeDefinition;
     /** Default rotation applied at instance-spawn. */
     defaultRotation?: number;
-    /** One or more layers. Always at least one. layers[0] is the "main" layer. */
+    /**
+     * If true, the 2D view of this component is rendered as a single 40×40
+     * square with the main icon centred — useful for shapes whose true 2D
+     * footprint is non-square (off-centre logo, awkward proportions).
+     */
+    simplified2D?: boolean;
+    /** One or more layers. Always at least one. All layers are equal — no layer is "main". */
     layers: ShapeLayer[];
 }
 
@@ -120,7 +141,7 @@ export function defaultShapeLayer(partial: Partial<ShapeLayer> = {}): ShapeLayer
     return {
         id: `layer-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
         name: 'Main',
-        baseShape: 'cuboid',
+        baseShape: 'rectangle',
         width: GRID_SIZE * 2,
         height: GRID_SIZE * 2,
         depth: GRID_SIZE,
@@ -157,71 +178,14 @@ export function defaultIconEntry(partial: Partial<IconEntry> = {}): IconEntry {
 }
 
 /**
- * Canonical defaults for all built-in shapes.
- * Built-ins are registry entries that legacy code paths may look up by id,
- * but they are NOT exposed in the palette (the user-facing list comes from
- * the shape store).
+ * No built-in shape entries remain. The canonical form-factor classes
+ * (Rectangle, Circle, Octagon, Tube, Pipe, Duct, Channel, SvgPolygonShape)
+ * read their module-init defaults from `shape-capabilities.ts`
+ * (`defaultDimensionsFor`). User shapes are loaded from localStorage.
+ * BUILT_IN_SHAPE_IDS is kept as an empty Set so existing callers that filter
+ * out built-ins remain trivially correct.
  */
-const BUILT_IN_DEFAULTS: Record<string, ShapeDefinition> = {
-    'firewall': {
-        displayName: 'Firewall',
-        componentType: 'Firewall',
-        layers: [defaultShapeLayer({
-            id: 'layer-firewall-main',
-            width: GRID_SIZE * 3,
-            height: GRID_SIZE,
-            depth: GRID_SIZE * 2,
-        })],
-    },
-    'switch': {
-        displayName: 'Switch',
-        componentType: 'Switch',
-        layers: [defaultShapeLayer({
-            id: 'layer-switch-main',
-            width: GRID_SIZE * 2,
-            height: GRID_SIZE * 2,
-            depth: GRID_SIZE / 2,
-        })],
-    },
-    'router': {
-        displayName: 'Router',
-        layers: [defaultShapeLayer({
-            id: 'layer-router-main',
-            width: GRID_SIZE * 2,
-            height: GRID_SIZE * 2,
-            depth: GRID_SIZE / 2,
-        })],
-    },
-    'computer': {
-        displayName: 'Server',
-        componentType: 'Server',
-        layers: [defaultShapeLayer({
-            id: 'layer-computer-main',
-            width: GRID_SIZE,
-            height: GRID_SIZE * 2,
-            depth: GRID_SIZE * 2,
-        })],
-    },
-    'database': {
-        displayName: 'Storage',
-        componentType: 'Storage',
-        layers: [defaultShapeLayer({
-            id: 'layer-database-main',
-            width: GRID_SIZE,
-            height: GRID_SIZE,
-            depth: GRID_SIZE,
-        })],
-    },
-    'kubernetes-worker-node': {
-        displayName: 'Worker Node',
-        layers: [defaultShapeLayer({
-            id: 'layer-k8s-main',
-            width: GRID_SIZE * 2,
-            height: GRID_SIZE * 2,
-            depth: GRID_SIZE / 2,
-        })],
-    },
-};
+const BUILT_IN_DEFAULTS: Record<string, ShapeDefinition> = {};
 
 /** IDs of shapes that ship with the app and are not user-created. */
 export const BUILT_IN_SHAPE_IDS = new Set(Object.keys(BUILT_IN_DEFAULTS));

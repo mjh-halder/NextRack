@@ -1,4 +1,4 @@
-import { g, dia, V, highlighters, routers } from '@joint/core';
+import { g, dia, V, highlighters } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View, ToolKeys } from './shapes/isometric-shape';
 import { Link, Frame, cellNamespace } from './shapes';
@@ -364,18 +364,6 @@ function resolveComponentBase(cell: dia.Element): dia.Element {
     return cell;
 }
 
-// Outward direction vector per port — used by the short-distance router to
-// add orthogonal approach/departure points so links never run along edges.
-function portDirection(portId: string): { dx: number; dy: number } {
-    switch (portId) {
-        case 'front': return { dx:  0, dy:  1 };
-        case 'back':  return { dx:  0, dy: -1 };
-        case 'right': return { dx:  1, dy:  0 };
-        case 'left':  return { dx: -1, dy:  0 };
-        default:      return { dx:  0, dy:  0 };
-    }
-}
-
 const paper = new dia.Paper({
     el: canvasEl,
     model: graph,
@@ -419,40 +407,12 @@ const paper = new dia.Paper({
     gridSize: GRID_SIZE / 2,
     async: true,
     autoFreeze: true,
-    defaultConnectionPoint: {
-        name: 'anchor',
-        args: { offset: 2 },
-    },
-    defaultRouter: (vertices, args, linkView) => {
-        const manhattanArgs = {
-            step: GRID_SIZE / 2,
-            startDirections: ['top', 'bottom', 'left', 'right'],
-            endDirections:   ['top', 'bottom', 'left', 'right'],
-            isPointObstacle: (point) => {
-                const x = Math.floor(point.x / GRID_SIZE) * GRID_SIZE - GRID_SIZE / 2;
-                const y = Math.floor(point.y / GRID_SIZE) * GRID_SIZE - GRID_SIZE / 2;
-                const rect = new g.Rect(x, y, GRID_SIZE * 2, GRID_SIZE * 1.5);
-                return !obstacles.isFree(rect);
-            }
-        };
-        // Very short direct connections (≤ 2.5 GU, no user waypoints):
-        // straight line — Manhattan would kink due to overlapping obstacle zones.
-        // Everything else goes through Manhattan for clean orthogonal routing.
-        if (vertices.length === 0) {
-            const srcCenter = linkView.sourceBBox.center();
-            const tgtCenter = linkView.targetBBox.center();
-            if (srcCenter.distance(tgtCenter) <= GRID_SIZE * 2.5) {
-                return routers.normal(vertices, args, linkView);
-            }
-        }
-        return routers.manhattan(vertices, manhattanArgs as any, linkView);
-    },
+    defaultRouter: { name: 'manhattan' },
     defaultLink: () => new Link(),
     linkPinning: false,
     overflow: true,
     snapLinks: { radius: GRID_SIZE },
     cellViewNamespace: cellNamespace,
-    defaultAnchor: { name: 'modelCenter' },
     validateConnection: (cellViewS, _magnetS, cellViewT, magnetT) => {
         if (!cellViewT) return false;
         const targetModel = cellViewT.model;

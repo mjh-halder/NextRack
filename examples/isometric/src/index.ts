@@ -5,6 +5,7 @@ import { panel, canvasEl, paletteEl, viewToggleContainerEl, designNameEl, fitToC
 import { panel as cdPanel, selectShape } from './component-designer';
 import { initTopHeader, setCanvasActive } from './top-header';
 import { initAdmin } from './admin';
+import { bootstrapBundledVendorIcons } from './vendor-icon-bootstrap';
 import { initDataModel } from './data-model';
 import { initProductCatalog } from './product-catalog';
 import { initKnowledgeBase, navigateToTopic } from './docs/knowledge-base';
@@ -25,9 +26,12 @@ const THEME_KEY = 'nr-theme';
 const MOON_SVG = carbonIconToString(Moon20 as CarbonIcon);
 // Sun — shown in dark mode (click to switch to light)
 const SUN_SVG = carbonIconToString(Sun20 as CarbonIcon);
-function applyTheme(dark: boolean) {
+export function applyTheme(dark: boolean) {
     document.documentElement.classList.toggle('cds--g100', dark);
     document.documentElement.classList.toggle('cds--white', !dark);
+    // Notify subscribers so they can refresh theme-dependent visuals
+    // (shape fill/stroke, etc.).
+    window.dispatchEvent(new CustomEvent('nr-theme-change', { detail: { dark } }));
 
     const btn = document.getElementById('nav-theme');
     if (btn) {
@@ -69,6 +73,10 @@ initAppDesigner(appDesignerEl);
 initPlacementView(placementViewEl, systemGraph);
 initKnowledgeBase(kbEl);
 
+// Seed empty vendor catalogs (AWS/GCP/Azure) from bundled ZIPs.
+// Fire-and-forget: on completion, onCatalogChange refreshes both palettes.
+void bootstrapBundledVendorIcons();
+
 type AppView = 'grid' | 'apps' | 'placement' | 'components' | 'products' | 'analysis' | 'admin';
 type EditorMode = 'just-draw' | 'full-architecture';
 
@@ -92,7 +100,7 @@ const FLYOUT_ICONS: Record<string, string> = {
     apps: '<svg viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="M28.83,21.17,25,17.37l.67-.67a1,1,0,0,0,0-1.41l-6-6a1,1,0,0,0-1.41,0h0l-.79.79L10.71,3.29a1,1,0,0,0-1.41,0h0l-4,4-.12.15-4,6a1,1,0,0,0,.12,1.26l3,3a1,1,0,0,0,1.42,0L10,13.41l2.09,2.09-4.8,4.79a1,1,0,0,0,0,1.41l2,2A1,1,0,0,0,10,24a1,1,0,0,0,.52-.15l4.33-2.6,2.44,2.45a1,1,0,0,0,1.41,0h0l.67-.7,3.79,3.83a4,4,0,0,0,5.66-5.66ZM10,10.58l-5,5L3.29,13.87,6.78,8.63,10,5.41l6.09,6.09L13.5,14.08Zm8,11-2.84-2.84-5,3L9.42,21,19,11.41,23.59,16Zm9.42,3.83a2,2,0,0,1-2.83,0h0l-3.8-3.79,2.83-2.83,3.8,3.79a2,2,0,0,1,0,2.83Z"/></svg>',
     grid: '<svg viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="M16,24a.9967.9967,0,0,1-.4741-.12l-13-7L3.4741,15.12,16,21.8643,28.5259,15.12l.9482,1.7607-13,7A.9967.9967,0,0,1,16,24Z"/><path d="M16,30a.9967.9967,0,0,1-.4741-.12l-13-7L3.4741,21.12,16,27.8643,28.5259,21.12l.9482,1.7607-13,7A.9967.9967,0,0,1,16,30Z"/><path d="M16,18a.9967.9967,0,0,1-.4741-.12l-13-7a1,1,0,0,1,0-1.7607l13-7a.9982.9982,0,0,1,.9482,0l13,7a1,1,0,0,1,0,1.7607l-13,7A.9967.9967,0,0,1,16,18ZM5.1094,10,16,15.8643,26.8906,10,16,4.1358Z"/></svg>',
     placement: '<svg viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="M28,4H4A2,2,0,0,0,2,6V26a2,2,0,0,0,2,2H28a2,2,0,0,0,2-2V6A2,2,0,0,0,28,4Zm0,22H12V20H10v6H4V17H20.1719l-3.586,3.5859L18,22l6-6-6-6-1.4141,1.4141L20.1719,15H4V6h6v6h2V6H28Z"/></svg>',
-    components: '<svg viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="m31.707,19.2929l-3-3c-.3906-.3906-1.0234-.3906-1.4141,0l-9.293,9.293v4.4141h4.4141l9.293-9.293c.3906-.3906.3906-1.0234,0-1.4141Zm-10.1211,8.707h-1.5859v-1.5859l5-5,1.5859,1.5859-5,5Zm6.4141-6.4141l-1.5859-1.5859,1.5859-1.5859,1.5859,1.5859-1.5859,1.5859Z"/><path d="m16,22c-3.3643,0-6-2.6357-6-6s2.6357-6,6-6,6,2.6357,6,6-2.6357,6-6,6Zm0-10c-2.2803,0-4,1.7197-4,4s1.7197,4,4,4,4-1.7197,4-4-1.7197-4-4-4Z"/><path d="m27.5474,12.0005l1.7322-1-2.3354-4.0444c-.3652-.6328-1.0334-1.0005-1.7322-1.0005-.2134,0-.4294.0342-.6406.106l-2.4341.8232c-.418-.2812-.856-.5352-1.312-.7583l-.5037-2.5186c-.187-.9351-1.0078-1.6079-1.9612-1.6079h-4.7207c-.9534,0-1.7742.6729-1.9612,1.6079l-.5037,2.5186c-.459.2246-.9062.4692-1.3267.7534l-2.4194-.8184c-.2112-.0718-.4272-.106-.6406-.106-.6987,0-1.3669.3677-1.7322,1.0005l-2.3606,4.0879c-.4766.8257-.3042,1.873.4119,2.5024l1.9309,1.6968c-.0171.2515-.0381.5015-.0381.7568,0,.2578.0103.5127.0278.7656l-1.9207,1.688c-.7161.6294-.8884,1.6768-.4119,2.5024l2.3606,4.0879c.3652.6328,1.0334,1.0005,1.7322,1.0005.2134,0,.4297-.0342.6406-.106l2.4341-.8232c.418.2817.856.5352,1.312.7583l.5037,2.5186c.187.9351,1.0078,1.6079,1.9612,1.6079h2.3604v-2h-2.3604l-.7102-3.5508c-.9753-.356-1.9026-.9062-2.6948-1.5713l-3.4468,1.166-2.3604-4.0879,2.7253-2.395c-.1838-1.043-.1914-2.083-.0071-3.1279l-2.7183-2.3892,2.3611-4.0879,3.4268,1.1592c.8032-.6763,1.7295-1.2051,2.7141-1.5645l.7102-3.5508h4.7207l.7102,3.5508c.9753.356,1.9023.9062,2.6948,1.5713l3.4468-1.166,2.3352,4.0444Z"/></svg>',
+    components: '<svg viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="M30,25v-2h-2.1c-.1-.6-.4-1.2-.7-1.8l1.5-1.5-1.4-1.4-1.5,1.5c-.5-.3-1.1-.6-1.8-.7v-2.1h-2v2.1c-.6.1-1.2.4-1.8.7l-1.5-1.5-1.4,1.4,1.5,1.5c-.3.5-.6,1.1-.7,1.8h-2.1v2h2.1c.1.6.4,1.2.7,1.8l-1.5,1.5,1.4,1.4,1.5-1.5c.5.3,1.1.6,1.8.7v2.1h2v-2.1c.6-.1,1.2-.4,1.8-.7l1.5,1.5,1.4-1.4-1.5-1.5c.3-.5.6-1.1.7-1.8h2.1ZM23,27c-1.7,0-3-1.3-3-3s1.3-3,3-3,3,1.3,3,3-1.3,3-3,3ZM21.4854,7.126L12.4858,2.126c-.3027-.168-.6689-.168-.9717,0L2.5142,7.126c-.3174.1763-.5142.5107-.5142.874v10c0,.3633.1968.6982.5142.874l9,5c.1514.084.3188.126.4858.126.1753,0,.3506-.0459.5073-.1377.3052-.1797.4927-.5078.4927-.8623v-9.4116l7-3.8891v4.3007h2v-6c0-.3633-.1973-.6978-.5146-.874ZM12,4.144l6.9411,3.8561-6.9411,3.8558-6.9409-3.856,6.9409-3.856h0ZM4,17.4111v-7.7117l7,3.8889v7.7124s-7-3.8896-7-3.8896Z"/></svg>',
     products: '<svg viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="M26,2H8A2,2,0,0,0,6,4V8H4v2H6v5H4v2H6v5H4v2H6v4a2,2,0,0,0,2,2H26a2,2,0,0,0,2-2V4A2,2,0,0,0,26,2Zm0,26H8V24h2V22H8V17h2V15H8V10h2V8H8V4H26Z"/><path d="M14 8H22V10H14z"/><path d="M14 15H22V17H14z"/><path d="M14 22H22V24H14z"/></svg>',
     analysis: '<svg viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="M4,2H2V28a2,2,0,0,0,2,2H30V28H4Z"/><path d="M30,9H23v2h3.59L19,18.59l-4.29-4.3a1,1,0,0,0-1.42,0L6,21.59,7.41,23,14,16.41l4.29,4.3a1,1,0,0,0,1.42,0L28,12.41V16h2Z"/></svg>',
 };

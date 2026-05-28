@@ -2090,6 +2090,7 @@ export class PropertyPanel {
             ['default', 'Auto (Manhattan)'],
             ['normal', 'Direct'],
             ['orthogonal', 'Orthogonal'],
+            ['manhattan', 'Manhattan'],
             ['metro', 'Metro'],
         ]) {
             const opt = document.createElement('option');

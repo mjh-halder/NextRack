@@ -55,19 +55,6 @@ const MENUS: MenuGroup[] = [
             { label: 'Validate',         action: 'model-validate', canvasOnly: true },
         ],
     },
-    {
-        label: 'Help',
-        items: [
-            { label: 'Shortcuts', action: 'help-shortcuts', shortcut: '?' },
-            { label: 'About',     action: 'help-about' },
-        ],
-    },
-    {
-        label: 'Admin',
-        items: [
-            { label: 'Set as Default', action: 'admin-set-default', canvasOnly: true },
-        ],
-    },
 ];
 
 let canvasActive = false;

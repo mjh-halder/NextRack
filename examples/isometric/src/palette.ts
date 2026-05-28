@@ -8,6 +8,7 @@ import { ShapeRegistry, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
 import './shape-store';
 import { getPreviewFactory } from './shapes/shape-factories';
 import { applyRegistryDefaults } from './utils';
+import { getPaletteIcon, getHitArea, getCompositeIsoHeight } from './shape-query';
 import { carbonIconToString, CarbonIcon } from './icons';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';
 import CaretRight16 from '@carbon/icons/es/caret--right/16.js';
@@ -24,7 +25,8 @@ import Maximize16 from '@carbon/icons/es/maximize/16.js';
 import SettingsAdjust16 from '@carbon/icons/es/settings--adjust/16.js';
 import SubVolume16 from '@carbon/icons/es/watson-health/sub-volume/16.js';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
-import { getIconById, onCatalogChange } from './icon-catalog';
+import { onCatalogChange } from './icon-catalog';
+import { renderIcon } from './icon-renderer';
 import { buildComponentPanel, formatLabel, ComponentTreeItem, setComponentViewMode, getComponentViewMode } from './component-tree';
 import { listCanvases, CanvasRecord } from './canvas-store';
 
@@ -47,10 +49,14 @@ interface PaletteItem {
     label: string;
     kind: string;
     create: () => IsometricShape;
+    /** SVG markup to render in the palette/tree row. Resolved at item-build
+     *  time via icon-renderer.renderIcon() — contains the original (possibly
+     *  color-bearing) catalog SVG. */
     iconSvg?: string;
-    iconSvgMono?: string;
-    iconBgColor?: string;
-    iconIsVendor?: boolean;
+    /** Extra CSS class for the icon container (e.g. `nr-icon-color`).
+     *  Comes from icon-renderer; opts vendor / uploaded icons out of the
+     *  default `filter: brightness(0)` so they keep their original colors. */
+    iconCssClass?: string;
 }
 
 const ICON_AREA_CUSTOM = carbonIconToString(AreaCustom16 as CarbonIcon);
@@ -672,7 +678,7 @@ export class ComponentPalette {
             if (!emptyMsg) {
                 emptyMsg = document.createElement('li');
                 emptyMsg.className = 'nr-palette-empty-msg';
-                emptyMsg.textContent = 'Keine Ergebnisse';
+                emptyMsg.textContent = 'No results';
                 this.elementTreeListEl.appendChild(emptyMsg);
             }
             emptyMsg.style.display = '';
@@ -772,10 +778,12 @@ export class ComponentPalette {
             e => !e.get('isFrame') && !e.isLink() && e.get('componentRole') !== 'child'
         ) as dia.Element[];
 
+        const hasChildren = childFrames.length > 0 || childElements.length > 0;
+
         const li = document.createElement('li');
-        li.className = 'nr-tree-zone';
+        li.className = 'nr-tree-zone' + (hasChildren ? '' : ' nr-tree-zone--empty');
         li.setAttribute('role', 'treeitem');
-        li.setAttribute('aria-expanded', 'true');
+        li.setAttribute('aria-expanded', hasChildren ? 'true' : 'false');
 
         const row = document.createElement('div');
         row.className = 'nr-tree-row';
@@ -787,7 +795,16 @@ export class ComponentPalette {
 
         const toggleSpan = document.createElement('span');
         toggleSpan.className = 'nr-tree-toggle';
-        toggleSpan.innerHTML = ICON_TREE_TOGGLE;
+        if (hasChildren) {
+            toggleSpan.innerHTML = ICON_TREE_TOGGLE;
+        } else {
+            toggleSpan.classList.add('nr-tree-toggle--empty');
+        }
+
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'nr-tree-icon';
+        iconSpan.innerHTML = ICON_TREE_ZONE;
+        iconSpan.setAttribute('aria-hidden', 'true');
 
         const labelSpan = document.createElement('span');
         labelSpan.className = 'nr-tree-label';
@@ -795,6 +812,7 @@ export class ComponentPalette {
         labelSpan.title = zoneLabel;
 
         row.appendChild(toggleSpan);
+        row.appendChild(iconSpan);
         row.appendChild(labelSpan);
         row.appendChild(dragHandle);
         li.appendChild(row);
@@ -813,6 +831,7 @@ export class ComponentPalette {
         li.appendChild(childrenUl);
 
         row.addEventListener('click', () => {
+            if (!hasChildren) return;
             const expanded = li.getAttribute('aria-expanded') === 'true';
             li.setAttribute('aria-expanded', String(!expanded));
             childrenUl.style.display = expanded ? 'none' : '';
@@ -840,9 +859,14 @@ export class ComponentPalette {
             || ShapeRegistry[shapeKey]?.displayName
             || shapeKey
             || 'Element';
+        // Use the Shape-wide Main IconEntry (CONTEXT.md: isMain is per-Shape),
+        // matching the Components palette below. Querying `layers[0].icons[0]`
+        // here previously meant the Element Tree and the Components section
+        // could show DIFFERENT icons for the same Shape whenever `isMain` was
+        // set on something other than the first IconEntry of the first Layer.
+        const def = shapeKey ? ShapeRegistry[shapeKey] : undefined;
         const iconId = (cell.prop('meta/icon') as string | undefined)
-            || (shapeKey ? ShapeRegistry[shapeKey]?.layers?.[0]?.icons?.[0]?.iconId : undefined);
-        const iconEntry = iconId ? getIconById(iconId) : undefined;
+            || (def ? getPaletteIcon(def)?.iconId : undefined);
 
         const li = document.createElement('li');
         li.className = 'nr-tree-element';
@@ -852,9 +876,11 @@ export class ComponentPalette {
         row.className = 'nr-tree-row';
 
         let iconSvgHtml: string | null = null;
-        if (iconEntry?.svg) {
-            const isVendor = iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure';
-            iconSvgHtml = isVendor ? (iconEntry.svgMono || iconEntry.svg) : iconEntry.svg;
+        let iconCssClass = '';
+        const rendered = renderIcon(iconId, 'tree');
+        if (rendered) {
+            iconSvgHtml = rendered.html;
+            iconCssClass = rendered.cssClass;
         } else if (cell.get('isDoubleArrow')) {
             iconSvgHtml = ICON_DOUBLE_ARROW;
         } else if (cell.get('isArea')) {
@@ -862,7 +888,7 @@ export class ComponentPalette {
         }
         if (iconSvgHtml) {
             const iconSpan = document.createElement('span');
-            iconSpan.className = 'nr-tree-icon';
+            iconSpan.className = 'nr-tree-icon' + (iconCssClass ? ' ' + iconCssClass : '');
             iconSpan.innerHTML = iconSvgHtml;
             iconSpan.setAttribute('aria-hidden', 'true');
             row.appendChild(iconSpan);
@@ -1044,26 +1070,21 @@ export class ComponentPalette {
             .filter(([id]) => !BUILT_IN_SHAPE_IDS.has(id))
             .map(([id, defaults]) => {
                 const layer0 = defaults.layers?.[0];
-                const catIconId = layer0?.icons?.[0]?.iconId;
-                const iconEntry = catIconId ? getIconById(catIconId) : undefined;
-                const isVendorIcon = iconEntry && (iconEntry.source === 'aws' || iconEntry.source === 'gcp' || iconEntry.source === 'azure');
+                const catIconId = getPaletteIcon(defaults)?.iconId;
+                const rendered = renderIcon(catIconId, 'palette');
                 const paletteItem: PaletteItem = {
                     label: defaults.displayName ?? formatLabel(id),
                     kind: id,
-                    create: () => getPreviewFactory(id, layer0?.baseShape ?? 'cuboid')(),
-                    iconSvg: iconEntry?.svg || undefined,
-                    iconSvgMono: isVendorIcon ? iconEntry.svgMono : undefined,
-                    iconBgColor: isVendorIcon ? iconEntry.bgColor : undefined,
-                    iconIsVendor: !!isVendorIcon,
+                    create: () => getPreviewFactory(id, layer0?.baseShape ?? 'rectangle')(),
+                    iconSvg: rendered?.html,
+                    iconCssClass: rendered?.cssClass,
                 };
                 return {
                     id,
                     label: paletteItem.label,
                     iconSvg: paletteItem.iconSvg,
-                    iconSvgMono: paletteItem.iconSvgMono,
-                    iconBgColor: paletteItem.iconBgColor,
-                    iconIsVendor: paletteItem.iconIsVendor,
-                    collection: defaults.collection || 'User Components',
+                    iconCssClass: paletteItem.iconCssClass,
+                    collection: defaults.collection || 'User Created',
                     data: paletteItem,
                 };
             });
@@ -1101,8 +1122,8 @@ export class ComponentPalette {
 
             if (item.iconSvg) {
                 const iconSpan = document.createElement('span');
-                iconSpan.className = 'nr-palette-item-icon';
-                iconSpan.innerHTML = (item.iconIsVendor && item.iconSvgMono) ? item.iconSvgMono : item.iconSvg;
+                iconSpan.className = 'nr-palette-item-icon' + (item.iconCssClass ? ' ' + item.iconCssClass : '');
+                iconSpan.innerHTML = item.iconSvg;
                 iconSpan.setAttribute('aria-hidden', 'true');
                 btn.appendChild(iconSpan);
             }
@@ -1130,19 +1151,24 @@ export class ComponentPalette {
 
         const defaults = ShapeRegistry[item.kind];
         const view = this.getView();
-        const meta: NodeMeta = { name: '', shapeType: item.kind, serverId: '', notes: '' };
+        // meta.name from displayName so the new element starts named (Inspector
+        // input, label, element tree all consistent — same rule as the SD
+        // drop handler).
+        const meta: NodeMeta = { name: defaults?.displayName ?? '', shapeType: item.kind, serverId: '', notes: '' };
 
-        // Complex shape: one cell (ComplexComponent) that renders all layers
-        // internally. One bbox, one z, one drag target — no embedding, no
-        // sibling-layer painter ambiguity.
+        // ComplexComponent is required for multi-Layer OR multi-Icon shapes:
+        // a single-image `topIcon` attr can carry one icon only. Same predicate
+        // as the drop handler — keeps the two spawn paths in sync.
         const baseLayer = defaults?.layers?.[0];
-        if ((defaults?.layers?.length ?? 0) > 1 && baseLayer) {
+        const needsComplex = (defaults?.layers?.length ?? 0) > 1 || (baseLayer?.icons?.length ?? 0) > 1;
+        if (needsComplex && baseLayer) {
             const cc = new ComplexComponent();
-            const haSize = defaults!.hitAreaSize ?? { width: baseLayer.width, height: baseLayer.height };
+            const haSize = getHitArea(defaults!);
             cc.resize(haSize.width, haSize.height);
-            cc.set('isometricHeight',        baseLayer.depth);
-            cc.set('defaultIsometricHeight', baseLayer.depth);
-            cc.set('defaultSize',            { width: baseLayer.width, height: baseLayer.height });
+            const isoH = getCompositeIsoHeight(defaults!);
+            cc.set('isometricHeight',        isoH);
+            cc.set('defaultIsometricHeight', isoH);
+            cc.set('defaultSize',            haSize);
             // Copy the layer definitions into the cell — deep-clone so edits to
             // the registry later don't mutate placed instances.
             cc.set('layers', defaults!.layers!.map(l => ({ ...l, style: { ...l.style } })));

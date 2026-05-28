@@ -3,14 +3,11 @@ import { elementTools } from '@joint/core';
 import svg from './octagon.svg';
 import { PolygonShape, SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
 import { SizeControl, CenterBasedHeightControl, CONNECT_TOOL_PRESET } from '../../tools';
-import { GRID_SIZE } from '../../theme';
+import { defaultDimensionsFor } from '../shape-capabilities';
 
-const defaultSize = {
-    width: GRID_SIZE * 2,
-    height: GRID_SIZE * 2,
-};
-
-const defaultIsometricHeight = GRID_SIZE / 2;
+const _defaults = defaultDimensionsFor('octagon');
+const defaultSize = { width: _defaults.width, height: _defaults.height };
+const defaultIsometricHeight = _defaults.depth;
 
 @Model({
     attributes: {

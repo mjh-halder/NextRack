@@ -34,6 +34,8 @@ import k8sControlPlaneSvg from '../assets/kubernetes--control-plane-node.svg';
 import instanceVirtualSvg from '../assets/instance--virtual.svg';
 import k8sWorkerNodeSvg from '../assets/kubernetes--worker-node.svg';
 
+import { unzipSync } from 'fflate';
+
 import { getCarbonIcons } from './carbon-icons-all';
 
 export type IconSource = 'custom' | 'carbon' | 'uploaded' | 'aws' | 'gcp' | 'azure' | 'grid-icon';
@@ -45,6 +47,21 @@ export interface IconCatalogEntry {
     source: IconSource;
     bgColor?: string;
     svgMono?: string;
+}
+
+/**
+ * Whether an icon source carries its own colors and should be rendered as-is
+ * (no CSS color filtering). Vendor icons (AWS/Azure/GCP) and user uploads are
+ * treated as color-bearing; Carbon/custom/grid-icon are line art designed to
+ * be tinted via `filter: brightness(0)` for theme contrast.
+ *
+ * Trees and palettes consult this to decide whether to add the `nr-icon-color`
+ * CSS class (which opts the icon out of the default `brightness(0)` filter).
+ * On the canvas itself, AWS still respects the per-entry `monochrome` flag via
+ * the rendering pipeline — this predicate is for list/tree presentation only.
+ */
+export function iconKeepsOriginalColor(source: IconSource | undefined | null): boolean {
+    return source === 'aws' || source === 'gcp' || source === 'azure' || source === 'uploaded';
 }
 
 const CUSTOM_ICONS: ReadonlyArray<IconCatalogEntry> = [
@@ -384,6 +401,26 @@ function sanitizeAwsSvg(svg: string): string {
         }
     });
 
+    // AWS Architecture Category icons (Category-Icons_*/Arch-Category_*) ship
+    // with a decorative outer stroke-only rect (`#879196` gray, ~full viewBox)
+    // around the orange tile. The frame is barely visible at the SVG's natural
+    // 48px standalone size but stands out at recognition-surface sizes (the
+    // 16–20px palette icons) — and competes with the row/cell borders. Strip
+    // any outline-only rect covering most of the viewBox.
+    const vb = el.getAttribute('viewBox');
+    const vbm = vb?.match(/[\d.]+\s+[\d.]+\s+([\d.]+)\s+([\d.]+)/);
+    const vbW = vbm ? parseFloat(vbm[1]) : 48;
+    const vbH = vbm ? parseFloat(vbm[2]) : 48;
+    el.querySelectorAll('rect').forEach(r => {
+        const stroke = r.getAttribute('stroke');
+        if (!stroke || stroke === 'none') return;
+        const fill = r.getAttribute('fill');
+        if (fill && fill !== 'none') return;
+        const w = parseFloat(r.getAttribute('width') || '0');
+        const h = parseFloat(r.getAttribute('height') || '0');
+        if (w >= vbW * 0.9 && h >= vbH * 0.9) r.remove();
+    });
+
     return new XMLSerializer().serializeToString(el);
 }
 
@@ -713,6 +750,25 @@ const catalogListeners = new Set<CatalogListener>();
 // Cache sanitized SVGs so we don't re-parse on every rebuild
 const sanitizeCache = new Map<string, { svg: string; bgColor?: string; svgMono?: string }>();
 
+// Vendor icons have sanitized IDs prefixed `_aws<N>_` (counter from sanitize).
+// The cache returns the same SVG string for every render of a given icon, so
+// rendering the same icon in multiple DOM slots concurrently (e.g. CD palette
+// tree + icon-entry list + icon picker) creates duplicate IDs in the document.
+// SVG paint refs (`fill="url(#X)"`, `<use href="#X"/>`) resolve to the FIRST
+// matching ID document-wide — gradients with `gradientUnits="userSpaceOnUse"`
+// then evaluate against the first instance's coordinate system, making other
+// instances' gradient-filled paths invisible (the symptom: "parts missing /
+// looks mono" in CD, fine in SD which renders only one instance at a time).
+//
+// Fix: at every render, append a unique suffix to the prefix so each DOM
+// instance owns disjoint IDs. Pure string replace — no parse cost — and a
+// no-op for Carbon / custom icons whose IDs don't match this prefix.
+let renderIdCounter = 0;
+export function freshenVendorSvgIds(svg: string): string {
+    const r = (++renderIdCounter).toString(36);
+    return svg.replace(/_aws(\d+)_/g, `_aws$1_r${r}_`);
+}
+
 function getSanitized(rec: VendorIconRecord): { svg: string; bgColor?: string; svgMono?: string } {
     let cached = sanitizeCache.get(rec.id);
     if (!cached) {
@@ -847,8 +903,48 @@ export const ICON_CATALOG: IconCatalogEntry[] = [];
 const ICON_BY_ID: Map<string, IconCatalogEntry> = new Map();
 rebuildCatalog();
 
-// Auto-load IndexedDB vendor icons on module init — rebuilds catalog when ready
-idbLoadAll().then(() => rebuildCatalog()).catch(() => {});
+// Auto-load IndexedDB vendor icons on module init — rebuilds catalog when ready.
+// Exported so callers (e.g. the bundled-vendor bootstrap) can wait until the
+// IDB cache is hydrated before deciding whether to populate empty vendors.
+export const catalogReady: Promise<void> = idbLoadAll()
+    .then(() => { rebuildCatalog(); })
+    .catch(() => { /* swallow; rebuildCatalog already ran with empty cache */ });
+
+/**
+ * Unzip a vendor icon archive and return SVG entries ready for
+ * `addAwsIcons` / `addGcpIcons` / `addAzureIcons`. SVGs are normalized so the
+ * `viewBox` is present and explicit `width`/`height` attributes are stripped —
+ * this matches the shape consumers downstream rely on (catalog rendering and
+ * shape baking both assume a viewBox).
+ *
+ * Shared by the Admin upload path and the bundled-vendor bootstrap. Pure
+ * (no IDB writes, no DOM mutation outside the parser scratch space).
+ */
+export function extractSvgEntriesFromZip(buf: ArrayBuffer | Uint8Array): Array<{ label: string; svg: string }> {
+    const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    const unzipped = unzipSync(bytes);
+    const entries: Array<{ label: string; svg: string }> = [];
+    for (const [path, data] of Object.entries(unzipped)) {
+        if (!path.endsWith('.svg') || path.startsWith('__MACOSX')) continue;
+        const name = path.split('/').pop()!.replace(/\.svg$/, '');
+        let svg = new TextDecoder().decode(data);
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(svg, 'image/svg+xml');
+        const svgEl = doc.querySelector('svg');
+        if (svgEl) {
+            if (!svgEl.getAttribute('viewBox')) {
+                const w = svgEl.getAttribute('width') || '80';
+                const hh = svgEl.getAttribute('height') || '80';
+                svgEl.setAttribute('viewBox', `0 0 ${parseFloat(w)} ${parseFloat(hh)}`);
+            }
+            svgEl.removeAttribute('width');
+            svgEl.removeAttribute('height');
+            svg = new XMLSerializer().serializeToString(svgEl);
+        }
+        entries.push({ label: name, svg });
+    }
+    return entries;
+}
 
 export function getIconById(id: string): IconCatalogEntry | undefined {
     const entry = ICON_BY_ID.get(id);

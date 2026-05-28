@@ -1,4 +1,5 @@
 import { dia, highlighters } from '@joint/core';
+import { SHAPE_CELL_SIZE } from './theme';
 
 const HOVER_ID = 'hover-ring';
 const COLOR = '#4589ff';
@@ -68,6 +69,12 @@ export function clearHover(): void {
 function getVisualBounds(cell: dia.Element): { x: number; y: number; width: number; height: number } {
     const { width, height } = cell.size();
     const { x, y } = cell.position();
+    // In 2D the shape collapses to a default-cell icon centered on the cell —
+    // the selection outline follows that visual, not the underlying cell size.
+    if (cell.get('viewMode') === '2d') {
+        const G = SHAPE_CELL_SIZE;
+        return { x: x + (width - G) / 2, y: y + (height - G) / 2, width: G, height: G };
+    }
     const rot = (cell.get('labelRotation') as number) || 0;
     if (rot === 270 || rot === 90) {
         const cx = x + width / 2;
@@ -207,15 +214,28 @@ export function applySelect(cellView: dia.CellView): void {
     const paper = cellView.paper;
     if (!paper) return;
 
+    // For regular components we want the outline inserted INTO the CELLS
+    // layer, just before the cell view, so the shape paints over the
+    // outline (no see-through edges). If the view isn't in CELLS yet —
+    // typical right after graph.addCell() before JointJS mounts it —
+    // defer to the next frame instead of falling back to FRONT.
+    const isZone  = !!cell.get('isFrame');
+    const isArea  = !!cell.get('isArea');
+    const isIcon  = !!cell.get('isIcon');
+    const isLabel = !!cell.get('isGridLabel');
+    const isSpecialOverlay = isZone || isArea || isIcon || isLabel;
+    if (!isSpecialOverlay) {
+        const cellsLayer = paper.getLayerNode(dia.Paper.Layers.CELLS);
+        if (cellView.el.parentNode !== cellsLayer) {
+            requestAnimationFrame(() => applySelect(cellView));
+            return;
+        }
+    }
+
     const { x, y, width, height } = getVisualBounds(cell);
     const ns = 'http://www.w3.org/2000/svg';
     const g = document.createElementNS(ns, 'g');
 
-    const isZone = !!cell.get('isFrame');
-    const isArea = !!cell.get('isArea');
-    const isIcon = !!cell.get('isIcon');
-
-    const isLabel = !!cell.get('isGridLabel');
     const resizable = isZone || isArea || isLabel || isIcon;
     buildSelectRects(g, ns, x, y, width, height, resizable, 2);
 
