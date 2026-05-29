@@ -44,13 +44,11 @@ const MENUS: MenuGroup[] = [
             { label: 'Zoom Out',      action: 'view-zoom-out',    shortcut: '⌘−', canvasOnly: true },
             { label: 'Fit to Screen', action: 'view-fit',         shortcut: '⌘0', canvasOnly: true },
             { label: 'Move to Center', action: 'view-center', canvasOnly: true },
-            { label: 'Toggle Grid',   action: 'view-toggle-grid', canvasOnly: true },
         ],
     },
     {
         label: 'Model',
         items: [
-            { label: 'Adjust Grid Size', action: 'model-adjust-grid', canvasOnly: true },
             { label: 'Add Zone',         action: 'model-add-zone', canvasOnly: true },
             { label: 'Validate',         action: 'model-validate', canvasOnly: true },
         ],

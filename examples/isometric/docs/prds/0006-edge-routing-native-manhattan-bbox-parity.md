@@ -1,12 +1,26 @@
 ---
 id: 0006
 title: Edge Routing — Native Manhattan and 2D/Iso bbox Parity
-status: ready-for-agent
+status: done
 created: 2026-05-28
+closed: 2026-05-29
 labels: [system-designer, routing, links, links-inspector, hit-area, views, refactor]
 ---
 
 # PRD 0006 — Edge Routing: Native Manhattan and 2D/Iso bbox Parity
+
+## Outcome (2026-05-29)
+
+Closed as `done`. The PRD's two core goals — native Manhattan as default router, and view-consistent edge routing between iso and 2D — were achieved, but through a different mechanism than the one originally proposed:
+
+- **Native Manhattan**: `paper.defaultRouter` is `{ name: 'manhattan' }` with no callback or overrides. ✓
+- **2D/iso parity**: instead of patching `apply2DHitArea` so the SVG bbox of every Shape matches its iso bbox, the routing anchor was decoupled from the visible marker. [Connection Ports](../../CONTEXT.md#connection-port) anchor at the Hit Area edge in **both** views; in 2D the visible port marker is translated inward via SVG transform onto the icon edge, and a link-owned [Connection Stub](../../CONTEXT.md#connection-stub) fills the icon-to-port gap. The router sees identical anchor geometry across modes — same outcome, smaller blast radius (`apply2DHitArea` is left intact).
+
+The new mechanism is documented in [ADR-0005](../adr/0005-connection-anchor-and-stub.md). An open follow-up about lead-out / shape clearance for routed edges (lines bending hard against the Hit Area edge with no breathing room) is tracked in that ADR's *Open follow-ups* section — not a new PRD.
+
+The body below is preserved as audit history of the override-stack that this PRD set out to dismantle.
+
+---
 
 ## Problem Statement
 

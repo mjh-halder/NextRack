@@ -54,7 +54,7 @@ The only remaining `layers[0]` use is the editor's label (`setShapeLabel` pins t
 
 ## Hit Area
 
-A rectangle on the floor plane that defines a Component's placement footprint in the System Designer — used for collision detection, snapping, and as the **anchor for the Shape's label**. It is independent of the Layers: the Hit Area always sits at floor level, even when every Layer floats above it.
+A rectangle on the floor plane that defines a Component's placement footprint in the System Designer — used for collision detection, snapping, as the **anchor for the Shape's label**, and as the **canonical anchor for [Connection Ports](#connection-port)** in both isometric and 2D views. It is independent of the Layers: the Hit Area always sits at floor level, even when every Layer floats above it.
 
 Stored as `hitAreaSize: { width, height }` on the Shape Definition. If not explicitly set, derived as follows:
 
@@ -67,6 +67,36 @@ Reason: the Hit Area is the *floor footprint* of the Component. Floor-standing L
 **Rounding.** The returned dimensions always snap **up** to the next multiple of 10px in both width and height. Applies to all four cases above, including explicit `hitAreaSize`. Constant: `HIT_AREA_STEP` in `src/shape-query.ts`.
 
 The Hit Area is what allows Layers to float freely. Before this concept was used for labels, `layers[0]` had to be pinned to the floor so the label rendered correctly; now the Hit Area takes that job and `layers[0]` is freed from the floor.
+
+## Connection Port
+
+A canonical anchor point where a Connection terminates on a Component. Each Component exposes four Ports — `front`, `back`, `left`, `right` — each sitting at the midpoint of one [Hit Area](#hit-area) edge.
+
+Port positions are **identical in isometric and 2D views**. The view-mode switch changes how the Component looks, not where its anchors are. This is what makes the geometry of a Connection consistent across modes: the routed path is computed against the same source/target points regardless of which view is active.
+
+A Port may sit *outside* the visible Icon in 2D — the Icon is a centered 40×40 box inside the Hit Area, and the Hit Area is typically larger. The gap between the Icon edge and the Port is filled by a [Connection Stub](#connection-stub).
+
+The Port has two visual aspects that are distinguished in 2D:
+
+- **Logical position** — the routing anchor; sits at the Hit Area edge in both views. Used by the router and connection-snap.
+- **Marker** — the small circle shown on hover so users know where they can attach. In 2D the marker is translated inward to the Icon edge so users grab connections from the visible Icon. In iso the marker sits at the logical position.
+
+The decoupling means the user's drag-affordance always tracks the visible shape, while routing geometry stays consistent across the view switch.
+
+## Connection Stub
+
+The straight segment of a Connection that runs between the visible Icon edge of a Component and its [Connection Port](#connection-port). It exists only in **2D view** — in isometric view the Icon does not exist as a separate visual layer, so the stub is conceptually zero-length.
+
+The Stub is **part of the rendered link**, not part of the Component:
+
+- Style (color, width, dash) is inherited from the link automatically.
+- The stub only appears on sides where a Connection actually attaches.
+- A Component standing isolated has no stubs in 2D — the look stays minimal (a bare Icon).
+- Multiple Connections on the same side each render their own stub.
+
+Routing is unaffected: the router (Manhattan, etc.) computes its path between Port positions on the Hit Area edges, exactly as it does in isometric view. The connector renderer prepends/appends the stub segment to the routed path when drawing in 2D.
+
+The Stub is the visual seam that makes 2D view spatially consistent with isometric view without forcing the 2D look to expose the full Hit Area as a tile.
 
 ## IconEntry
 

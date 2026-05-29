@@ -370,7 +370,7 @@ export const sortElements = (graph) => {
     return nodes;
 }
 
-export const drawGrid = (paper: dia.Paper, sizeX: number, step: number, color = '#e8e8e8', sizeY = sizeX) => {
+export const drawGrid = (paper: dia.Paper, sizeX: number, step: number, color = '#e8e8e8', sizeY = sizeX, opacity = 1) => {
     const gridData = [];
     for (let i = 0; i <= sizeY; i++) {
         gridData.push(`M 0,${i * step} ${sizeX * step},${i * step}`);
@@ -382,10 +382,18 @@ export const drawGrid = (paper: dia.Paper, sizeX: number, step: number, color = 
         'd': gridData.join(' '),
         'fill': 'none',
         'stroke': color,
+        'stroke-opacity': String(opacity),
         'class': 'nr-grid-lines'
     });
     gridVEl.appendTo(paper.getLayerNode(dia.Paper.Layers.BACK));
     return gridVEl;
+}
+
+// Live opacity update without rebuilding the grid path. Used by the SD
+// display-settings hub while scrubbing the Opacity stepper.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const setGridOpacity = (gridVEl: any, opacity: number): void => {
+    if (gridVEl) gridVEl.attr('stroke-opacity', String(opacity));
 }
 
 /**

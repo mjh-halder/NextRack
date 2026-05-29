@@ -3653,13 +3653,230 @@ html, body {
     inline-size: 100%;
 }
 
-/* View toggle — system designer: fixed top-right */
+/* View toggle — system designer: fixed top-right.
+   Flex layout so the iso/2D segmented control and the Display Settings
+   trigger sit side by side. */
 #view-toggle-container {
     position: fixed;
     top: calc(var(--nr-header-h) + 10px);
     right: 10px;
     z-index: 15;
     transition: right 0.1s ease;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ── SD Display Settings Hub ─────────────────────────────────────────────
+   Trigger button + popover panel attached to #view-toggle-container.
+   ----------------------------------------------------------------------- */
+.nr-sd-hub-trigger {
+    all: unset;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: var(--cds-background, #ffffff);
+    border: 1px solid var(--cds-border-subtle-01, #c6c6c6);
+    color: var(--cds-icon-primary, #161616);
+    box-sizing: border-box;
+}
+.nr-sd-hub-trigger:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+}
+.nr-sd-hub-trigger[aria-expanded="true"] {
+    background: var(--cds-layer-selected-01, #e0e0e0);
+}
+.cds--g100 .nr-sd-hub-trigger {
+    background: var(--cds-background, #161616);
+    border-color: var(--cds-border-subtle-01, #393939);
+    color: var(--cds-icon-primary, #f4f4f4);
+}
+.cds--g100 .nr-sd-hub-trigger:hover {
+    background: var(--cds-layer-hover-01, #353535);
+}
+.cds--g100 .nr-sd-hub-trigger[aria-expanded="true"] {
+    background: var(--cds-layer-selected-01, #525252);
+}
+
+.nr-sd-hub-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 240px;
+    padding: 12px;
+    background: var(--cds-background, #ffffff);
+    border: 1px solid var(--cds-border-subtle-01, #c6c6c6);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+    z-index: 16;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.8125rem;
+    color: var(--cds-text-primary, #161616);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+/* display: flex above overrides the user-agent [hidden] { display: none }
+   rule — force it back so the panel actually hides. */
+.nr-sd-hub-panel[hidden] {
+    display: none;
+}
+.cds--g100 .nr-sd-hub-panel {
+    background: var(--cds-background, #262626);
+    border-color: var(--cds-border-subtle-01, #393939);
+    color: var(--cds-text-primary, #f4f4f4);
+}
+
+.nr-sd-hub-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 4px;
+}
+.nr-sd-hub-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.32px;
+    color: var(--cds-text-secondary, #525252);
+}
+.cds--g100 .nr-sd-hub-title {
+    color: var(--cds-text-secondary, #c6c6c6);
+}
+
+/* Carbon modal pattern: close in the top-right corner, separate from header
+   content. Absolute-positioned within the panel. */
+.nr-sd-hub-close {
+    all: unset;
+    cursor: pointer;
+    position: absolute;
+    top: 0;
+    right: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    color: var(--cds-icon-secondary, #525252);
+}
+.nr-sd-hub-close:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+}
+.cds--g100 .nr-sd-hub-close {
+    color: var(--cds-icon-secondary, #c6c6c6);
+}
+.cds--g100 .nr-sd-hub-close:hover {
+    background: var(--cds-layer-hover-01, #353535);
+}
+
+.nr-sd-hub-divider {
+    height: 1px;
+    background: var(--cds-border-subtle-01, #e0e0e0);
+    margin: 4px 0;
+}
+.cds--g100 .nr-sd-hub-divider {
+    background: var(--cds-border-subtle-01, #393939);
+}
+
+.nr-sd-hub-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 28px;
+}
+.nr-sd-hub-label {
+    flex: 1;
+    color: var(--cds-text-secondary, #525252);
+    min-width: 0;
+}
+.cds--g100 .nr-sd-hub-label {
+    color: var(--cds-text-secondary, #c6c6c6);
+}
+
+/* Carbon NumberInput pattern: no outer border, only a bottom rule under
+   each cell. Matches the inspector's .nr-sd-number-display / .nr-ad__number-btn
+   styling. */
+.nr-sd-hub-stepper {
+    display: flex;
+    align-items: stretch;
+    height: 28px;
+    width: 110px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.nr-sd-hub-display {
+    flex: 1;
+    min-width: 0;
+    padding: 0 6px;
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.8125rem;
+    color: var(--cds-text-primary, #161616);
+    background: var(--cds-field-01, #f4f4f4);
+    border: none;
+    border-bottom: 1px solid var(--cds-border-strong-01, #8d8d8d);
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.nr-sd-hub-display {
+    cursor: ew-resize;
+}
+.cds--g100 .nr-sd-hub-display {
+    color: var(--cds-text-primary, #f4f4f4);
+    background: var(--cds-field-01, #393939);
+    border-bottom-color: var(--cds-border-strong-01, #6f6f6f);
+}
+
+.nr-sd-hub-stepbtn {
+    all: unset;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    box-sizing: border-box;
+    color: var(--cds-icon-primary, #161616);
+    background: var(--cds-field-01, #f4f4f4);
+    border-left: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    border-bottom: 1px solid var(--cds-border-strong-01, #8d8d8d);
+}
+.nr-sd-hub-stepbtn:hover:not(:disabled) {
+    background: var(--cds-field-hover-01, #e8e8e8);
+}
+.nr-sd-hub-stepbtn:active:not(:disabled) {
+    background: var(--cds-field-hover-01, #d1d1d1);
+}
+.nr-sd-hub-stepbtn:disabled {
+    color: var(--cds-icon-disabled, #c6c6c6);
+    cursor: not-allowed;
+}
+.cds--g100 .nr-sd-hub-stepbtn {
+    color: var(--cds-icon-primary, #f4f4f4);
+    background: var(--cds-field-01, #393939);
+    border-left-color: var(--cds-border-subtle-01, #525252);
+    border-bottom-color: var(--cds-border-strong-01, #6f6f6f);
+}
+.cds--g100 .nr-sd-hub-stepbtn:hover:not(:disabled) {
+    background: var(--cds-field-hover-01, #474747);
+}
+
+/* The grid show/hide control uses the existing .nr-seg-control / .nr-seg-btn
+   styles — same look as the iso/2D toggle. Forced to 110px so it lines up with
+   the steppers underneath. */
+.nr-sd-hub-item .nr-seg-control {
+    flex-shrink: 0;
+    width: 110px;
+    height: 28px;
+    box-sizing: border-box;
+}
+.nr-sd-hub-item .nr-seg-btn {
+    height: 100%;
 }
 
 /* Shift toggle and minimap left when the inspector panel is open (340px wide + 10px gap) */

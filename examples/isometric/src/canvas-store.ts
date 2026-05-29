@@ -16,6 +16,16 @@ interface CanvasData {
     cells: Record<string, unknown>[];
 }
 
+// Display-settings persisted per canvas. All fields optional so old saves
+// continue to load — missing values are filled with defaults by the caller.
+export interface DisplayMeta {
+    gridCountX?: number;
+    gridCountY?: number;
+    gridVisible?: boolean;
+    gridOpacity?: number;       // 0..1
+    gridCellPitch?: number;     // 0.5 | 1 | 2 | 4 (multiplier on GRID_SIZE)
+}
+
 const INDEX_KEY = 'nextrack-canvas-index-v1';
 const DATA_PREFIX = 'nextrack-canvas-data-';
 const ACTIVE_KEY = 'nextrack-canvas-active-v1';
@@ -68,8 +78,11 @@ export function createCanvas(name: string, canvasType: CanvasRecord['canvasType'
     return meta;
 }
 
-export function saveCanvasGraph(id: string, graph: dia.Graph): void {
-    const data = { cells: graph.getCells().map(c => c.toJSON()) };
+export function saveCanvasGraph(id: string, graph: dia.Graph, display?: DisplayMeta): void {
+    const data: { cells: Record<string, unknown>[]; display?: DisplayMeta } = {
+        cells: graph.getCells().map(c => c.toJSON()),
+    };
+    if (display) data.display = display;
     try {
         localStorage.setItem(dataKey(id), JSON.stringify(data));
         const index = readIndex();
@@ -81,14 +94,14 @@ export function saveCanvasGraph(id: string, graph: dia.Graph): void {
     } catch { /* non-critical */ }
 }
 
-export function loadCanvasGraph(id: string, graph: dia.Graph): boolean {
+export function loadCanvasGraph(id: string, graph: dia.Graph): DisplayMeta | null {
     try {
         const raw = localStorage.getItem(dataKey(id));
-        if (!raw) return false;
+        if (!raw) return null;
         const json = JSON.parse(raw);
         graph.fromJSON(json);
-        return true;
-    } catch { return false; }
+        return (json.display as DisplayMeta | undefined) ?? {};
+    } catch { return null; }
 }
 
 export function getActiveCanvasId(): string {

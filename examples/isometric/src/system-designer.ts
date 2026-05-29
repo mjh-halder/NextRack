@@ -2,7 +2,8 @@ import { g, dia, V, highlighters } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View, ToolKeys } from './shapes/isometric-shape';
 import { Link, Frame, Area, cellNamespace } from './shapes';
-import { sortElements, drawGrid, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle, applyShapeFillOpacity, icon2DHref } from './utils';
+import { stubConnector } from './connectors/stub-connector'; // ADR-0005
+import { sortElements, drawGrid, setGridOpacity, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle, applyShapeFillOpacity, icon2DHref } from './utils';
 import { GRID_SIZE, GRID_COUNT, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
 import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath, NodeMeta } from './inspector';
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
@@ -14,6 +15,7 @@ import { saveGraph, loadGraph, saveDefaultDesign, loadDefaultDesign } from './pe
 import {
     ensureExampleCanvas, listCanvases, createCanvas, deleteCanvas,
     getActiveCanvasId, setActiveCanvasId, saveCanvasGraph, loadCanvasGraph, CanvasRecord,
+    DisplayMeta,
 } from './canvas-store';
 import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
 import { initMinimap, updateMinimapView, scheduleMinimapUpdate, setMinimapNavigateCallback } from './minimap';
@@ -44,6 +46,10 @@ import Edit16 from '@carbon/icons/es/edit/16.js';
 import Unplug16 from '@carbon/icons/es/unplug/16.js';
 import View16 from '@carbon/icons/es/view/16.js';
 import ViewOff16 from '@carbon/icons/es/view--off/16.js';
+import ColorPalette16 from '@carbon/icons/es/color-palette/16.js';
+import Subtract16 from '@carbon/icons/es/subtract/16.js';
+import Add16 from '@carbon/icons/es/add/16.js';
+import Close16 from '@carbon/icons/es/close/16.js';
 
 // Inline Carbon SVG icons (16 × 16) used in the menu components
 const CDS_ICON_CLOSE = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" width="16" height="16" aria-hidden="true"><path d="M12 4.7l-.7-.7L8 7.3 4.7 4l-.7.7L7.3 8 4 11.3l.7.7L8 8.7l3.3 3.3.7-.7L8.7 8z"/></svg>`;
@@ -328,13 +334,15 @@ let currentCell: IsometricShape | Link = null;
 let currentZoom = 1;
 let currentGridCountX = GRID_COUNT;
 let currentGridCountY = GRID_COUNT;
-// Pixel size of a single grid cell. Drives drawGrid spacing and the iso paper
-// dimensions; existing shape pixel sizes are NOT rescaled (so their footprint
-// stays the same on screen).
-let currentCellSize = GRID_SIZE;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let gridVEl: any = null;
 let gridVisible = true;
+// Display-only settings persisted per canvas. gridCellPitch is a multiplier on
+// GRID_SIZE for the *visible* grid-line spacing — it does NOT change the snap
+// raster, paper dimensions, or any shape geometry. gridOpacity is the stroke
+// opacity of the grid path (0..1).
+let gridOpacity = 1;
+let gridCellPitch: 0.5 | 1 | 2 | 4 = 1;
 let treeHighlightedCell: IsometricShape | null = null;
 let currentFrame: Frame | null = null;
 
@@ -414,6 +422,7 @@ const paper = new dia.Paper({
     async: true,
     autoFreeze: true,
     defaultRouter: { name: 'manhattan' },
+    defaultConnector: stubConnector,
     defaultLink: () => new Link(),
     linkPinning: false,
     overflow: true,
@@ -461,7 +470,16 @@ const paper = new dia.Paper({
     }
 });
 
-gridVEl = drawGrid(paper, GRID_COUNT, GRID_SIZE);
+function rebuildGrid(): void {
+    if (gridVEl) gridVEl.remove();
+    const step = GRID_SIZE * gridCellPitch;
+    const linesX = Math.round(currentGridCountX / gridCellPitch);
+    const linesY = Math.round(currentGridCountY / gridCellPitch);
+    gridVEl = drawGrid(paper, linesX, step, '#e8e8e8', linesY, gridOpacity);
+    if (!gridVisible) gridVEl.node.style.display = 'none';
+}
+
+rebuildGrid();
 
 // Allow the inspector to look up cell views (e.g. for fill-only opacity).
 panel.paper = paper;
@@ -474,9 +492,41 @@ paper.setDimensions(
     GRID_SIZE * GRID_COUNT * SCALE + CANVAS_PAD
 );
 
+// Snapshot of the current display-only settings for persistence.
+function currentDisplayMeta(): DisplayMeta {
+    return {
+        gridCountX: currentGridCountX,
+        gridCountY: currentGridCountY,
+        gridVisible,
+        gridOpacity,
+        gridCellPitch,
+    };
+}
+
+// Apply a DisplayMeta payload loaded from storage to the live state. Missing
+// fields fall back to current values, so partial / legacy saves still work.
+function applyDisplayMeta(meta: DisplayMeta | null | undefined): void {
+    if (!meta) return;
+    if (typeof meta.gridVisible === 'boolean') gridVisible = meta.gridVisible;
+    if (typeof meta.gridOpacity === 'number' && meta.gridOpacity >= 0 && meta.gridOpacity <= 1) {
+        gridOpacity = meta.gridOpacity;
+    }
+    if (meta.gridCellPitch === 0.5 || meta.gridCellPitch === 1 || meta.gridCellPitch === 2 || meta.gridCellPitch === 4) {
+        gridCellPitch = meta.gridCellPitch;
+    }
+    const newX = typeof meta.gridCountX === 'number' ? meta.gridCountX : currentGridCountX;
+    const newY = typeof meta.gridCountY === 'number' ? meta.gridCountY : currentGridCountY;
+    if (newX !== currentGridCountX || newY !== currentGridCountY) {
+        applyGridResize(newX, newY);
+    } else {
+        rebuildGrid();
+    }
+    refreshDisplayHub();
+}
+
 ensureExampleCanvas();
 let activeCanvasId = getActiveCanvasId();
-loadCanvasGraph(activeCanvasId, graph);
+applyDisplayMeta(loadCanvasGraph(activeCanvasId, graph));
 requestAnimationFrame(() => centerGridInViewport(currentGridCountX, currentGridCountY));
 
 graph.on('reset', () => {
@@ -914,6 +964,350 @@ new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     requestAnimationFrame(() => fitToContent());
 });
 
+// ──────────────────────────────────────────────────────────────────────────
+// Display Settings Hub — popover with grid visibility / opacity / cell pitch
+// / width / height. Lives next to the iso/2D toggle in #view-toggle-container.
+// All values persist per canvas via DisplayMeta (see canvas-store.ts).
+// ──────────────────────────────────────────────────────────────────────────
+let refreshDisplayHub: () => void = () => {};
+
+function initDisplaySettingsHub(): void {
+    const clamp = (v: number, mn: number, mx: number) => Math.max(mn, Math.min(mx, v));
+
+    // Soft-min for grid count steppers — recomputed each time the hub opens.
+    let softMin = { minX: 5, minY: 5 };
+
+    const triggerBtn = document.createElement('button');
+    triggerBtn.type = 'button';
+    triggerBtn.className = 'nr-sd-hub-trigger';
+    triggerBtn.title = 'Display Settings';
+    triggerBtn.setAttribute('aria-label', 'Display settings');
+    triggerBtn.setAttribute('aria-haspopup', 'dialog');
+    triggerBtn.setAttribute('aria-expanded', 'false');
+    triggerBtn.innerHTML = carbonIconToString(ColorPalette16 as CarbonIcon);
+    viewToggleContainerEl.appendChild(triggerBtn);
+
+    const panelEl = document.createElement('div');
+    panelEl.className = 'nr-sd-hub-panel';
+    panelEl.setAttribute('role', 'dialog');
+    panelEl.setAttribute('aria-label', 'Display settings');
+    panelEl.hidden = true;
+
+    const headerEl = document.createElement('div');
+    headerEl.className = 'nr-sd-hub-header';
+    const titleEl = document.createElement('div');
+    titleEl.className = 'nr-sd-hub-title';
+    titleEl.textContent = 'Display Settings';
+    headerEl.appendChild(titleEl);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'nr-sd-hub-close';
+    closeBtn.title = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close display settings');
+    closeBtn.innerHTML = carbonIconToString(Close16 as CarbonIcon);
+    headerEl.appendChild(closeBtn);
+
+    panelEl.appendChild(headerEl);
+
+    // ── Item builders ────────────────────────────────────────────────────
+
+    interface StepperOpts {
+        label: string;
+        getValue: () => number;
+        setValue: (v: number) => void;
+        commit: () => void;
+        format: (v: number) => string;
+        minFn: () => number;
+        maxFn: () => number;
+        stepFn: (v: number, dir: -1 | 1) => number;
+        scrubPxPerUnit: number;
+        liveCommit: boolean; // commit during scrub, not just on release
+    }
+
+    function buildStepper(opts: StepperOpts): { row: HTMLElement; refresh: () => void } {
+        const row = document.createElement('div');
+        row.className = 'nr-sd-hub-item';
+
+        const lbl = document.createElement('span');
+        lbl.className = 'nr-sd-hub-label';
+        lbl.textContent = opts.label;
+        row.appendChild(lbl);
+
+        const stepper = document.createElement('div');
+        stepper.className = 'nr-sd-hub-stepper';
+
+        const decBtn = document.createElement('button');
+        decBtn.type = 'button';
+        decBtn.className = 'nr-sd-hub-stepbtn';
+        decBtn.title = 'Decrease';
+        decBtn.innerHTML = carbonIconToString(Subtract16 as CarbonIcon);
+
+        const displayEl = document.createElement('div');
+        displayEl.className = 'nr-sd-hub-display';
+        displayEl.title = 'Drag horizontally to scrub';
+
+        const incBtn = document.createElement('button');
+        incBtn.type = 'button';
+        incBtn.className = 'nr-sd-hub-stepbtn';
+        incBtn.title = 'Increase';
+        incBtn.innerHTML = carbonIconToString(Add16 as CarbonIcon);
+
+        const refresh = () => {
+            displayEl.textContent = opts.format(opts.getValue());
+            decBtn.disabled = opts.getValue() <= opts.minFn();
+            incBtn.disabled = opts.getValue() >= opts.maxFn();
+        };
+        refresh();
+
+        const tap = (dir: -1 | 1) => {
+            const cur = opts.getValue();
+            const next = clamp(opts.stepFn(cur, dir), opts.minFn(), opts.maxFn());
+            if (next === cur) return;
+            opts.setValue(next);
+            opts.commit();
+            refresh();
+        };
+        decBtn.addEventListener('click', () => tap(-1));
+        incBtn.addEventListener('click', () => tap(+1));
+
+        // Drag-to-scrub on the display.
+        let scrubStartX = 0;
+        let scrubStartVal = 0;
+        let scrubbing = false;
+        let scrubDirty = false;
+        displayEl.addEventListener('mousedown', (e: MouseEvent) => {
+            e.preventDefault();
+            scrubbing = true;
+            scrubDirty = false;
+            scrubStartX = e.clientX;
+            scrubStartVal = opts.getValue();
+
+            // Cover the entire viewport with a transparent div that owns the
+            // ew-resize cursor. The overlay captures every mouse event during
+            // the drag — the cursor cannot be overridden by underlying
+            // elements (paper.el sets its own cursor:grab) because none of
+            // them are under the pointer during the drag. mousemove still
+            // reaches the document-level listener via event bubbling. The
+            // overlay is removed on mouseup *and* on window-blur, so a
+            // mouseup-outside-the-window can't leave it stranded.
+            const overlay = document.createElement('div');
+            overlay.style.cssText =
+                'position:fixed;inset:0;z-index:99999;cursor:ew-resize;background:transparent;';
+            document.body.appendChild(overlay);
+
+            const onMove = (ev: MouseEvent) => {
+                if (!scrubbing) return;
+                const dx = ev.clientX - scrubStartX;
+                const delta = Math.round(dx / opts.scrubPxPerUnit);
+                const next = clamp(scrubStartVal + delta, opts.minFn(), opts.maxFn());
+                if (next !== opts.getValue()) {
+                    opts.setValue(next);
+                    scrubDirty = true;
+                    if (opts.liveCommit) opts.commit();
+                    refresh();
+                }
+            };
+            const cleanup = () => {
+                scrubbing = false;
+                overlay.remove();
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                window.removeEventListener('blur', onBlur);
+                if (scrubDirty && !opts.liveCommit) opts.commit();
+            };
+            const onUp = () => cleanup();
+            const onBlur = () => cleanup();
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('mouseup', onUp);
+            window.addEventListener('blur', onBlur);
+        });
+
+        stepper.appendChild(displayEl);
+        stepper.appendChild(decBtn);
+        stepper.appendChild(incBtn);
+        row.appendChild(stepper);
+        return { row, refresh };
+    }
+
+    function buildSegToggle<T extends string>(opts: {
+        label: string;
+        options: Array<{ value: T; label: string }>;
+        getValue: () => T;
+        setValue: (v: T) => void;
+        commit: () => void;
+    }): { row: HTMLElement; refresh: () => void } {
+        const row = document.createElement('div');
+        row.className = 'nr-sd-hub-item';
+
+        const lbl = document.createElement('span');
+        lbl.className = 'nr-sd-hub-label';
+        lbl.textContent = opts.label;
+        row.appendChild(lbl);
+
+        const seg = document.createElement('div');
+        seg.className = 'nr-seg-control';
+        seg.setAttribute('role', 'radiogroup');
+        seg.setAttribute('aria-label', opts.label);
+
+        const btns = new Map<T, HTMLButtonElement>();
+        for (const o of opts.options) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'nr-seg-btn';
+            btn.setAttribute('role', 'radio');
+            btn.textContent = o.label;
+            btn.addEventListener('click', () => {
+                opts.setValue(o.value);
+                opts.commit();
+                refresh();
+            });
+            btns.set(o.value, btn);
+            seg.appendChild(btn);
+        }
+
+        const refresh = () => {
+            const cur = opts.getValue();
+            btns.forEach((b, v) => {
+                const active = v === cur;
+                b.setAttribute('aria-checked', String(active));
+                b.classList.toggle('nr-seg-btn--selected', active);
+            });
+        };
+        refresh();
+        row.appendChild(seg);
+        return { row, refresh };
+    }
+
+    // ── Items ────────────────────────────────────────────────────────────
+
+    const gridVisItem = buildSegToggle<'show' | 'hide'>({
+        label: 'Grid',
+        options: [
+            { value: 'show', label: 'Show' },
+            { value: 'hide', label: 'Hide' },
+        ],
+        getValue: () => gridVisible ? 'show' : 'hide',
+        setValue: (v) => { gridVisible = v === 'show'; },
+        commit: () => { if (gridVEl) gridVEl.node.style.display = gridVisible ? '' : 'none'; },
+    });
+
+    const opacityItem = buildStepper({
+        label: 'Opacity',
+        getValue: () => Math.round(gridOpacity * 100),
+        setValue: (v) => { gridOpacity = clamp(v, 0, 100) / 100; },
+        commit: () => { setGridOpacity(gridVEl, gridOpacity); },
+        format: (v) => `${v}%`,
+        minFn: () => 0,
+        maxFn: () => 100,
+        stepFn: (v, dir) => v + dir * 10,
+        scrubPxPerUnit: 2,
+        liveCommit: true,
+    });
+
+    const pitchSteps: (0.5 | 1 | 2 | 4)[] = [0.5, 1, 2, 4];
+    const pitchItem = buildStepper({
+        label: 'Cell Pitch',
+        getValue: () => pitchSteps.indexOf(gridCellPitch),
+        setValue: (idx) => { gridCellPitch = pitchSteps[clamp(idx, 0, pitchSteps.length - 1)]; },
+        commit: () => { rebuildGrid(); },
+        format: (idx) => {
+            const p = pitchSteps[idx];
+            return p === 0.5 ? '½×' : `${p}×`;
+        },
+        minFn: () => 0,
+        maxFn: () => pitchSteps.length - 1,
+        stepFn: (idx, dir) => idx + dir,
+        scrubPxPerUnit: 30,
+        liveCommit: true,
+    });
+
+    const widthItem = buildStepper({
+        label: 'Width',
+        getValue: () => currentGridCountX,
+        setValue: (v) => { currentGridCountX = v; },
+        commit: () => { applyGridResize(currentGridCountX, currentGridCountY); },
+        format: (v) => `${v}`,
+        minFn: () => softMin.minX,
+        maxFn: () => 500,
+        stepFn: (v, dir) => v + dir,
+        scrubPxPerUnit: 4,
+        liveCommit: false,
+    });
+
+    const heightItem = buildStepper({
+        label: 'Height',
+        getValue: () => currentGridCountY,
+        setValue: (v) => { currentGridCountY = v; },
+        commit: () => { applyGridResize(currentGridCountX, currentGridCountY); },
+        format: (v) => `${v}`,
+        minFn: () => softMin.minY,
+        maxFn: () => 500,
+        stepFn: (v, dir) => v + dir,
+        scrubPxPerUnit: 4,
+        liveCommit: false,
+    });
+
+    panelEl.appendChild(gridVisItem.row);
+    panelEl.appendChild(opacityItem.row);
+    panelEl.appendChild(pitchItem.row);
+    const divider = document.createElement('div');
+    divider.className = 'nr-sd-hub-divider';
+    panelEl.appendChild(divider);
+    panelEl.appendChild(widthItem.row);
+    panelEl.appendChild(heightItem.row);
+
+    viewToggleContainerEl.appendChild(panelEl);
+
+    const refreshAll = () => {
+        gridVisItem.refresh();
+        opacityItem.refresh();
+        pitchItem.refresh();
+        widthItem.refresh();
+        heightItem.refresh();
+    };
+    refreshDisplayHub = refreshAll;
+
+    // ── Open/close ───────────────────────────────────────────────────────
+
+    const setOpen = (open: boolean) => {
+        panelEl.hidden = !open;
+        triggerBtn.setAttribute('aria-expanded', String(open));
+        if (open) {
+            softMin = computeGridSoftMin();
+            refreshAll();
+        }
+    };
+
+    triggerBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setOpen(panelEl.hidden);
+    });
+
+    closeBtn.addEventListener('click', () => {
+        setOpen(false);
+        triggerBtn.focus();
+    });
+
+    document.addEventListener('mousedown', (e: MouseEvent) => {
+        if (panelEl.hidden) return;
+        const target = e.target as Node;
+        if (panelEl.contains(target) || triggerBtn.contains(target)) return;
+        setOpen(false);
+    });
+
+    document.addEventListener('keydown', (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && !panelEl.hidden) {
+            setOpen(false);
+            triggerBtn.focus();
+        }
+    });
+}
+
+initDisplaySettingsHub();
+// Sync hub displays with any DisplayMeta applied during initial canvas load.
+refreshDisplayHub();
+
 switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
 
 // ---- Minimap ----
@@ -1221,8 +1615,7 @@ function applyNewDesign(name: string, gridCount: number) {
     // Rebuild the obstacle grid at the new size (graph is empty so this just resets it)
     obstacles.update();
 
-    if (gridVEl) gridVEl.remove();
-    gridVEl = drawGrid(paper, gridCount, GRID_SIZE);
+    rebuildGrid();
 
     paper.setDimensions(
         SIDEBAR_INSET + 2 * GRID_SIZE * gridCount * SCALE * ISOMETRIC_SCALE + CANVAS_PAD,
@@ -1658,20 +2051,18 @@ function showToast(message: string) {
 
 // ---- Adjust Grid Size ----
 
-function applyGridResize(newX: number, newY: number, newCellSize?: number) {
+function applyGridResize(newX: number, newY: number) {
     currentGridCountX = newX;
     currentGridCountY = newY;
-    if (newCellSize && newCellSize > 0) currentCellSize = newCellSize;
     obstacles.sizeX = newX;
     obstacles.sizeY = newY;
     obstacles.update();
 
-    if (gridVEl) gridVEl.remove();
-    gridVEl = drawGrid(paper, newX, currentCellSize, '#e8e8e8', newY);
+    rebuildGrid();
 
     paper.setDimensions(
-        SIDEBAR_INSET + 2 * currentCellSize * newX * SCALE * ISOMETRIC_SCALE + CANVAS_PAD,
-        currentCellSize * newY * SCALE + CANVAS_PAD
+        SIDEBAR_INSET + 2 * GRID_SIZE * newX * SCALE * ISOMETRIC_SCALE + CANVAS_PAD,
+        GRID_SIZE * newY * SCALE + CANVAS_PAD
     );
 
     switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
@@ -1679,129 +2070,22 @@ function applyGridResize(newX: number, newY: number, newCellSize?: number) {
     updateMinimapView(currentView, currentGridCountX);
 }
 
-function showAdjustGridModal() {
-    const modalEl = document.createElement('div');
-    modalEl.className = 'cds--modal is-visible';
-    modalEl.setAttribute('role', 'dialog');
-    modalEl.setAttribute('aria-modal', 'true');
-    modalEl.setAttribute('aria-labelledby', 'nr-grid-modal-heading');
-
-    const containerEl = document.createElement('div');
-    containerEl.className = 'cds--modal-container cds--modal-container--sm';
-
-    // Header
-    const headerEl = document.createElement('div');
-    headerEl.className = 'cds--modal-header';
-
-    const headingEl = document.createElement('p');
-    headingEl.className = 'cds--modal-header__heading';
-    headingEl.id = 'nr-grid-modal-heading';
-    headingEl.textContent = 'Adjust Grid Size';
-
-    const closeBtnWrapper = document.createElement('div');
-    closeBtnWrapper.className = 'cds--modal-close-button';
-    const closeBtn = document.createElement('button');
-    closeBtn.className = 'cds--modal-close';
-    closeBtn.type = 'button';
-    closeBtn.title = 'Close';
-    closeBtn.setAttribute('aria-label', 'Close');
-    closeBtn.innerHTML = CDS_ICON_CLOSE;
-    closeBtn.addEventListener('click', () => modalEl.remove());
-    closeBtnWrapper.appendChild(closeBtn);
-
-    headerEl.appendChild(headingEl);
-    headerEl.appendChild(closeBtnWrapper);
-
-    // Body — two number inputs side by side
-    const bodyEl = document.createElement('div');
-    bodyEl.className = 'cds--modal-content';
-    bodyEl.style.display = 'flex';
-    bodyEl.style.gap = '1rem';
-
-    function makeNumberField(id: string, label: string, value: number): { wrapper: HTMLElement; input: HTMLInputElement } {
-        const formItem = document.createElement('div');
-        formItem.className = 'cds--form-item';
-        formItem.style.flex = '1';
-
-        const inputWrapper = document.createElement('div');
-        inputWrapper.className = 'cds--text-input-wrapper';
-
-        const lbl = document.createElement('label');
-        lbl.className = 'cds--label';
-        lbl.setAttribute('for', id);
-        lbl.textContent = label;
-
-        const outerWrapper = document.createElement('div');
-        outerWrapper.className = 'cds--text-input__field-outer-wrapper';
-
-        const fieldWrapper = document.createElement('div');
-        fieldWrapper.className = 'cds--text-input__field-wrapper';
-
-        const input = document.createElement('input');
-        input.id = id;
-        input.type = 'number';
-        input.className = 'cds--text-input';
-        input.min = '5';
-        input.max = '500';
-        input.value = String(value);
-
-        fieldWrapper.appendChild(input);
-        outerWrapper.appendChild(fieldWrapper);
-        inputWrapper.appendChild(lbl);
-        inputWrapper.appendChild(outerWrapper);
-        formItem.appendChild(inputWrapper);
-
-        return { wrapper: formItem, input };
+// Lower bound for grid-count steppers: the smallest grid that still contains
+// every existing shape. Prevents the user from scrubbing shapes "off the grid"
+// — they would otherwise remain in the model at coordinates beyond the new
+// bounds, visually hanging in empty space.
+function computeGridSoftMin(): { minX: number; minY: number } {
+    let maxRight = 0;
+    let maxBottom = 0;
+    for (const el of graph.getElements()) {
+        const b = el.getBBox();
+        if (b.x + b.width > maxRight) maxRight = b.x + b.width;
+        if (b.y + b.height > maxBottom) maxBottom = b.y + b.height;
     }
-
-    const { wrapper: xWrapper, input: xInput } = makeNumberField('nr-grid-x', 'Width (columns)', currentGridCountX);
-    const { wrapper: yWrapper, input: yInput } = makeNumberField('nr-grid-y', 'Height (rows)', currentGridCountY);
-    const { wrapper: cellWrapper, input: cellInput } = makeNumberField('nr-grid-cell', 'Cell Size (px)', currentCellSize);
-    cellInput.min = '5';
-    cellInput.max = '200';
-    bodyEl.appendChild(xWrapper);
-    bodyEl.appendChild(yWrapper);
-    bodyEl.appendChild(cellWrapper);
-
-    // Footer
-    const footerEl = document.createElement('div');
-    footerEl.className = 'cds--modal-footer';
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'cds--btn cds--btn--secondary';
-    cancelBtn.type = 'button';
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.addEventListener('click', () => modalEl.remove());
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'cds--btn cds--btn--primary';
-    saveBtn.type = 'button';
-    saveBtn.textContent = 'Save';
-    saveBtn.addEventListener('click', () => {
-        const newX = Math.max(5, Math.min(500, parseInt(xInput.value, 10) || currentGridCountX));
-        const newY = Math.max(5, Math.min(500, parseInt(yInput.value, 10) || currentGridCountY));
-        const newCellSize = Math.max(5, Math.min(200, parseInt(cellInput.value, 10) || currentCellSize));
-        modalEl.remove();
-        applyGridResize(newX, newY, newCellSize);
-    });
-
-    footerEl.appendChild(cancelBtn);
-    footerEl.appendChild(saveBtn);
-
-    containerEl.appendChild(headerEl);
-    containerEl.appendChild(bodyEl);
-    containerEl.appendChild(footerEl);
-    modalEl.appendChild(containerEl);
-    document.body.appendChild(modalEl);
-
-    modalEl.addEventListener('mousedown', (e: MouseEvent) => {
-        if (e.target === modalEl) modalEl.remove();
-    });
-
-    xInput.focus();
-    xInput.select();
+    const minX = Math.max(5, Math.ceil(maxRight / GRID_SIZE));
+    const minY = Math.max(5, Math.ceil(maxBottom / GRID_SIZE));
+    return { minX, minY };
 }
-
 
 function setTreeHighlight(cell: IsometricShape | null) {
     clearSelect();
@@ -2113,7 +2397,7 @@ palette.setCanvasCallbacks(
 palette.refreshCanvasDropdown(activeCanvasId);
 
 function switchCanvas(id: string): void {
-    saveCanvasGraph(activeCanvasId, graph);
+    saveCanvasGraph(activeCanvasId, graph, currentDisplayMeta());
     paper.removeTools();
     currentCell = null;
     currentFrame = null;
@@ -2142,7 +2426,7 @@ function switchCanvas(id: string): void {
         minimapEl.style.display = '';
         showResourceBar();
         hideLayoutBar();
-        loadCanvasGraph(id, graph);
+        applyDisplayMeta(loadCanvasGraph(id, graph));
         applyHideConnections();
         switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
         updateMinimapView(currentView, currentGridCountX);
@@ -3458,14 +3742,15 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             showNewDesignModal();
             break;
         case 'file-save':
-            saveGraph(graph, currentGridCountX, currentGridCountY);
+            saveGraph(graph, currentDisplayMeta());
             break;
         case 'file-open':
-            loadGraph(graph, () => {
+            loadGraph(graph, (display) => {
                 paper.removeTools();
                 currentCell = null;
                 panel.hide();
                 clearHistory();
+                applyDisplayMeta(display);
                 switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
             });
             break;
@@ -3491,13 +3776,6 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
             break;
         case 'view-center':
             centerGridInViewport(currentGridCountX, currentGridCountY);
-            break;
-        case 'view-toggle-grid':
-            gridVisible = !gridVisible;
-            if (gridVEl) gridVEl.node.style.display = gridVisible ? '' : 'none';
-            break;
-        case 'model-adjust-grid':
-            showAdjustGridModal();
             break;
         case 'file-export-svg':
             exportCanvasSvg();

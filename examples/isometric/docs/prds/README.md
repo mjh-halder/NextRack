@@ -35,5 +35,6 @@ labels: []
 | 0003 | User-Created Folders in the Component Designer         | `done`            |
 | 0004 | Multilayer Component — Main-Icon Invariant & 2D Parity | `done`            |
 | 0005 | Central Icon-Render Resolver — Family/Surface/Theme    | `ready-for-agent` |
-| 0006 | Edge Routing — Native Manhattan and 2D/Iso bbox Parity | `ready-for-agent` |
+| 0006 | Edge Routing — Native Manhattan and 2D/Iso bbox Parity | `done`            |
 | 0007 | System Designer — Area Independence, Tree-Drop Extraction, Group-Move Link Waypoints | `ready-for-agent` |
+| 0008 | System Designer — Display Settings Hub (Grid Visibility, Opacity, Pitch, Size) | `done`            |

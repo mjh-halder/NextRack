@@ -1,12 +1,22 @@
 import { dia } from '@joint/core';
 import { GRID_SIZE } from './theme';
+import type { DisplayMeta } from './canvas-store';
 
 const FILE_NAME = 'nextrack-diagram.json';
 const DEFAULT_DESIGN_KEY = 'nextrack-default-design-v1';
 
-export function saveGraph(graph: dia.Graph, gridCountX?: number, gridCountY?: number): void {
+export function saveGraph(graph: dia.Graph, display?: DisplayMeta): void {
     const data = {
-        meta: { gridSize: GRID_SIZE, gridCountX, gridCountY, version: 1, exportedAt: new Date().toISOString() },
+        meta: {
+            gridSize: GRID_SIZE,
+            gridCountX: display?.gridCountX,
+            gridCountY: display?.gridCountY,
+            gridVisible: display?.gridVisible,
+            gridOpacity: display?.gridOpacity,
+            gridCellPitch: display?.gridCellPitch,
+            version: 1,
+            exportedAt: new Date().toISOString(),
+        },
         cells: graph.getCells().map(cell => cell.toJSON()),
     };
     const json = JSON.stringify(data, null, 2);
@@ -20,10 +30,18 @@ export function saveGraph(graph: dia.Graph, gridCountX?: number, gridCountY?: nu
 }
 
 /** Persist the current graph as the startup default in localStorage. */
-export function saveDefaultDesign(graph: dia.Graph): void {
+export function saveDefaultDesign(graph: dia.Graph, display?: DisplayMeta): void {
     try {
         const data = {
-            meta: { gridSize: GRID_SIZE, version: 1 },
+            meta: {
+                gridSize: GRID_SIZE,
+                gridCountX: display?.gridCountX,
+                gridCountY: display?.gridCountY,
+                gridVisible: display?.gridVisible,
+                gridOpacity: display?.gridOpacity,
+                gridCellPitch: display?.gridCellPitch,
+                version: 1,
+            },
             cells: graph.getCells().map(cell => cell.toJSON()),
         };
         localStorage.setItem(DEFAULT_DESIGN_KEY, JSON.stringify(data));
@@ -51,7 +69,7 @@ export function loadDefaultDesign(graph: dia.Graph): boolean {
 
 export function loadGraph(
     graph: dia.Graph,
-    onLoaded: () => void
+    onLoaded: (display?: DisplayMeta) => void
 ): void {
     const input = document.createElement('input');
     input.type = 'file';
@@ -64,7 +82,15 @@ export function loadGraph(
             try {
                 const json = JSON.parse(e.target!.result as string);
                 graph.fromJSON(json);
-                onLoaded();
+                const m = json.meta ?? {};
+                const display: DisplayMeta = {
+                    gridCountX: m.gridCountX,
+                    gridCountY: m.gridCountY,
+                    gridVisible: m.gridVisible,
+                    gridOpacity: m.gridOpacity,
+                    gridCellPitch: m.gridCellPitch,
+                };
+                onLoaded(display);
             } catch (err) {
                 console.error('[nextrack] Failed to load diagram:', err);
             }
