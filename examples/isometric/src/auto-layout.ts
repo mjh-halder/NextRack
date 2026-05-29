@@ -1,7 +1,7 @@
 import { dia, g } from '@joint/core';
 import { DirectedGraph } from '@joint/layout-directed-graph';
 import { GRID_SIZE } from './nextrack-theme';
-import { sortElements } from './utils';
+import { nextrackSortElements } from './nextrack-utils';
 import { View } from './shapes/isometric-shape';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Grid16 from '@carbon/icons/es/grid/16.js';
@@ -148,7 +148,7 @@ function applyGridLayout(elements: dia.Element[]): void {
         );
     });
     graph.stopBatch('layout');
-    if (getView() === View.Isometric) sortElements(graph);
+    if (getView() === View.Isometric) nextrackSortElements(graph);
 }
 
 // ---- Stack (Directed Graph) ----
@@ -207,7 +207,7 @@ function applyStack(rankDir: 'TB' | 'BT' | 'LR' | 'RL'): void {
     }
 
     graph.stopBatch('layout');
-    if (getView() === View.Isometric) sortElements(graph);
+    if (getView() === View.Isometric) nextrackSortElements(graph);
 }
 
 // ---- Alignment ----
@@ -245,7 +245,7 @@ function applyAlign(axis: 'horizontal' | 'vertical'): void {
     }
 
     graph.stopBatch('layout');
-    if (getView() === View.Isometric) sortElements(graph);
+    if (getView() === View.Isometric) nextrackSortElements(graph);
 }
 
 export function showLayoutBar(): void {

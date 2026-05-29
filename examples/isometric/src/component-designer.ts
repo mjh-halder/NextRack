@@ -5,7 +5,7 @@ import { cellNamespace } from './shapes';
 import { Rectangle } from './shapes/rectangle/rectangle';
 import { NextrackLink as Link } from './shapes/link/nextrack-link';
 import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFactory } from './shapes/shape-factories';
-import { drawGrid, switchView, transformationMatrix } from './utils';
+import { nextrackDrawGrid, nextrackSwitchView, nextrackTransformationMatrix } from './nextrack-utils';
 import { applyShapeStyle, applyShapeFillOpacity, buildCompositeIconSvg, buildTextIconSvg, icon2DHref } from './nextrack-utils';
 import { applyTheme } from './boot';
 import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
@@ -377,7 +377,7 @@ const paper = new dia.Paper({
 
 const CD_MARGIN = 20;
 
-gridVEl = drawGrid(paper, CD_GRID_COUNT, GRID_SIZE);
+gridVEl = nextrackDrawGrid(paper, CD_GRID_COUNT, GRID_SIZE);
 paper.setDimensions(
     SIDEBAR_INSET + 2 * GRID_SIZE * CD_GRID_COUNT * SCALE * ISOMETRIC_SCALE + CD_MARGIN * 2,
     GRID_SIZE * CD_GRID_COUNT * SCALE + CD_MARGIN * 2
@@ -404,7 +404,7 @@ const paper2D = new dia.Paper({
     interactive: false,
 });
 
-drawGrid(paper2D, CD_GRID_COUNT, GRID_SIZE);
+nextrackDrawGrid(paper2D, CD_GRID_COUNT, GRID_SIZE);
 paper2D.setDimensions(
     GRID_SIZE * CD_GRID_COUNT * SCALE + CD_MARGIN * 2,
     GRID_SIZE * CD_GRID_COUNT * SCALE + CD_MARGIN * 2
@@ -419,8 +419,8 @@ paper2D.el.classList.add('nr-2d-icons-only');
 // ISO paper is always isometric; 2D paper is always in 2D mode.
 // The ViewToggle is hidden; dual-view replaces it.
 
-switchView(paper, View.Isometric, null, SIDEBAR_INSET, CD_GRID_COUNT);
-paper2D.matrix(transformationMatrix(View.TwoDimensional, CD_MARGIN, 0, CD_GRID_COUNT));
+nextrackSwitchView(paper, View.Isometric, null, SIDEBAR_INSET, CD_GRID_COUNT);
+paper2D.matrix(nextrackTransformationMatrix(View.TwoDimensional, CD_MARGIN, 0, CD_GRID_COUNT));
 
 // ── Template panel ────────────────────────────────────────────────────────────
 
@@ -6878,7 +6878,7 @@ function loadShapeIntoCanvas(id: string) {
     layerShapes    = [];
     layerShapes2D  = [];
     currentZoom = 1;
-    paper.matrix(transformationMatrix(View.Isometric, CD_MARGIN, SIDEBAR_INSET, CD_GRID_COUNT));
+    paper.matrix(nextrackTransformationMatrix(View.Isometric, CD_MARGIN, SIDEBAR_INSET, CD_GRID_COUNT));
 
     const savedDefaults = ShapeRegistry[id];
     const displayName   = savedDefaults?.displayName ?? formatLabel(id);

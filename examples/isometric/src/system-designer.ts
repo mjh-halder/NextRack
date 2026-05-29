@@ -5,7 +5,7 @@ import IsometricShape from './shapes/nextrack-isometric-shape';
 import { ToolKeys } from './shapes/nextrack-isometric-shape';
 import { Link, Frame, Area, cellNamespace } from './shapes';
 import { stubConnector } from './connectors/stub-connector'; // ADR-0005
-import { sortElements, drawGrid, switchView, transformationMatrix } from './utils';
+import { nextrackSortElements, nextrackDrawGrid, nextrackSwitchView, nextrackTransformationMatrix } from './nextrack-utils';
 import { setGridOpacity, applyRegistryDefaults, applyShapeStyle, applyShapeFillOpacity, icon2DHref } from './nextrack-utils';
 import { GRID_SIZE, GRID_COUNT, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './nextrack-theme';
 import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath, NodeMeta } from './inspector';
@@ -178,7 +178,7 @@ function duplicateWithLinks() {
     panel.show(clone);
     currentCell = clone;
     graph.stopBatch('duplicate');
-    if (currentView === View.Isometric) sortElements(graph);
+    if (currentView === View.Isometric) nextrackSortElements(graph);
 }
 
 function duplicateSelected() {
@@ -216,7 +216,7 @@ function duplicateSelected() {
 
         areaSelect.clear();
         graph.stopBatch('duplicate');
-        if (currentView === View.Isometric) sortElements(graph);
+        if (currentView === View.Isometric) nextrackSortElements(graph);
         return;
     }
 
@@ -239,7 +239,7 @@ function duplicateSelected() {
     panel.show(clone);
     currentCell = clone;
     graph.stopBatch('duplicate');
-    if (currentView === View.Isometric) sortElements(graph);
+    if (currentView === View.Isometric) nextrackSortElements(graph);
 }
 
 function duplicateZone(frame: Frame): void {
@@ -313,7 +313,7 @@ function duplicateZone(frame: Frame): void {
     reEmbed(frame);
 
     graph.stopBatch('duplicate');
-    if (currentView === View.Isometric) sortElements(graph);
+    if (currentView === View.Isometric) nextrackSortElements(graph);
 }
 
 export const panel = new PropertyPanel(inspectorEl, {
@@ -478,7 +478,7 @@ function rebuildGrid(): void {
     const step = GRID_SIZE * gridCellPitch;
     const linesX = Math.round(currentGridCountX / gridCellPitch);
     const linesY = Math.round(currentGridCountY / gridCellPitch);
-    gridVEl = drawGrid(paper, linesX, step, '#e8e8e8', linesY, gridOpacity);
+    gridVEl = nextrackDrawGrid(paper, linesX, step, '#e8e8e8', linesY, gridOpacity);
     if (!gridVisible) gridVEl.node.style.display = 'none';
 }
 
@@ -617,7 +617,7 @@ let sortTimer: ReturnType<typeof setTimeout> | null = null;
 function debouncedSort() {
     if (currentView !== View.Isometric) return;
     if (sortTimer) clearTimeout(sortTimer);
-    sortTimer = setTimeout(() => { sortTimer = null; sortElements(graph); }, 80);
+    sortTimer = setTimeout(() => { sortTimer = null; nextrackSortElements(graph); }, 80);
 }
 
 graph.on('change:position change:size', debouncedSort);
@@ -838,7 +838,7 @@ graph.on('change:position', (cell: dia.Cell) => {
 // Zoom via mouse wheel (blank and cell areas)
 
 function getMinZoom(): number {
-    const baseMx = transformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
+    const baseMx = nextrackTransformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
     const gw = currentGridCountX * GRID_SIZE;
     const gh = (currentGridCountY ?? currentGridCountX) * GRID_SIZE;
     const corners = [
@@ -929,7 +929,7 @@ paper.on('cell:mousewheel', (_cellView: dia.CellView, evt: dia.Event, x: number,
 
 // Switch between isometric and 2D view
 
-// View switch helper — used by the component designer's switchView import
+// View switch helper — used by the component designer's nextrackSwitchView import
 
 
 
@@ -940,9 +940,9 @@ new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     // Instant view switch — no animation
     graph.getElements().forEach((el: dia.Element) =>
         (el as IsometricShape).toggleView(currentView));
-    paper.matrix(transformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX));
+    paper.matrix(nextrackTransformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX));
     paper.el.classList.toggle('nr-2d-icons-only', currentView === View.TwoDimensional);
-    if (currentView === View.Isometric) sortElements(graph);
+    if (currentView === View.Isometric) nextrackSortElements(graph);
     if (currentCell && !(currentCell instanceof Link)) {
         // 2D collapses every shape to a 40×40 icon-only cell — link-drawing
         // (the orange connect arrow) doesn't belong in that overview view.
@@ -1311,7 +1311,7 @@ initDisplaySettingsHub();
 // Sync hub displays with any DisplayMeta applied during initial canvas load.
 refreshDisplayHub();
 
-switchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
+nextrackSwitchView(paper, currentView, currentCell, SIDEBAR_INSET, currentGridCountX);
 
 // ---- Minimap ----
 
@@ -1389,7 +1389,7 @@ fitBtn.addEventListener('click', () => {
     const vpH = window.innerHeight - headerH;
     if (vpW <= 0 || vpH <= 0) return;
 
-    const baseMx = transformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
+    const baseMx = nextrackTransformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
 
     // Project bbox corners through the isometric transform (without offset)
     // to get the screen-space extent at zoom=1
@@ -1446,7 +1446,7 @@ zoomControlEl.appendChild(fitBtn);
 syncZoomSlider = () => {
     const mx = paper.matrix();
     const actualScale = Math.sqrt(mx.a * mx.a + mx.b * mx.b);
-    const baseMx = transformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
+    const baseMx = nextrackTransformationMatrix(currentView, 20, SIDEBAR_INSET, currentGridCountX);
     const baseScale = Math.sqrt(baseMx.a * baseMx.a + baseMx.b * baseMx.b);
     if (baseScale > 0) currentZoom = actualScale / baseScale;
     zoomSlider.value = String(Math.log(currentZoom));
@@ -1575,7 +1575,7 @@ initAutoLayout(
 // ---- New Design ----
 
 // Compute the scroll position that centers the grid in the usable viewport area
-// (viewport width minus sidebar). Must be called after switchView() sets the matrix.
+// (viewport width minus sidebar). Must be called after nextrackSwitchView() sets the matrix.
 function centerGridInViewport(gridCountX: number, gridCountY: number) {
     const mx = paper.matrix();
     const W = gridCountX * GRID_SIZE;
@@ -1625,7 +1625,7 @@ function applyNewDesign(name: string, gridCount: number) {
         GRID_SIZE * gridCount * SCALE + CANVAS_PAD
     );
 
-    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+    nextrackSwitchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
     centerGridInViewport(currentGridCountX, currentGridCountY);
     updateMinimapView(currentView, currentGridCountX);
 
@@ -2068,7 +2068,7 @@ function applyGridResize(newX: number, newY: number) {
         GRID_SIZE * newY * SCALE + CANVAS_PAD
     );
 
-    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+    nextrackSwitchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
     centerGridInViewport(currentGridCountX, currentGridCountY);
     updateMinimapView(currentView, currentGridCountX);
 }
@@ -2105,7 +2105,7 @@ function screenCoordsOfModelPoint(mx: DOMMatrix, px: number, py: number): { sx: 
 }
 
 function focusElement(el: dia.Element): void {
-    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+    nextrackSwitchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
     const mx = paper.matrix();
     const bbox = el.getBBox();
     const c = screenCoordsOfModelPoint(mx, bbox.x + bbox.width / 2, bbox.y + bbox.height / 2);
@@ -2124,7 +2124,7 @@ function focusElement(el: dia.Element): void {
 export function fitToContent(): void {
     const elements = graph.getElements();
     if (elements.length === 0) return;
-    switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+    nextrackSwitchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
     const mx = paper.matrix();
     let minSx = Infinity, minSy = Infinity, maxSx = -Infinity, maxSy = -Infinity;
     for (const el of elements) {
@@ -2201,7 +2201,7 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
         if (view) requestAnimationFrame(() => applySelect(view));
     }
     if (currentView === View.Isometric) {
-        sortElements(graph);
+        nextrackSortElements(graph);
     }
 }, (cellId: string) => {
     // Tree item clicked — select the element on the canvas
@@ -2358,7 +2358,7 @@ canvasDropTarget.addEventListener('drop', (e: DragEvent) => {
     // Areas don't belong in zones — they're independent design elements.
     if (dropZone && !placed.get('isArea')) dropZone.embed(placed);
 
-    if (currentView === View.Isometric) sortElements(graph);
+    if (currentView === View.Isometric) nextrackSortElements(graph);
     palette.refresh();
 });
 
@@ -2431,7 +2431,7 @@ function switchCanvas(id: string): void {
         hideLayoutBar();
         applyDisplayMeta(loadCanvasGraph(id, graph));
         applyHideConnections();
-        switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+        nextrackSwitchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
         updateMinimapView(currentView, currentGridCountX);
     }
 
@@ -2654,7 +2654,7 @@ const areaSelect = new AreaSelect({
                 updateZoneAssignment(cell as IsometricShape);
             }
         });
-        if (currentView === View.Isometric) sortElements(graph);
+        if (currentView === View.Isometric) nextrackSortElements(graph);
     },
 });
 
@@ -3258,7 +3258,7 @@ function switchShapeVariation(cell: IsometricShape): void {
     setTreeHighlight(newShape);
 
     graph.stopBatch('switch-variation');
-    if (currentView === View.Isometric) sortElements(graph);
+    if (currentView === View.Isometric) nextrackSortElements(graph);
 }
 
 // ── Area path-edit mode ──────────────────────────────────────────────────────
@@ -3731,7 +3731,7 @@ document.addEventListener('nextrack:registry-changed', () => {
         const defaults = ShapeRegistry[meta.kind];
         if (!defaults) return;
         applyRegistryDefaults(cell, defaults, paper);
-        if (currentView === View.Isometric) sortElements(graph);
+        if (currentView === View.Isometric) nextrackSortElements(graph);
     });
 });
 
@@ -3754,7 +3754,7 @@ document.addEventListener('nextrack:header-action', (e: Event) => {
                 panel.hide();
                 clearHistory();
                 applyDisplayMeta(display);
-                switchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
+                nextrackSwitchView(paper, currentView, null, SIDEBAR_INSET, currentGridCountX);
             });
             break;
         case 'edit-undo':

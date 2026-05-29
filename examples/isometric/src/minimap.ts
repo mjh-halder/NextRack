@@ -1,7 +1,7 @@
 import { dia, V } from '@joint/core';
 import { cellNamespace } from './shapes';
 import { View } from './shapes/isometric-shape';
-import { transformationMatrix } from './utils';
+import { nextrackTransformationMatrix } from './nextrack-utils';
 
 const MINIMAP_W = 180;
 const MINIMAP_H = 120;
@@ -106,7 +106,7 @@ function scheduleViewportUpdate(): void {
 function rebuildMinimapMatrix(): void {
     if (!minimapPaper) return;
 
-    baseMxCached = transformationMatrix(currentView, GRID_SIZE, SIDEBAR_INSET, currentGridCount);
+    baseMxCached = nextrackTransformationMatrix(currentView, GRID_SIZE, SIDEBAR_INSET, currentGridCount);
     const gw = currentGridCount * GRID_SIZE;
     const gh = currentGridCount * GRID_SIZE;
 

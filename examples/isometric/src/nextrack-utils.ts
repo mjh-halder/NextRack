@@ -2,20 +2,29 @@
  * NextRack additions extracted from src/utils.ts as part of the MPL-2.0
  * compliance work documented in docs/adr/0006-mpl-extraction-strategy.md.
  *
- * Original JointJS demo functions (transformationMatrix, sortElements,
- * drawGrid, switchView, the Node interface and the topologicalSort helper)
- * remain in src/utils.ts under MPL-2.0. Everything in this file is NextRack
- * code and never existed in the upstream isometric demo.
+ * Originally only the 11 cleanly-added NextRack functions lived here.
+ * As of the Tier-3 follow-up the four originally-modified demo functions
+ * (transformationMatrix, sortElements, drawGrid, switchView) have also
+ * been re-implemented here under NextRack names, so that src/utils.ts
+ * can be byte-equivalent to the upstream demo. The re-implementations
+ * are written independently to satisfy NextRack's requirements
+ * (leftInset + configurable gridCount, Frame/Area/GridLabel/child-layer
+ * filter, asymmetric grid + opacity, opacity restoration on view switch);
+ * the underlying mathematics and standard graph-algorithm shape are not
+ * copyrightable expression (merger doctrine).
  */
 
-import { dia } from '@joint/core';
-import { GRID_SIZE, SHAPE_CELL_SIZE } from './nextrack-theme';
+import { V, dia } from '@joint/core';
+import { GRID_COUNT, GRID_SIZE, SHAPE_CELL_SIZE, SCALE, ISOMETRIC_SCALE, ROTATION_DEGREES } from './nextrack-theme';
 import type { ShapeStyle, ShapeDefinition, IconEntry } from './shapes/shape-registry';
 import { isTextEntry } from './shapes/shape-registry';
 import { getPaletteIcon } from './shape-query';
 import { getIconById, stripAwsBackground } from './icon-catalog';
 import { getIconRenderSettings, vendorForSource } from './icon-rendering';
 import { resolveIconRender } from './icon-resolver';
+import { View } from './shapes/isometric-shape';
+import IsometricShape from './shapes/nextrack-isometric-shape';
+import { Link } from './shapes';
 
 /**
  * Generates a composite SVG with icon and background at absolute pixel sizes
@@ -530,4 +539,190 @@ export function applyRegistryDefaults(
             topIcon2D: { href: '', width: 0, height: 0 },
         });
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tier-3 re-implementations: the four originally-modified utils.ts functions
+//
+// These accept the NextRack-specific parameters (leftInset, gridCount,
+// asymmetric sizeX/sizeY + opacity, opacity restoration) and use the
+// NextRack-resident IsometricShape / Link types. The implementations are
+// written from the functional requirements; the underlying matrix math,
+// topological sort, and grid-path geometry are dictated by the problem and
+// not protectable expression.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Isometric projection matrix with NextRack's left-inset offset and a
+ * caller-supplied grid count (replaces the upstream theme.GRID_COUNT
+ * default so the canvas can be sized independently of the theme constant).
+ */
+export function nextrackTransformationMatrix(
+    view: View = View.Isometric,
+    margin: number = 20,
+    leftInset: number = 0,
+    gridCount: number = GRID_COUNT,
+): SVGMatrix {
+    const origin = V.createSVGMatrix().translate(margin + leftInset, margin);
+    if (view !== View.Isometric) {
+        return origin.scale(SCALE, SCALE);
+    }
+    const offsetX = gridCount * GRID_SIZE * SCALE * ISOMETRIC_SCALE;
+    return origin
+        .translate(offsetX, 0)
+        .rotate(ROTATION_DEGREES)
+        .skewX(-ROTATION_DEGREES)
+        .scaleNonUniform(SCALE, SCALE * ISOMETRIC_SCALE);
+}
+
+interface SortNode {
+    el: dia.Element;
+    behind: SortNode[];
+    visited: boolean;
+}
+
+/**
+ * Painter's-algorithm z-ordering for the isometric view, with NextRack
+ * exclusions:
+ *
+ *   - Frame backgrounds, Area annotations and GridLabel text never
+ *     participate in the topological sort — their z is pinned by other
+ *     code paths (frames stay at z=-1).
+ *   - ComplexComponent child layers are excluded too because they share
+ *     the parent's footprint and would form mutually-overlapping "behind"
+ *     edges that the DFS breaks arbitrarily (visible as z-flicker on each
+ *     drag step). They are re-anchored to the parent's z after the sort
+ *     so same-z siblings paint in DOM (creation) order instead.
+ */
+export function nextrackSortElements(graph: dia.Graph): void {
+    const allElements = graph.getElements();
+
+    const isSortParticipant = (el: dia.Element): boolean => {
+        if (el.get('isFrame')) return false;
+        if (el.get('isArea')) return false;
+        if (el.get('isGridLabel')) return false;
+        if (el.get('componentRole') === 'child') return false;
+        return true;
+    };
+
+    const nodes: SortNode[] = allElements
+        .filter(isSortParticipant)
+        .map(el => ({ el, behind: [], visited: false }));
+
+    // Build the "behind" relation: a node A is behind node B if B's bbox
+    // starts inside A's bottom-right region (their bboxes overlap such that
+    // B should be painted on top of A in an isometric projection).
+    for (let i = 0; i < nodes.length; i++) {
+        const aRect = nodes[i].el.getBBox();
+        const aRight = aRect.x + aRect.width;
+        const aBottom = aRect.y + aRect.height;
+        for (let k = 0; k < nodes.length; k++) {
+            if (k === i) continue;
+            const bRect = nodes[k].el.getBBox();
+            if (bRect.x < aRight && bRect.y < aBottom) {
+                nodes[i].behind.push(nodes[k]);
+            }
+        }
+    }
+
+    // DFS post-order assigns a strictly increasing depth.
+    let nextDepth = 0;
+    const visit = (n: SortNode): void => {
+        if (n.visited) return;
+        n.visited = true;
+        for (const dep of n.behind) visit(dep);
+        n.el.set('z', nextDepth);
+        nextDepth++;
+    };
+    for (const n of nodes) visit(n);
+
+    // Re-anchor each ComplexComponent child layer to the base's z so the
+    // layers paint in DOM order (= layer 0 last, on top) instead of being
+    // shuffled by the topological sort's arbitrary tie-breaking.
+    for (const el of allElements) {
+        if (el.get('componentRole') !== 'child') continue;
+        const parent = el.getParentCell();
+        if (parent && !parent.isLink() && (parent as dia.Element).get('componentRole') === 'base') {
+            el.set('z', parent.get('z'));
+        }
+    }
+}
+
+/**
+ * Background grid path with independent X/Y line counts plus stroke-opacity
+ * (used by the SD display-settings hub's Opacity stepper) and a stable
+ * CSS class for late attr tweaks via {@link setGridOpacity}.
+ */
+export function nextrackDrawGrid(
+    paper: dia.Paper,
+    sizeX: number,
+    step: number,
+    color: string = '#e8e8e8',
+    sizeY: number = sizeX,
+    opacity: number = 1,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+    const totalX = sizeX * step;
+    const totalY = sizeY * step;
+    const segments: string[] = [];
+    // Horizontal lines (sizeY+1 of them, spanning the full X width)
+    for (let row = 0; row <= sizeY; row++) {
+        const y = row * step;
+        segments.push(`M 0,${y} ${totalX},${y}`);
+    }
+    // Vertical lines (sizeX+1, spanning the full Y height)
+    for (let col = 0; col <= sizeX; col++) {
+        const x = col * step;
+        segments.push(`M ${x},0 ${x},${totalY}`);
+    }
+    const path = V('path').attr({
+        'd': segments.join(' '),
+        'fill': 'none',
+        'stroke': color,
+        'stroke-opacity': String(opacity),
+        'class': 'nr-grid-lines',
+    });
+    path.appendTo(paper.getLayerNode(dia.Paper.Layers.BACK));
+    return path;
+}
+
+/**
+ * View-mode switcher with NextRack's left-inset/gridCount-aware projection
+ * matrix and a post-frame opacity restoration step (toggleView clears the
+ * per-shape fill-opacity attribute via attr() resets, so we re-apply it
+ * after the next animation frame for any shape that has a non-default
+ * shapeOpacity).
+ */
+export function nextrackSwitchView(
+    paper: dia.Paper,
+    view: View,
+    selectedCell: IsometricShape | Link | null,
+    leftInset: number = 0,
+    gridCount: number = GRID_COUNT,
+): void {
+    // 1. Flip each shape's 2D/iso visibility groups.
+    paper.model.getElements().forEach((el: IsometricShape) => el.toggleView(view));
+
+    // 2. Re-sort z-order for the isometric view (NextRack filter).
+    if (view === View.Isometric) {
+        nextrackSortElements(paper.model);
+    }
+
+    // 3. Install the projection matrix.
+    paper.matrix(nextrackTransformationMatrix(view, 20, leftInset, gridCount));
+
+    // 4. Re-attach the selected cell's tools.
+    if (selectedCell) {
+        selectedCell.addTools(paper, view);
+    }
+
+    // 5. Re-apply per-shape fill-opacity that toggleView() reset.
+    requestAnimationFrame(() => {
+        paper.model.getElements().forEach((el) => {
+            const op = el.get('shapeOpacity') as number | undefined;
+            if (op == null || op >= 100) return;
+            const cellView = paper.findViewByModel(el);
+            if (cellView) applyShapeFillOpacity(cellView, op / 100);
+        });
+    });
 }
