@@ -3,7 +3,8 @@ import Obstacles from './obstacles';
 import IsometricShape, { View, ToolKeys } from './shapes/isometric-shape';
 import { Link, Frame, Area, cellNamespace } from './shapes';
 import { stubConnector } from './connectors/stub-connector'; // ADR-0005
-import { sortElements, drawGrid, setGridOpacity, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle, applyShapeFillOpacity, icon2DHref } from './utils';
+import { sortElements, drawGrid, switchView, transformationMatrix } from './utils';
+import { setGridOpacity, applyRegistryDefaults, applyShapeStyle, applyShapeFillOpacity, icon2DHref } from './nextrack-utils';
 import { GRID_SIZE, GRID_COUNT, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
 import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath, NodeMeta } from './inspector';
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';

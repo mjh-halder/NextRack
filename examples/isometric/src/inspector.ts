@@ -1,6 +1,6 @@
 import { dia } from '@joint/core';
 import IsometricShape from './shapes/isometric-shape';
-import { applyShapeFillOpacity } from './utils';
+import { applyShapeFillOpacity } from './nextrack-utils';
 import { applyLabelPosition } from './label-position';
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS, ShapeDefinition } from './shapes/shape-registry';
 import { getPaletteIcon } from './shape-query';

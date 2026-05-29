@@ -7,7 +7,7 @@ import { GRID_SIZE } from './theme';
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
 import './shape-store';
 import { getPreviewFactory } from './shapes/shape-factories';
-import { applyRegistryDefaults } from './utils';
+import { applyRegistryDefaults } from './nextrack-utils';
 import { getPaletteIcon, getHitArea, getCompositeIsoHeight } from './shape-query';
 import { carbonIconToString, CarbonIcon } from './icons';
 import ChevronDown16 from '@carbon/icons/es/chevron--down/16.js';

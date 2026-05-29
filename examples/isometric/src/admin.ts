@@ -1692,7 +1692,7 @@ const DEMO_GLYPHS: Record<import('./icon-rendering').IconVendor, string> = {
 function renderIconRenderingSection(container: HTMLElement): void {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const ir = require('./icon-rendering') as typeof import('./icon-rendering');
-    const u  = require('./utils')          as typeof import('./utils');
+    const u  = require('./nextrack-utils') as typeof import('./nextrack-utils');
     /* eslint-enable @typescript-eslint/no-require-imports */
 
     type Vendor = import('./icon-rendering').IconVendor;

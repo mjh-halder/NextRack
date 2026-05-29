@@ -38,7 +38,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 // SD's ComplexComponent render path uses the same dark/light rules as the
 // CD's direct-instance path (utils.applyShapeStyle). See ADR-0004.
 
-import { resolveStyleColors, icon2DHref, buildCompositeIconSvg, buildTextIconSvg } from '../utils';
+import { resolveStyleColors, icon2DHref, buildCompositeIconSvg, buildTextIconSvg } from '../nextrack-utils';
 import { resolveIconRender } from '../icon-resolver';
 import { isDarkMode } from '../svg-inventory';
 
