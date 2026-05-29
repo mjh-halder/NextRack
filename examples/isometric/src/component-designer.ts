@@ -6,7 +6,7 @@ import { Link } from './shapes/link/link';
 import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFactory } from './shapes/shape-factories';
 import { drawGrid, switchView, transformationMatrix } from './utils';
 import { applyShapeStyle, applyShapeFillOpacity, buildCompositeIconSvg, buildTextIconSvg, icon2DHref } from './nextrack-utils';
-import { applyTheme } from './index';
+import { applyTheme } from './boot';
 import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
 import { parseSvgFootprint } from './svg-footprint';
 import { Area } from './shapes/area/area';
