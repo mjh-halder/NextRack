@@ -10,17 +10,18 @@ import { getProductsByType, getProduct } from './product-catalog';
 import { getCanvas, updateCanvas, CanvasRecord } from './canvas-store';
 import { GRID_SIZE } from './theme';
 import { carbonIconToString, CarbonIcon } from './icons';
-import { getGridIconEntries, IconCatalogEntry } from './icon-catalog';
-import { familyForSource } from './icon-rendering';
+import { getDesignIconEntries, IconCatalogEntry, iconKeepsOriginalColor, IconSource } from './icon-catalog';
 
 /**
  * Mirror of the recognition-surface `nr-icon-color` opt-out on canvas
  * Icon-Shape `<image>` elements. Vendor-coloured icons get the class →
  * style.css suppresses the dark-mode brightness/invert filter for them.
+ * Design Icons stay theme-tinted (no class), so black source SVGs render
+ * dark in light mode and light in dark mode.
  * Pass `undefined` to clear both selectors (e.g. on icon removal).
  */
 function syncIconColorClass(el: dia.Element, source: string | undefined): void {
-    const keep = source !== undefined && familyForSource(source) !== 'carbon';
+    const keep = iconKeepsOriginalColor(source as IconSource | undefined);
     const cls = keep ? 'nr-icon-color' : '';
     el.attr('iconImage/class', cls);
     el.attr('iconFlat/class', cls);
@@ -184,6 +185,9 @@ export class PropertyPanel {
     private multiZoneTargets: dia.Element[] = [];
     private multiLinkExtras: dia.Link[] = [];
     private multiLinkDetach: (() => void) | null = null;
+    // Detacher for the per-Area `change:areaCorners` sync handler — keeps
+    // the corner steppers in sync when on-canvas radius handles are dragged.
+    private areaCornerSyncCleanup: (() => void) | null = null;
 
     private nodeInputs: Record<string, HTMLInputElement | HTMLTextAreaElement> = {};
     private nodeLabelHiddenEl!: HTMLInputElement;
@@ -588,6 +592,11 @@ export class PropertyPanel {
 
     private buildStepperRow(labelText: string, min: number, max: number, step: number, value: number, onChange: (v: number) => void, defaultValue?: number): { row: HTMLElement; input: HTMLInputElement } {
         const defVal = defaultValue ?? value;
+        // Decimal precision derived from `step` so 0.5 renders as "0.5"
+        // and 1 renders as "1". Avoids per-call format overrides.
+        const decimals = step >= 1 ? 0 : Math.max(0, Math.ceil(-Math.log10(step) - 1e-9));
+        const fmt  = (v: number) => v.toFixed(decimals);
+        const snap = (v: number) => parseFloat(v.toFixed(decimals));
         const row = document.createElement('div');
         row.className = 'inspector-row nr-sd-number-row';
         const label = document.createElement('label');
@@ -603,21 +612,21 @@ export class PropertyPanel {
         input.min = String(min);
         input.max = String(max);
         input.step = String(step);
-        input.value = String(Math.round(value));
+        input.value = fmt(value);
 
         const displayEl = document.createElement('input');
         displayEl.type = 'text';
         displayEl.className = 'nr-sd-number-display';
-        displayEl.value = String(Math.round(value));
+        displayEl.value = fmt(value);
 
         const resetBtn = document.createElement('button');
         resetBtn.type = 'button';
         resetBtn.className = 'nr-stepper-reset';
         resetBtn.textContent = '\u00d7';
-        resetBtn.title = `Reset to ${Math.round(defVal)}`;
-        resetBtn.style.display = Math.round(value) === Math.round(defVal) ? 'none' : '';
+        resetBtn.title = `Reset to ${fmt(defVal)}`;
+        resetBtn.style.display = snap(value) === snap(defVal) ? 'none' : '';
         resetBtn.addEventListener('click', () => {
-            input.value = String(defVal);
+            input.value = fmt(defVal);
             update();
         });
 
@@ -634,14 +643,14 @@ export class PropertyPanel {
         const update = () => {
             const v = parseFloat(input.value);
             const clamped = Math.max(min, Math.min(max, isNaN(v) ? min : v));
-            input.value = String(clamped);
-            displayEl.value = String(Math.round(clamped));
-            resetBtn.style.display = Math.round(clamped) === Math.round(defVal) ? 'none' : '';
+            input.value = fmt(clamped);
+            displayEl.value = fmt(clamped);
+            resetBtn.style.display = snap(clamped) === snap(defVal) ? 'none' : '';
             onChange(clamped);
         };
 
-        decBtn.addEventListener('click', () => { input.value = String(Math.max(min, parseFloat(input.value) - step)); update(); });
-        incBtn.addEventListener('click', () => { input.value = String(Math.min(max, parseFloat(input.value) + step)); update(); });
+        decBtn.addEventListener('click', () => { input.value = fmt(Math.max(min, parseFloat(input.value) - step)); update(); });
+        incBtn.addEventListener('click', () => { input.value = fmt(Math.min(max, parseFloat(input.value) + step)); update(); });
         displayEl.addEventListener('change', () => {
             const raw = parseFloat(displayEl.value);
             if (!isNaN(raw)) {
@@ -667,9 +676,9 @@ export class PropertyPanel {
                 const dx = ev.clientX - scrubStartX;
                 const delta = Math.round(dx / 3) * step;
                 const newVal = Math.max(min, Math.min(max, scrubStartVal + delta));
-                input.value = String(newVal);
-                displayEl.value = String(Math.round(newVal));
-                resetBtn.style.display = Math.round(newVal) === Math.round(defVal) ? 'none' : '';
+                input.value = fmt(newVal);
+                displayEl.value = fmt(newVal);
+                resetBtn.style.display = snap(newVal) === snap(defVal) ? 'none' : '';
                 onChange(newVal);
             };
             const onUp = () => {
@@ -1121,7 +1130,7 @@ export class PropertyPanel {
 
         // ── Custom Style section (plus/minus toggle) ─────────────────────
         if (!BUILT_IN_SHAPE_IDS.has(shapeKey)) {
-            const hasCustomStyle = !!(cell.get('accentColor') || ((cell.get('shapeOpacity') as number) ?? 100) < 100);
+            const hasCustomStyle = ((cell.get('shapeOpacity') as number) ?? 100) < 100;
 
             const styleLi = document.createElement('li');
             styleLi.className = 'cds--accordion__item nr-float-section' + (hasCustomStyle ? ' nr-float-section--active' : '');
@@ -1151,11 +1160,8 @@ export class PropertyPanel {
             styleAddBtn.addEventListener('click', () => {
                 const isActive = styleLi.classList.contains('nr-float-section--active');
                 if (isActive) {
-                    cell.set('accentColor', '');
+                    // change:shapeOpacity listener applies fill-opacity reset.
                     cell.set('shapeOpacity', 100);
-                    this.applyAccentColor(cell, '');
-                    const view = this.paper?.findViewByModel(cell);
-                    if (view) applyShapeFillOpacity(view, 1);
                 }
                 const next = !isActive;
                 styleLi.classList.toggle('nr-float-section--active', next);
@@ -1164,119 +1170,16 @@ export class PropertyPanel {
                 styleAddBtn.title = next ? 'Remove custom style' : 'Add custom style';
             });
 
-            const colorRow = document.createElement('div');
-            colorRow.className = 'inspector-row';
-            const colorLabel = document.createElement('label');
-            colorLabel.textContent = 'Color';
-            colorRow.appendChild(colorLabel);
-
-            const hexWrap = document.createElement('div');
-            hexWrap.className = 'nr-sd-hex-input-wrap';
-
-            const hexInput = document.createElement('input');
-            hexInput.type = 'text';
-            hexInput.className = 'nr-sd-hex-input';
-            hexInput.readOnly = true;
-            hexInput.style.cursor = 'pointer';
-
-            const colorBtn = document.createElement('button');
-            colorBtn.type = 'button';
-            colorBtn.className = 'nr-sd-hex-color-btn';
-
-            const NONE_ICON = '<svg viewBox="0 0 32 32" fill="currentColor" width="16" height="16"><path d="M2,16H2A14,14,0,1,0,16,2,14,14,0,0,0,2,16Zm23.15,7.75L8.25,6.85a12,12,0,0,1,16.9,16.9ZM8.24,25.16A12,12,0,0,1,6.84,8.27L23.73,25.16a12,12,0,0,1-15.49,0Z"/></svg>';
-            let currentAccent = (cell.get('accentColor') as string) || '';
-
-            const syncDisplay = () => {
-                if (currentAccent) {
-                    hexInput.value = currentAccent;
-                    hexInput.classList.remove('nr-sd-hex-input--default');
-                    colorBtn.style.backgroundColor = currentAccent;
-                    colorBtn.innerHTML = '';
-                } else {
-                    hexInput.value = 'None';
-                    hexInput.classList.add('nr-sd-hex-input--default');
-                    colorBtn.style.backgroundColor = '';
-                    colorBtn.innerHTML = NONE_ICON;
-                }
-            };
-            syncDisplay();
-
-            const popup = document.createElement('div');
-            popup.className = 'nr-sd-color-popup';
-            popup.style.display = 'none';
-
-            const noneBtn = document.createElement('button');
-            noneBtn.type = 'button';
-            noneBtn.className = 'nr-sd-color-popup__no-color';
-            noneBtn.title = 'None';
-            noneBtn.innerHTML = NONE_ICON;
-            noneBtn.addEventListener('click', () => {
-                currentAccent = '';
-                cell.set('accentColor', '');
-                popup.style.display = 'none';
-                syncDisplay();
-                this.applyAccentColor(cell, '');
-            });
-            popup.appendChild(noneBtn);
-
-            for (const c of PRIMARY_COLORS) {
-                const swatch = document.createElement('button');
-                swatch.type = 'button';
-                swatch.className = 'nr-sd-color-popup__swatch';
-                swatch.style.backgroundColor = c.base;
-                swatch.title = c.label;
-                swatch.addEventListener('click', () => {
-                    currentAccent = c.base;
-                    cell.set('accentColor', c.base);
-                    popup.style.display = 'none';
-                    syncDisplay();
-                    this.applyAccentColor(cell, c.base);
-                });
-                popup.appendChild(swatch);
-            }
-
-            const hiddenPicker = document.createElement('input');
-            hiddenPicker.type = 'color';
-            hiddenPicker.className = 'nr-sd-hex-hidden-picker';
-            hiddenPicker.value = currentAccent || '#525252';
-
-            const customSwatch = document.createElement('button');
-            customSwatch.type = 'button';
-            customSwatch.className = 'nr-sd-color-popup__swatch nr-sd-color-popup__swatch--custom';
-            customSwatch.title = 'Custom color';
-            customSwatch.innerHTML = '<svg viewBox="0 0 32 32" fill="currentColor" width="12" height="12"><path d="M29.391,2.609a3.279,3.279,0,0,0-4.634,0L18.4835,8.883,12.793,3.207,11.3789,4.6211l4.2764,4.2764L2.4072,22.146A.9967.9967,0,0,0,2.1,22.78L.042,29.0361a1,1,0,0,0,1.265,1.2637l6.2549-2.0586a.9974.9974,0,0,0,.6348-.3076L21.4453,14.6855l4.2764,4.2764,1.4141-1.4141L21.4116,11.8237l6.2744-6.2744.0051-.0051a3.2781,3.2781,0,0,0,0-4.634ZM6.8965,27.0017l-4.3384,1.4275L3.985,24.0908ZM28.2808,5.8281l-.0051.0051L21.9316,12.177l-.707-.707,6.3491-6.3491a1.2783,1.2783,0,0,1,1.806,0h0a1.2776,1.2776,0,0,1-.0977,1.7071Z"/></svg>';
-            customSwatch.addEventListener('click', () => { popup.style.display = 'none'; hiddenPicker.click(); });
-            popup.appendChild(customSwatch);
-
-            hiddenPicker.addEventListener('input', () => {
-                currentAccent = hiddenPicker.value;
-                cell.set('accentColor', currentAccent);
-                syncDisplay();
-                this.applyAccentColor(cell, currentAccent);
-            });
-
-            colorBtn.addEventListener('click', () => {
-                popup.style.display = popup.style.display === 'none' ? '' : 'none';
-            });
-            hexInput.addEventListener('click', () => { colorBtn.click(); });
-
-            document.addEventListener('mousedown', (e) => {
-                if (!hexWrap.contains(e.target as Node)) popup.style.display = 'none';
-            }, true);
-
-            hexWrap.appendChild(hexInput);
-            hexWrap.appendChild(colorBtn);
-            hexWrap.appendChild(hiddenPicker);
-            hexWrap.appendChild(popup);
-            colorRow.appendChild(hexWrap);
-            styleFields.appendChild(colorRow);
+            // Color picker removed — the `accentColor` plumbing no longer
+            // had a visible effect. Only Opacity remains in Custom Style.
 
             // Opacity — fill-only via helper, so strokes (edges) stay opaque.
+            // Sole writer is `cell.set('shapeOpacity', v)`; the central
+            // change:shapeOpacity listener in system-designer applies the
+            // SVG-side fill-opacity. Keeps grid + inspector in sync.
             const currentOpacity = (cell.get('shapeOpacity') as number) ?? 100;
             const { row: opacityRow } = this.buildStepperRow('Opacity', 0, 100, 5, currentOpacity, (v) => {
                 cell.set('shapeOpacity', v);
-                const view = this.paper?.findViewByModel(cell);
-                if (view) applyShapeFillOpacity(view, v / 100);
             }, 100);
             styleFields.appendChild(opacityRow);
 
@@ -2431,6 +2334,10 @@ export class PropertyPanel {
         this.currentLink = null;
         this.currentZone = null;
 
+        // Drop any previous areaCorners change listener before rebuilding.
+        this.areaCornerSyncCleanup?.();
+        this.areaCornerSyncCleanup = null;
+
         this.areaSection.innerHTML = '';
 
         const propsPanel = document.createElement('div');
@@ -2575,10 +2482,11 @@ export class PropertyPanel {
         if (!isDoubleArrow) accordion.appendChild(cornerLi);
 
         const CK = ['tl', 'tr', 'bl', 'br'] as const;
-        // Migrate legacy single-value fields into per-corner data
+        // Migrate legacy single-value fields into per-corner data.
+        // Default is "default" (= plain rectangle, no corner mods).
         let saved = el.get('areaCorners') as Record<string, { style: string; radius: number }> | undefined;
         if (!saved || !saved.tl) {
-            const legacyStyle = (el.get('cornerStyle') as string) || 'rounded';
+            const legacyStyle = (el.get('cornerStyle') as string) || 'default';
             const legacyRadius = (el.get('areaRadius') as number) ?? 0;
             saved = {};
             for (const k of CK) saved[k] = { style: legacyStyle, radius: legacyRadius };
@@ -2596,55 +2504,18 @@ export class PropertyPanel {
         const cornerSvg = carbonIconToString(Corner16 as CarbonIcon);
         const rotIcon = (deg: number) => `<span style="display:inline-flex;transform:rotate(${deg}deg)">${cornerSvg}</span>`;
 
-        const buildCornerPath = () => {
-            const tl = cornerVals.tl, tr = cornerVals.tr, br = cornerVals.br, bl = cornerVals.bl;
-            const rTL = tl.radius, rTR = tr.radius, rBR = br.radius, rBL = bl.radius;
-
-            const parts: string[] = [];
-
-            // Start: top-left corner
-            if (rTL <= 0) {
-                parts.push('M 0 0');
-            } else if (tl.style === 'rounded') {
-                parts.push(`M 0 ${rTL} A ${rTL} ${rTL} 0 0 1 ${rTL} 0`);
-            } else {
-                parts.push(`M 0 ${rTL} L ${rTL} 0`);
-            }
-
-            // Top edge → top-right corner
-            if (rTR <= 0) {
-                parts.push('H calc(w)');
-            } else if (tr.style === 'rounded') {
-                parts.push(`H calc(w-${rTR}) A ${rTR} ${rTR} 0 0 1 calc(w) ${rTR}`);
-            } else {
-                parts.push(`H calc(w-${rTR}) L calc(w) ${rTR}`);
-            }
-
-            // Right edge → bottom-right corner
-            if (rBR <= 0) {
-                parts.push('V calc(h)');
-            } else if (br.style === 'rounded') {
-                parts.push(`V calc(h-${rBR}) A ${rBR} ${rBR} 0 0 1 calc(w-${rBR}) calc(h)`);
-            } else {
-                parts.push(`V calc(h-${rBR}) L calc(w-${rBR}) calc(h)`);
-            }
-
-            // Bottom edge → bottom-left corner
-            if (rBL <= 0) {
-                parts.push('H 0');
-            } else if (bl.style === 'rounded') {
-                parts.push(`H ${rBL} A ${rBL} ${rBL} 0 0 1 0 calc(h-${rBL})`);
-            } else {
-                parts.push(`H ${rBL} L 0 calc(h-${rBL})`);
-            }
-
-            parts.push('Z');
-            return parts.join(' ');
-        };
-
         const applyAllCorners = () => {
+            // Single source of truth: the area's `bodyPath` :d binding reads
+            // `areaCorners` and re-renders. No direct body/d manipulation.
+            // Drop any legacy body/d carried over from older builds so the
+            // binding can take effect.
+            if (el.attr('body/d') != null) el.removeAttr('body/d');
             el.set('areaCorners', { ...cornerVals });
-            el.attr('body/d', buildCornerPath());
+            updateRadiusVisibility();
+            // Inform the canvas so it can refresh the corner-radius diamond
+            // tools (which depend on the style: default → none, otherwise →
+            // shown). Listener lives in system-designer.ts.
+            document.dispatchEvent(new CustomEvent('nextrack:area-corners-style-changed', { detail: { cellId: el.id } }));
         };
 
         // ── Style dropdown (shared) ────────────────────────────────────
@@ -2656,7 +2527,7 @@ export class PropertyPanel {
         const cornerStyleSelect = document.createElement('select');
         cornerStyleSelect.style.flex = '0 0 160px';
         cornerStyleSelect.style.width = '160px';
-        for (const [val, txt] of [['rounded', 'Rounded'], ['cut', 'Cut']]) {
+        for (const [val, txt] of [['default', 'Default'], ['rounded', 'Rounded'], ['cut', 'Cut']]) {
             const opt = document.createElement('option');
             opt.value = val;
             opt.textContent = txt;
@@ -2686,15 +2557,33 @@ export class PropertyPanel {
         toggleBtn.className = 'nr-ad__number-btn nr-corner-toggle-btn' + (independent ? ' nr-corner-toggle--active' : '');
         toggleBtn.title = 'Independent corners';
         toggleBtn.innerHTML = select02Icon;
+        // The Independent toggle is meaningless in polygon mode (the grid
+        // would just stay hidden); drop it from the UI entirely there.
+        if (((el.get('normalizedVerts') as [number, number][]) ?? []).length >= 3) {
+            toggleBtn.style.display = 'none';
+        }
 
         const uniStepper = uniRadRow.querySelector<HTMLElement>('.nr-ad__number-stepper');
         if (uniStepper) uniStepper.appendChild(toggleBtn);
         cornerBody.appendChild(uniRadRow);
 
+        // Polygon mode: radius is set per-vertex by the yellow on-canvas
+        // diamonds, not by the inspector — only the style dropdown remains
+        // relevant. Default style: radius is meaningless (plain rect/path).
+        // Style change still flows through applyAllCorners → areaCorners.tl.style.
+        const hasCustomPath = ((el.get('normalizedVerts') as [number, number][]) ?? []).length >= 3;
+        const isDefaultStyle = cornerVals.tl.style === 'default';
+        const updateRadiusVisibility = () => {
+            const hideRadius = hasCustomPath || cornerVals.tl.style === 'default';
+            uniRadRow.style.display = hideRadius ? 'none' : '';
+            indepWrap.style.display = (independent && !hideRadius) ? '' : 'none';
+        };
+        if (hasCustomPath || isDefaultStyle) uniRadRow.style.display = 'none';
+
         // ── Independent corner inputs (2×2 grid) ──────────────────────
         const indepWrap = document.createElement('div');
         indepWrap.className = 'nr-corner-grid';
-        indepWrap.style.display = independent ? '' : 'none';
+        indepWrap.style.display = (independent && !hasCustomPath) ? '' : 'none';
         const cornerDeg: Record<string, number> = { tl: 0, tr: 90, br: 180, bl: 270 };
 
         const gridEl = document.createElement('div');
@@ -2767,6 +2656,29 @@ export class PropertyPanel {
             setUnifiedReadOnly(true);
         }
 
+        // Reflect external `areaCorners` mutations (yellow on-canvas radius
+        // handles) back into the steppers. Compares per-key so the sliders
+        // only repaint when something actually changed.
+        const syncFromModel = () => {
+            const fromModel = el.get('areaCorners') as Record<string, { style: string; radius: number }> | undefined;
+            if (!fromModel) return;
+            let dirty = false;
+            for (const k of CK) {
+                const spec = fromModel[k];
+                if (!spec) continue;
+                if (spec.radius !== cornerVals[k].radius || spec.style !== cornerVals[k].style) {
+                    cornerVals[k] = { ...spec };
+                    indepInputs[k].value = String(spec.radius);
+                    const d = indepInputs[k].closest('.nr-sd-number-row')?.querySelector<HTMLInputElement>('.nr-sd-number-display');
+                    if (d) d.value = `${spec.radius}px`;
+                    dirty = true;
+                }
+            }
+            if (dirty) syncUnifiedDisplay();
+        };
+        el.on('change:areaCorners', syncFromModel);
+        this.areaCornerSyncCleanup = () => el.off('change:areaCorners', syncFromModel);
+
         propsPanel.appendChild(accordion);
         this.areaSection.appendChild(propsPanel);
 
@@ -2778,6 +2690,179 @@ export class PropertyPanel {
         this.areaSection.appendChild(notesPanel);
 
         this.titleTextEl.textContent = 'Area Inspector';
+        this.hideAllSections();
+        this.areaSection.style.display = '';
+        this.duplicateBtn.parentElement!.style.display = '';
+        this.duplicateBtn.textContent = 'Duplicate';
+        this.duplicateZoneBtn.parentElement!.style.display = 'none';
+        this.deleteBtn.parentElement!.style.display = '';
+        this.deleteBtn.textContent = 'Delete';
+        this.overflowBtn.style.display = '';
+        this.closeOverflowMenu();
+        this.el.classList.remove('inspector-hidden');
+    }
+
+    /**
+     * Dedicated inspector for DoubleArrow. Kept separate from `showArea`
+     * because the two shapes share no domain logic beyond rendering generic
+     * style properties — mixing them led to crashes (Edit-Path actions
+     * triggered for arrows that have no path-edit code) and stale UI
+     * (Area's blue/50%-opacity defaults shown for a grey arrow). Reads
+     * canonical state from the model via `el.get(...)` so the inspector and
+     * canvas stay in sync via the same chokepoints used everywhere else.
+     */
+    showDoubleArrow(el: dia.Element): void {
+        this.currentNode = null;
+        this.currentLink = null;
+        this.currentZone = null;
+
+        // DoubleArrow has no Corner accordion → no corner sync listener.
+        this.areaCornerSyncCleanup?.();
+        this.areaCornerSyncCleanup = null;
+
+        this.areaSection.innerHTML = '';
+
+        const propsPanel = document.createElement('div');
+        const notesPanel = document.createElement('div');
+        notesPanel.className = 'inspector-notes-panel';
+        const tabs = this.buildTabBar([
+            { label: 'Properties', panel: propsPanel },
+            { label: 'Notes', panel: notesPanel },
+        ]);
+        this.areaSection.appendChild(tabs);
+
+        const accordion = document.createElement('ul');
+        accordion.className = 'cds--accordion';
+
+        // ── Design section ─────────────────────────────────────────────
+        const { li: designLi, body: designBody } = this.buildAccordionSection('Design');
+        accordion.appendChild(designLi);
+
+        // Name
+        const { row: nameRow, input: nameInput } = this.buildRow('arrow-name', 'Name', 'Double Arrow');
+        nameInput.value = (el.attr('label/text') as string) || '';
+        nameInput.addEventListener('input', () => { el.attr('label/text', nameInput.value); });
+        designBody.appendChild(nameRow);
+
+        // Label Position (shared helper — works for any rect-bounded shape)
+        designBody.appendChild(this.buildAreaLabelPositionRow(el));
+
+        // Fill color + opacity → chokepoint
+        const applyFill = () => {
+            const col = (el.get('areaColor') as string) || '#525252';
+            const opacity = parseFloat(String(el.get('areaOpacity') ?? 50)) / 100;
+            const r = parseInt(col.slice(1, 3), 16);
+            const g = parseInt(col.slice(3, 5), 16);
+            const b = parseInt(col.slice(5, 7), 16);
+            el.attr('body/fill', `rgba(${r},${g},${b},${opacity})`);
+            el.attr('label/fill', col);
+        };
+        const colorRow = document.createElement('div');
+        colorRow.className = 'inspector-row';
+        const colorLabel = document.createElement('label');
+        colorLabel.textContent = 'Fill Color';
+        colorRow.appendChild(colorLabel);
+        const hexWrap = this.buildColorPicker(
+            (el.get('areaColor') as string) || '#525252',
+            (c) => { el.set('areaColor', c); applyFill(); },
+        );
+        colorRow.appendChild(hexWrap);
+        designBody.appendChild(colorRow);
+
+        const { row: opacityRow } = this.buildStepperRow('Opacity', 0, 100, 1, el.get('areaOpacity') ?? 50, (v) => {
+            el.set('areaOpacity', v);
+            applyFill();
+        });
+        designBody.appendChild(opacityRow);
+
+        // ── Outline section ────────────────────────────────────────────
+        const { li: outlineLi, body: outlineBody } = this.buildAccordionSection('Outline');
+        accordion.appendChild(outlineLi);
+
+        const outlineStyleRow = document.createElement('div');
+        outlineStyleRow.className = 'inspector-row';
+        const outlineStyleLabel = document.createElement('label');
+        outlineStyleLabel.textContent = 'Style';
+        outlineStyleRow.appendChild(outlineStyleLabel);
+        const outlineSelect = document.createElement('select');
+        outlineSelect.style.flex = '0 0 160px';
+        outlineSelect.style.width = '160px';
+        for (const [val, txt] of [['none', 'None'], ['dotted', 'Dotted'], ['square-dotted', 'Square Dotted'], ['dashed', 'Dashed'], ['solid', 'Solid']]) {
+            const opt = document.createElement('option');
+            opt.value = val;
+            opt.textContent = txt;
+            outlineSelect.appendChild(opt);
+        }
+        outlineSelect.value = (el.get('outlineStyle') as string) || 'none';
+
+        const applyOutline = () => {
+            const style = outlineSelect.value;
+            const thickness = parseFloat(thicknessInput.value);
+            const color = (el.get('outlineColor') as string) || '#8d8d8d';
+            if (style === 'none') {
+                el.attr('body/stroke', 'none');
+                el.attr('body/stroke-width', 0);
+                el.attr('body/stroke-dasharray', null);
+                el.attr('body/stroke-linecap', null);
+            } else {
+                el.attr('body/stroke', color);
+                el.attr('body/stroke-width', thickness);
+                if (style === 'dotted') {
+                    el.attr('body/stroke-dasharray', `0 ${thickness * 2.5}`);
+                    el.attr('body/stroke-linecap', 'round');
+                } else if (style === 'square-dotted') {
+                    el.attr('body/stroke-dasharray', `${thickness} ${thickness * 2}`);
+                    el.attr('body/stroke-linecap', 'butt');
+                } else if (style === 'dashed') {
+                    el.attr('body/stroke-dasharray', `${thickness * 4} ${thickness * 2.5}`);
+                    el.attr('body/stroke-linecap', 'butt');
+                } else {
+                    el.attr('body/stroke-dasharray', null);
+                    el.attr('body/stroke-linecap', null);
+                }
+            }
+            el.set('outlineStyle', style);
+            el.set('outlineThickness', thickness);
+            outlineDetailsEl.style.display = style === 'none' ? 'none' : '';
+        };
+
+        outlineSelect.addEventListener('change', applyOutline);
+        outlineStyleRow.appendChild(outlineSelect);
+        outlineBody.appendChild(outlineStyleRow);
+
+        const outlineDetailsEl = document.createElement('div');
+        outlineDetailsEl.style.display = ((el.get('outlineStyle') as string) || 'none') === 'none' ? 'none' : '';
+
+        const { row: thicknessRow, input: thicknessInput } = this.buildStepperRow(
+            'Thickness', 0.5, 6, 0.5, el.get('outlineThickness') ?? 2, () => applyOutline(),
+        );
+        outlineDetailsEl.appendChild(thicknessRow);
+
+        const outColorRow = document.createElement('div');
+        outColorRow.className = 'inspector-row';
+        const outColorLabel = document.createElement('label');
+        outColorLabel.textContent = 'Color';
+        outColorRow.appendChild(outColorLabel);
+        const outColorWrap = this.buildColorPicker(
+            (el.get('outlineColor') as string) || '#8d8d8d',
+            (c) => { el.set('outlineColor', c); applyOutline(); },
+        );
+        outColorRow.appendChild(outColorWrap);
+        outlineDetailsEl.appendChild(outColorRow);
+
+        outlineBody.appendChild(outlineDetailsEl);
+
+        propsPanel.appendChild(accordion);
+        this.areaSection.appendChild(propsPanel);
+
+        // Notes
+        const { row: notesRow, input: notesInput } = this.buildRow('arrow-notes', 'Notes', 'Notes', true);
+        (notesInput as HTMLTextAreaElement).value = String(el.get('areaNotes') ?? '');
+        notesInput.addEventListener('input', () => { el.set('areaNotes', notesInput.value); });
+        notesPanel.appendChild(notesRow);
+        this.areaSection.appendChild(notesPanel);
+
+        this.titleTextEl.textContent = 'Double Arrow Inspector';
         this.hideAllSections();
         this.areaSection.style.display = '';
         this.duplicateBtn.parentElement!.style.display = '';
@@ -2909,14 +2994,14 @@ export class PropertyPanel {
         designBody.appendChild(fileRow);
         designBody.appendChild(preview);
 
-        // Grid icon library
-        const gridIcons = getGridIconEntries();
-        if (gridIcons.length > 0) {
+        // Design Icons library (IDB-backed; managed in Admin)
+        const designIcons = getDesignIconEntries();
+        if (designIcons.length > 0) {
             const gridSection = document.createElement('div');
             gridSection.style.marginTop = '8px';
 
             const gridLabel = document.createElement('label');
-            gridLabel.textContent = 'Grid Icons';
+            gridLabel.textContent = 'Design Icons';
             gridLabel.style.display = 'block';
             gridLabel.style.fontSize = '0.8125rem';
             gridLabel.style.marginBottom = '6px';
@@ -2926,7 +3011,7 @@ export class PropertyPanel {
             const iconGrid = document.createElement('div');
             iconGrid.className = 'nr-sd-icon-grid';
 
-            const applyGridIcon = (icon: IconCatalogEntry) => {
+            const applyDesignIcon = (icon: IconCatalogEntry) => {
                 const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(icon.svg);
                 el.attr('iconImage/href', dataUrl);
                 el.attr('iconFlat/href', dataUrl);
@@ -2940,7 +3025,7 @@ export class PropertyPanel {
                 applyIconStanding(el, !!(el.get('iconStanding')));
             };
 
-            for (const icon of gridIcons) {
+            for (const icon of designIcons) {
                 const btn = document.createElement('button');
                 btn.type = 'button';
                 btn.className = 'nr-sd-icon-btn';
@@ -2951,7 +3036,7 @@ export class PropertyPanel {
                         b.classList.remove('nr-sd-icon-btn--selected')
                     );
                     btn.classList.add('nr-sd-icon-btn--selected');
-                    applyGridIcon(icon);
+                    applyDesignIcon(icon);
                 });
                 iconGrid.appendChild(btn);
             }
@@ -3035,7 +3120,7 @@ export class PropertyPanel {
             faceRow.appendChild(faceSwitcher);
         };
 
-        const buildSlider = (label: string, key: string, defaultVal: number, min = -0.5, max = 0.5) => {
+        const buildSlider = (label: string, key: string, defaultVal: number, min = -3, max = 3) => {
             const row = document.createElement('div');
             row.className = 'nr-sd-face-row';
             const sliderLabel = document.createElement('span');
@@ -3051,7 +3136,7 @@ export class PropertyPanel {
             slider.type = 'range';
             slider.min = String(min);
             slider.max = String(max);
-            slider.step = '0.01';
+            slider.step = '0.05';
             slider.value = String((el.get(key) as number) ?? defaultVal);
             slider.style.flex = '1';
             const valLabel = document.createElement('span');
@@ -3072,8 +3157,8 @@ export class PropertyPanel {
             return row;
         };
 
-        const oxRow = buildSlider('Offset X', 'iconOffsetX', 0.22, -1, 1);
-        const oyRow = buildSlider('Offset Y', 'iconOffsetY', -0.22, -0.5, 0.5);
+        const oxRow = buildSlider('Offset X', 'iconOffsetX', 0.22, -3, 3);
+        const oyRow = buildSlider('Offset Y', 'iconOffsetY', -0.22, -3, 3);
 
         const showOffsetSliders = () => {
             const show = !!(el.get('iconStanding')) && !!(el.get('iconData'));

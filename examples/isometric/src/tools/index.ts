@@ -2,5 +2,6 @@ export * from './center-based-height-tool';
 export * from './size-tool';
 export * from './proportional-size-tool';
 export * from './frame-size-tool';
+export * from './area-vertex-tool';
 export * from './rotate-tool';
 export * from './tools';

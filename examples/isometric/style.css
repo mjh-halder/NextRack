@@ -1775,6 +1775,126 @@ html, body {
     border-bottom-color: var(--cds-border-strong-01, #6f6f6f);
 }
 
+/* Text-mode picker panel — shown when the Text tab in the icon picker
+   is active. Same visual language as the search input. */
+.nr-sd-icon-text-panel {
+    margin: 0 0 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.nr-sd-icon-text-label {
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--cds-text-secondary, #525252);
+}
+
+.nr-sd-icon-text-input {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    text-align: center;
+    color: var(--cds-text-primary, #161616);
+    background: var(--cds-field-01, #f4f4f4);
+    border: 0;
+    border-bottom: 1px solid var(--cds-border-strong-01, #8d8d8d);
+    box-sizing: border-box;
+    outline: none;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.nr-sd-icon-text-input:focus {
+    border-bottom-color: var(--cds-focus, #0f62fe);
+    box-shadow: inset 0 -1px 0 0 var(--cds-focus, #0f62fe);
+}
+
+.nr-sd-icon-text-help {
+    margin: 0;
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.6875rem;
+    line-height: 1.4;
+    color: var(--cds-text-helper, #6f6f6f);
+}
+
+.cds--g100 .nr-sd-icon-text-input {
+    color: var(--cds-text-primary, #f4f4f4);
+    background: var(--cds-field-01, #262626);
+    border-bottom-color: var(--cds-border-strong-01, #6f6f6f);
+}
+
+.cds--g100 .nr-sd-icon-text-label,
+.cds--g100 .nr-sd-icon-text-help {
+    color: var(--cds-text-helper, #c6c6c6);
+}
+
+/* Popup shown when clicking the + in the "Icons & Surface Text" section
+   header. Two rows: pick Icon or Surface Text mode for the new entry. */
+.nr-icon-add-picker {
+    position: fixed;
+    z-index: 10000;
+    background: var(--cds-layer-01, #ffffff);
+    border: 1px solid var(--cds-border-subtle-01, #e0e0e0);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+    border-radius: 2px;
+    min-width: 168px;
+    padding: 4px 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.nr-icon-add-picker__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 0;
+    background: transparent;
+    color: var(--cds-text-primary, #161616);
+    font-family: var(--cds-body-compact-01-font-family, 'IBM Plex Sans', sans-serif);
+    font-size: 0.8125rem;
+    cursor: pointer;
+    text-align: left;
+}
+
+.nr-icon-add-picker__row:hover {
+    background: var(--cds-layer-hover-01, #e8e8e8);
+}
+
+.nr-icon-add-picker__icon {
+    display: inline-flex;
+    width: 16px;
+    height: 16px;
+    color: var(--cds-icon-secondary, #525252);
+}
+
+.nr-icon-add-picker__label {
+    flex: 1;
+}
+
+.cds--g100 .nr-icon-add-picker {
+    background: var(--cds-layer-01, #262626);
+    border-color: var(--cds-border-subtle-01, #393939);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.cds--g100 .nr-icon-add-picker__row {
+    color: var(--cds-text-primary, #f4f4f4);
+}
+
+.cds--g100 .nr-icon-add-picker__row:hover {
+    background: var(--cds-layer-hover-01, #353535);
+}
+
+.cds--g100 .nr-icon-add-picker__icon {
+    color: var(--cds-icon-secondary, #c6c6c6);
+}
+
 .nr-sd-icon-scroll {
     max-height: 168px;
     overflow-y: auto;
@@ -4510,6 +4630,23 @@ body:has(#inspector:not(.inspector-hidden)) #layout-bar {
 }
 .joint-tools.nr-tools--hover [joint-selector="handle"] {
     opacity: 1;
+}
+/* Area path-edit handles are always visible while edit mode is active. */
+.joint-tools [joint-selector="handle"].nr-area-edit-handle {
+    opacity: 1;
+}
+/* Yellow corner-radius diamonds: shown only when an area is selected
+   with a non-default corner style — always visible in that mode, not
+   gated by hover. */
+.joint-tools [joint-selector="handle"].nr-area-corner-radius-handle {
+    opacity: 1;
+}
+
+/* Area path-edit mode: hide connection ports while the user is reshaping
+   the polygon — the port dots would compete with the vertex/midpoint
+   handles and on an L-shape rarely sit on a meaningful spot anyway. */
+.joint-element.nr-area-path-editing .joint-port-body {
+    display: none !important;
 }
 
 /* Light mode — soften shape edges one step (Gray 60 instead of near-black #333) */
@@ -10083,5 +10220,31 @@ body:has(#inspector:not(.inspector-hidden)) .nr-et-btn {
 
 .cds--g100 .nr-callout__line {
     background: radial-gradient(circle, #a8a8a8 1.5px, transparent 1.5px) center / 3px 8px repeat-y;
+}
+
+/* Floating value readout shown while dragging on-canvas adjustment
+   handles (e.g. the yellow corner-radius diamonds). Same visual language
+   as callout cards but smaller. Light/dark themes share the structure. */
+.nr-drag-value-tooltip {
+    position: fixed;
+    background: #ffffff;
+    border: 1px solid #d0d0d0;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--cds-text-primary, #161616);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    pointer-events: none;
+    z-index: 9999;
+    font-family: 'IBM Plex Sans', sans-serif;
+    white-space: nowrap;
+}
+
+.cds--g100 .nr-drag-value-tooltip {
+    background: #262626;
+    border-color: #525252;
+    color: var(--cds-text-primary, #f4f4f4);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
 

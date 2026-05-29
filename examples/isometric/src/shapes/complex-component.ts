@@ -28,7 +28,7 @@ import { Rectangle } from './rectangle/rectangle';           // proxy for rectan
 import { Circle } from './circle/circle';     // proxy for circle baseShape
 import { Octagon } from './octagon/octagon';
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape';
-import { ShapeLayer, IconEntry } from './shape-registry';
+import { ShapeLayer, IconEntry, isTextEntry } from './shape-registry';
 import { CONNECT_TOOL_PRESET } from '../tools';
 import { GRID_SIZE, SHAPE_CELL_SIZE } from '../theme';
 
@@ -38,7 +38,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 // SD's ComplexComponent render path uses the same dark/light rules as the
 // CD's direct-instance path (utils.applyShapeStyle). See ADR-0004.
 
-import { resolveStyleColors, icon2DHref, buildCompositeIconSvg } from '../utils';
+import { resolveStyleColors, icon2DHref, buildCompositeIconSvg, buildTextIconSvg } from '../utils';
 import { resolveIconRender } from '../icon-resolver';
 import { isDarkMode } from '../svg-inventory';
 
@@ -418,6 +418,34 @@ function findMainLayer(layers: ShapeLayer[]): ShapeLayer | undefined {
  */
 function liveIconHref(ie: IconEntry, canvasPx: number): string {
     const mode: 'light' | 'dark' = isDarkMode() ? 'dark' : 'light';
+    // Text mode: bypass the catalog/resolver path and build a text composite
+    // directly. Theme-tint behaves the same as Carbon mono icons.
+    if (isTextEntry(ie)) {
+        const textColor = ie.iconColor && ie.iconColor.length > 0
+            ? ie.iconColor
+            : (mode === 'dark' ? '#ffffff' : '#161616');
+        // Bg Size X/Y are real pixels; only the legacy bgSize fallback needs
+        // the GU-to-pixel conversion.
+        const bgPxX = ie.bgSizeX ?? ie.bgSize * GRID_SIZE;
+        const bgPxY = ie.bgSizeY ?? ie.bgSize * GRID_SIZE;
+        const textPx = ie.size * GRID_SIZE;
+        const composite = buildTextIconSvg(
+            ie.textContent ?? '',
+            ie.bgEnabled ? ie.bgColor : null,
+            ie.bgShape,
+            ie.bgRadius,
+            ie.bgChamfer,
+            canvasPx,
+            bgPxX,
+            textColor,
+            ie.fontWeight ?? 'bold',
+            ie.bgOpacity ?? 100,
+            ie.iconOpacity ?? 100,
+            bgPxY,
+            textPx,
+        );
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(composite)}`;
+    }
     const decision = resolveIconRender(ie, 'isoFace', mode);
     if (!decision) return ie.href ?? '';
     let glyphSvg = decision.glyphSvg;

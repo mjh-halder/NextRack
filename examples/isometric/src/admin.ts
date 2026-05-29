@@ -5,7 +5,7 @@
 // Wiring: initAdmin() is called once from index.ts. show()/hide() are driven by
 // the app-level view switcher in index.ts.
 
-import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon, addAwsIcons, removeAllAwsIcons, getAwsIconCount, addGcpIcons, removeAllGcpIcons, getGcpIconCount, addAzureIcons, removeAllAzureIcons, getAzureIconCount, addGridIcon, removeGridIcon, getGridIconCount, onCatalogChange, ensureFullCatalog, ensureCarbonIcons, extractSvgEntriesFromZip } from './icon-catalog';
+import { ICON_CATALOG, IconCatalogEntry, getIconById, addUploadedIcon, addAwsIcons, removeAllAwsIcons, getAwsIconCount, addGcpIcons, removeAllGcpIcons, getGcpIconCount, addAzureIcons, removeAllAzureIcons, getAzureIconCount, addDesignIcons, removeAllDesignIcons, getDesignIconCount, onCatalogChange, ensureFullCatalog, ensureCarbonIcons, extractSvgEntriesFromZip } from './icon-catalog';
 import { renderIcon } from './icon-renderer';
 import { carbonIconToString, CarbonIcon } from './icons';
 import Edit16 from '@carbon/icons/es/edit/16.js';
@@ -1125,10 +1125,11 @@ function renderIconConfig(container: HTMLElement): void {
     }
 
     const packs: PackDef[] = [
-        { id: 'svg',   label: 'Custom SVG',  accept: '.svg,image/svg+xml', getCount: () => 0, addFn: null, removeFn: null },
-        { id: 'aws',   label: 'AWS',         accept: '.zip,application/zip', getCount: getAwsIconCount,   addFn: addAwsIcons,   removeFn: removeAllAwsIcons },
-        { id: 'gcp',   label: 'GCP',         accept: '.zip,application/zip', getCount: getGcpIconCount,   addFn: addGcpIcons,   removeFn: removeAllGcpIcons },
-        { id: 'azure', label: 'Azure',       accept: '.zip,application/zip', getCount: getAzureIconCount, addFn: addAzureIcons, removeFn: removeAllAzureIcons },
+        { id: 'svg',    label: 'Custom SVG',   accept: '.svg,image/svg+xml',   getCount: () => 0,            addFn: null,             removeFn: null },
+        { id: 'design', label: 'Design Icons', accept: '.zip,application/zip', getCount: getDesignIconCount, addFn: addDesignIcons,   removeFn: removeAllDesignIcons },
+        { id: 'aws',    label: 'AWS',          accept: '.zip,application/zip', getCount: getAwsIconCount,    addFn: addAwsIcons,      removeFn: removeAllAwsIcons },
+        { id: 'gcp',    label: 'GCP',          accept: '.zip,application/zip', getCount: getGcpIconCount,    addFn: addGcpIcons,      removeFn: removeAllGcpIcons },
+        { id: 'azure',  label: 'Azure',        accept: '.zip,application/zip', getCount: getAzureIconCount,  addFn: addAzureIcons,    removeFn: removeAllAzureIcons },
     ];
 
     const importSection = document.createElement('div');
@@ -1316,7 +1317,7 @@ function buildSections(host: HTMLElement): void {
     host.innerHTML = '';
     const cfg  = getAllConfig();
     const term = iconSearchTerm.trim();
-    const vendorSources = new Set(['aws', 'gcp', 'azure']);
+    const vendorSources = new Set(['aws', 'gcp', 'azure', 'design']);
 
     const usedIds = getUsedIconIds();
 
@@ -1386,69 +1387,15 @@ function buildSections(host: HTMLElement): void {
                   emptyText: term ? 'No matches.' : 'No icons in this section.', primaryTarget: 'general', showRemove: true }),
         },
         {
-            key: 'grid-icons', label: 'Grid Icons',
-            count: getGridIconCount(),
+            key: 'design', label: 'Design Icons',
+            count: getDesignIconCount(),
             build: () => {
-                const wrap = document.createElement('div');
-                // Upload row
-                const uploadRow = document.createElement('div');
-                uploadRow.className = 'nr-admin__section';
-                uploadRow.style.marginBottom = '12px';
-                const uploadHead = document.createElement('div');
-                uploadHead.style.display = 'flex';
-                uploadHead.style.alignItems = 'center';
-                uploadHead.style.gap = '8px';
-                uploadHead.style.marginBottom = '8px';
-                const uploadLbl = document.createElement('span');
-                uploadLbl.className = 'nr-admin__section-title';
-                uploadLbl.textContent = 'Upload SVG';
-                uploadHead.appendChild(uploadLbl);
-                const gridFileInput = document.createElement('input');
-                gridFileInput.type = 'file';
-                gridFileInput.accept = '.svg,image/svg+xml';
-                gridFileInput.style.display = 'none';
-                const gridUploadBtn = document.createElement('label');
-                gridUploadBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
-                gridUploadBtn.textContent = 'Upload SVG';
-                gridUploadBtn.style.cursor = 'pointer';
-                gridUploadBtn.addEventListener('click', () => gridFileInput.click());
-                gridFileInput.addEventListener('change', () => {
-                    const file = gridFileInput.files?.[0];
-                    if (!file) return;
-                    const lbl = file.name.replace(/\.[^.]+$/, '');
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                        addGridIcon(lbl, reader.result as string);
-                        buildCtx?.renderSections();
-                    };
-                    reader.readAsText(file);
-                    gridFileInput.value = '';
-                });
-                uploadHead.appendChild(gridFileInput);
-                uploadHead.appendChild(gridUploadBtn);
-                uploadRow.appendChild(uploadHead);
-                wrap.appendChild(uploadRow);
-
-                // Icon grid with remove buttons
-                const gridIcons = ICON_CATALOG.filter(i => i.source === 'grid-icon' && matchesSearch(i, term));
-                if (gridIcons.length > 0) {
-                    const grid = document.createElement('div');
-                    grid.className = 'nr-admin__icon-compact-grid';
-                    for (const icon of gridIcons) {
-                        grid.appendChild(buildTile(icon, {
-                            titleAction: icon.label,
-                            onClick: null,
-                            showRemove: true,
-                            onRemove: () => { removeGridIcon(icon.id); buildCtx?.renderSections(); },
-                        }));
-                    }
-                    wrap.appendChild(grid);
-                } else {
-                    const empty = document.createElement('p');
-                    empty.className = 'nr-admin__section-helper';
-                    empty.textContent = term ? 'No grid icons match.' : 'No grid icons uploaded yet. Use the button above to add SVG files.';
-                    wrap.appendChild(empty);
-                }
+                const wrap = buildTabWithInUse(
+                    i => i.source === 'design',
+                    { title: 'Design Icons', helper: 'Monochrome SVGs for the System Designer Icon element. Theme-tinted automatically (dark in light mode, light in dark mode). Import a ZIP pack via the import section below.',
+                      icons: ICON_CATALOG.filter(i => i.source === 'design' && matchesSearch(i, term)),
+                      emptyText: term ? 'No design icons match.' : 'No design icons loaded. Upload a ZIP using the import section below.', primaryTarget: null, showRemove: false });
+                if (buildCtx?.importSection) wrap.appendChild(buildCtx.importSection);
                 return wrap;
             },
         },

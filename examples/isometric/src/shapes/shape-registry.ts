@@ -50,6 +50,26 @@ export interface IconEntry {
     href?: string;
     iconOpacity?: number;
     bgOpacity?: number;
+    /**
+     * Surface mode discriminator. 'text' = surface text entry; otherwise
+     * treated as an icon entry (current behaviour, backwards-compatible).
+     * Explicit flag so a not-yet-filled text entry (textContent === '') is
+     * still rendered/UI'd in text mode.
+     */
+    surfaceMode?: 'icon' | 'text';
+    /**
+     * Text content (≤3 chars) for `surfaceMode === 'text'`. Empty = the
+     * entry exists but hasn't been typed yet.
+     */
+    textContent?: string;
+    /** Font weight for text-mode entries. Default 'bold' (PowerPoint convention). */
+    fontWeight?: 'normal' | 'bold';
+    /**
+     * Background width/height as separate axes (text-mode only). When unset,
+     * the renderer uses `bgSize` for both axes (current single-axis behaviour).
+     */
+    bgSizeX?: number;
+    bgSizeY?: number;
 }
 
 /**
@@ -152,6 +172,11 @@ export function defaultShapeLayer(partial: Partial<ShapeLayer> = {}): ShapeLayer
         icons: [],
         ...partial,
     };
+}
+
+/** True when this entry is in surface-text mode (vs. icon mode). */
+export function isTextEntry(ie: IconEntry): boolean {
+    return ie.surfaceMode === 'text';
 }
 
 /** Helper: make a new IconEntry with default settings and a fresh stable id. */

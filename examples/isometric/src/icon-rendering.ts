@@ -153,7 +153,7 @@ export function exportBakedIconRenderingCode(): string {
 
 /**
  * Map a catalog `IconSource` to the configurable vendor bucket. Sources that
- * don't have their own bucket (custom, grid-icon, uploaded) inherit Carbon's
+ * don't have their own bucket (custom, design, uploaded) inherit Carbon's
  * mono treatment because they're line art designed to be tinted.
  */
 export function vendorForSource(source: string | undefined | null): IconVendor {
@@ -168,7 +168,7 @@ export function vendorForSource(source: string | undefined | null): IconVendor {
 // every catalog source with a Policy declaring which user-overrides apply on
 // which surface. Edited rarely — change behaviour here, not at render sites.
 
-export type IconFamily = 'carbon' | 'aws' | 'azure' | 'gcp' | 'uploaded';
+export type IconFamily = 'carbon' | 'aws' | 'azure' | 'gcp' | 'uploaded' | 'design';
 
 export type IconTintMode = 'original' | 'theme-mono';
 
@@ -227,6 +227,16 @@ export const ICON_FAMILY_POLICIES: Record<IconFamily, IconFamilyPolicy> = {
         supportsIsoBackground: true,
         supportsUserIconColor: true,
     },
+    // Design Icons: bundled + admin-imported monochrome SVGs for the System
+    // Designer Icon element. Treated like Carbon — theme-tinted everywhere so
+    // black source SVGs render dark in light mode and light in dark mode.
+    design: {
+        defaultTint: { recognition: 'theme-mono', grid2d: 'theme-mono', isoFace: 'theme-mono' },
+        usesVendor2DBackground: false,
+        supportsMonochrome: false,
+        supportsIsoBackground: true,
+        supportsUserIconColor: true,
+    },
 };
 
 export function familyForSource(source: string | undefined | null): IconFamily {
@@ -235,9 +245,9 @@ export function familyForSource(source: string | undefined | null): IconFamily {
         case 'azure':    return 'azure';
         case 'gcp':      return 'gcp';
         case 'uploaded': return 'uploaded';
+        case 'design':   return 'design';
         case 'carbon':
         case 'custom':
-        case 'grid-icon':
         default:         return 'carbon';
     }
 }

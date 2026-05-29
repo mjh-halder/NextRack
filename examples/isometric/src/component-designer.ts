@@ -4,7 +4,7 @@ import { cellNamespace } from './shapes';
 import { Rectangle } from './shapes/rectangle/rectangle';
 import { Link } from './shapes/link/link';
 import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFactory } from './shapes/shape-factories';
-import { drawGrid, switchView, transformationMatrix, applyShapeStyle, applyShapeFillOpacity, buildCompositeIconSvg, icon2DHref } from './utils';
+import { drawGrid, switchView, transformationMatrix, applyShapeStyle, applyShapeFillOpacity, buildCompositeIconSvg, buildTextIconSvg, icon2DHref } from './utils';
 import { applyTheme } from './index';
 import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
 import { parseSvgFootprint } from './svg-footprint';
@@ -47,6 +47,8 @@ import Asleep16 from '@carbon/icons/es/asleep/16.js';
 import Light16 from '@carbon/icons/es/light/16.js';
 import Add16 from '@carbon/icons/es/add/16.js';
 import AddLarge16 from '@carbon/icons/es/add--large/16.js';
+import CharacterSentenceCase16 from '@carbon/icons/es/character--sentence-case/16.js';
+import Image16 from '@carbon/icons/es/image/16.js';
 import Subtract16 from '@carbon/icons/es/subtract/16.js';
 import Tuning16 from '@carbon/icons/es/tuning/16.js';
 import Draggable16 from '@carbon/icons/es/draggable/16.js';
@@ -1763,7 +1765,7 @@ function applyIconToCurrentShape() {
     // globals as a "legacy" fallback. With the entries as SoT, these checks
     // are redundant — and would re-introduce the drift the input-sync ADR
     // documents.)
-    if (iconEntries.length > 0 && iconEntries.some(e => !!e.iconId || e.bgEnabled)) {
+    if (iconEntries.length > 0 && iconEntries.some(e => !!e.iconId || e.bgEnabled || e.surfaceMode === 'text')) {
         const { width: shapeW, height: shapeH } = iconShape.size();
         const iH = iconShape.isometricHeight;
 
@@ -1779,44 +1781,74 @@ function applyIconToCurrentShape() {
         const mode = isDarkMode() ? 'dark' : 'light';
         for (let i = iconEntries.length - 1; i >= 0; i--) {
             const ie = iconEntries[i];
-            if (!ie.iconId && !ie.bgEnabled) continue;
-            const ieBgSize = ie.bgSize;
-            const ieCanvasGU = Math.max(ie.size, ieBgSize);
-            const ieCanvasPx = ieCanvasGU * GRID_SIZE;
+            const isText = ie.surfaceMode === 'text';
+            if (!ie.iconId && !ie.bgEnabled && !isText) continue;
+            // Bg Size X/Y are real pixels; bgSize is GU and gets converted.
+            const ieBgPxX = ie.bgSizeX ?? ie.bgSize * GRID_SIZE;
+            const ieBgPxY = ie.bgSizeY ?? ie.bgSize * GRID_SIZE;
             const ieIconPx = ie.size * GRID_SIZE;
-            const ieBgPx = ieBgSize * GRID_SIZE;
+            const ieBgPx = ie.bgSize * GRID_SIZE;
+            // Canvas must contain the largest of icon/text size and bg axes.
+            const ieCanvasPx = Math.max(ieIconPx, ieBgPxX, ieBgPxY);
 
-            // All vendor / mono / iconColor / background decisions are made by
-            // the central resolver. This loop only adds the iso-face transform.
-            const decision = resolveIconRender(ie, 'isoFace', mode);
-            if (!decision) continue;
+            let ieHref: string;
+            if (isText) {
+                // Text mode bypasses the catalog/resolver path entirely. Theme
+                // tint behaves like a Carbon mono glyph.
+                const textColor = ie.iconColor && ie.iconColor.length > 0
+                    ? ie.iconColor
+                    : (mode === 'dark' ? '#ffffff' : '#161616');
+                const ieSvg = buildTextIconSvg(
+                    ie.textContent ?? '',
+                    ie.bgEnabled ? ie.bgColor : null,
+                    ie.bgShape,
+                    ie.bgRadius,
+                    ie.bgChamfer,
+                    ieCanvasPx,
+                    ieBgPxX,
+                    textColor,
+                    ie.fontWeight ?? 'bold',
+                    ie.bgOpacity ?? 100,
+                    ie.iconOpacity ?? 100,
+                    ieBgPxY,
+                    ieIconPx, // text glyph size — driven by ie.size, independent of bg
+                );
+                ieHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(ieSvg)}`;
+            } else {
+                // All vendor / mono / iconColor / background decisions are made
+                // by the central resolver. This loop only adds the iso-face
+                // transform.
+                const decision = resolveIconRender(ie, 'isoFace', mode);
+                if (!decision) continue;
 
-            // Carbon-style line art ships with fill="currentColor"; the data
-            // URI has no paint context, so resolve to a concrete colour. The
-            // feColorMatrix (when iconColor is set) will overpaint it anyway.
-            let ieSvgStr = decision.glyphSvg;
-            if (ieSvgStr) {
-                const defaultGlyphColor = mode === 'dark' ? '#ffffff' : '#000000';
-                ieSvgStr = ieSvgStr.replace(/currentColor/g, defaultGlyphColor);
+                // Carbon-style line art ships with fill="currentColor"; the
+                // data URI has no paint context, so resolve to a concrete
+                // colour. The feColorMatrix (when iconColor is set) will
+                // overpaint it anyway.
+                let ieSvgStr = decision.glyphSvg;
+                if (ieSvgStr) {
+                    const defaultGlyphColor = mode === 'dark' ? '#ffffff' : '#000000';
+                    ieSvgStr = ieSvgStr.replace(/currentColor/g, defaultGlyphColor);
+                }
+                const ieIconColor = decision.glyphTint === 'original' ? null : decision.glyphTint;
+                const bg = decision.background;
+
+                const ieSvg = buildCompositeIconSvg(
+                    ieSvgStr || null,
+                    bg?.color ?? null,
+                    (bg?.shape ?? ie.bgShape),
+                    false, // applyWhiteFilter — superseded by glyphTint
+                    bg?.radius ?? ie.bgRadius,
+                    bg?.chamfer ?? ie.bgChamfer,
+                    'normal',
+                    false,
+                    ieCanvasPx, ieIconPx, ieBgPx,
+                    ieIconColor,
+                    ie.iconOpacity ?? 100,
+                    bg?.opacity ?? 100,
+                );
+                ieHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(ieSvg)}`;
             }
-            const ieIconColor = decision.glyphTint === 'original' ? null : decision.glyphTint;
-            const bg = decision.background;
-
-            const ieSvg = buildCompositeIconSvg(
-                ieSvgStr || null,
-                bg?.color ?? null,
-                (bg?.shape ?? ie.bgShape),
-                false, // applyWhiteFilter — superseded by glyphTint
-                bg?.radius ?? ie.bgRadius,
-                bg?.chamfer ?? ie.bgChamfer,
-                'normal',
-                false,
-                ieCanvasPx, ieIconPx, ieBgPx,
-                ieIconColor,
-                ie.iconOpacity ?? 100,
-                bg?.opacity ?? 100,
-            );
-            const ieHref = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(ieSvg)}`;
             ie.href = ieHref;
             const ox = ie.offsetX * GRID_SIZE;
             const oy = ie.offsetY * GRID_SIZE;
@@ -1846,9 +1878,9 @@ function applyIconToCurrentShape() {
         // 2D: single Main icon, rendered through the shared icon2DHref so
         // SD and CD show pixel-identical output. Avoids the per-source
         // divergence that the previous inline 2D composite caused.
-        const mainIE = iconEntries.find(e => !!e.iconId && e.isMain)
+        const mainIE = iconEntries.find(e => (!!e.iconId || e.surfaceMode === 'text') && e.isMain)
             ?? (iconEntries.length === 1 ? iconEntries[0] : undefined);
-        const twoDHref = mainIE?.iconId ? icon2DHref(mainIE) : '';
+        const twoDHref = (mainIE?.iconId || mainIE?.surfaceMode === 'text') ? icon2DHref(mainIE!) : '';
 
         if (isoParts.length > 0 || twoDHref) {
             // Iso composite: large viewBox to accommodate all face projections
@@ -1908,12 +1940,14 @@ function buildIconContent(container: HTMLElement) {
 
     const getVisible = () => getVisibleIcons('complexShape');
 
-    // Icon source tabs
-    let iconSourceTab: 'common' | 'aws' | 'gcp' | 'azure' = 'common';
+    // Icon source tabs. Text mode lives in a separate entry kind (added via
+    // the dedicated "T+" button in the slot list) and bypasses these tabs.
+    type IconSourceTab = 'common' | 'aws' | 'gcp' | 'azure';
+    let iconSourceTab: IconSourceTab = 'common';
     const tabRow = document.createElement('div');
     tabRow.className = 'nr-sd-icon-tabs';
 
-    const tabDefs: Array<{ key: 'common' | 'aws' | 'gcp' | 'azure'; label: string }> = [
+    const tabDefs: Array<{ key: IconSourceTab; label: string }> = [
         { key: 'common', label: 'Common' },
         { key: 'aws',    label: 'AWS' },
         { key: 'gcp',    label: 'GCP' },
@@ -1929,6 +1963,7 @@ function buildIconContent(container: HTMLElement) {
         btn.addEventListener('click', () => {
             iconSourceTab = td.key;
             tabBtns.forEach((b, k) => b.classList.toggle('nr-sd-icon-tab--active', k === td.key));
+            updateContentVisibility();
             renderGrid();
             syncIconControlVisibility();
         });
@@ -2068,8 +2103,17 @@ function buildIconContent(container: HTMLElement) {
         populateGrid();
     };
 
+    // Per-entry mode (surfaceMode) drives content visibility. Whenever the
+    // active entry changes we re-sync the picker UI so the right editor
+    // (tabs/grid for icon, text input for text) is shown.
+    let lastPopulatedEntryId: string | null = null;
     const populateGrid = () => {
         const entry = currentEditingEntry();
+        const entryId = entry?.id ?? null;
+        if (entryId !== lastPopulatedEntryId) {
+            lastPopulatedEntryId = entryId;
+            updateContentVisibility();
+        }
         grid.querySelectorAll<HTMLElement>('.nr-sd-icon-btn').forEach(btn => {
             const id = btn.dataset.iconId ?? '';
             const isSelected = id === ''
@@ -2077,6 +2121,8 @@ function buildIconContent(container: HTMLElement) {
                 : id === entry?.iconId;
             btn.classList.toggle('nr-sd-icon-btn--selected', isSelected);
         });
+        // Keep text input in sync with the current entry whenever populated.
+        if (entry?.surfaceMode === 'text') refreshTextPanelFromEntry();
     };
     registerPopulator(populateGrid);
 
@@ -2085,9 +2131,63 @@ function buildIconContent(container: HTMLElement) {
         renderGrid();
     });
 
+    // ── Text-mode picker (sibling of the icon grid) ─────────────────────
+    const textPanel = document.createElement('div');
+    textPanel.className = 'nr-sd-icon-text-panel';
+    textPanel.style.display = 'none';
+
+    const textLbl = document.createElement('label');
+    textLbl.textContent = 'Text (max 3 chars)';
+    textLbl.className = 'nr-sd-icon-text-label';
+    textPanel.appendChild(textLbl);
+
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.className = 'nr-sd-icon-text-input';
+    textInput.maxLength = 3;
+    textInput.placeholder = 'e.g. XL';
+    textPanel.appendChild(textInput);
+
+    const textHelp = document.createElement('p');
+    textHelp.className = 'nr-sd-icon-text-help';
+    textHelp.textContent = 'Bold IBM Plex Sans, theme-tinted by default (dark in light mode, light in dark mode). Background and colour from the inspector apply.';
+    textPanel.appendChild(textHelp);
+
+    const applyText = () => {
+        const value = textInput.value.slice(0, 3);
+        const entry = currentEditingEntry();
+        if (!entry) return;
+        // Clear iconId so the renderer falls into the text branch.
+        updateIcon(entry.id, { textContent: value, iconId: '' });
+        syncIconControlVisibility();
+        if (iconsSectionBodyEl) {
+            const listEl = iconsSectionBodyEl.querySelector('div');
+            if (listEl) renderIconsListFn?.();
+        }
+    };
+    textInput.addEventListener('input', applyText);
+
+    const refreshTextPanelFromEntry = () => {
+        const entry = currentEditingEntry();
+        textInput.value = entry?.textContent ?? '';
+    };
+
+    const updateContentVisibility = () => {
+        // Mode comes from the active entry now — text entries hide the
+        // tab/grid stack, icon entries hide the text input.
+        const isText = currentEditingEntry()?.surfaceMode === 'text';
+        tabRow.style.display     = isText ? 'none' : '';
+        searchRow.style.display  = isText ? 'none' : '';
+        scrollWrap.style.display = isText ? 'none' : '';
+        textPanel.style.display  = isText ? '' : 'none';
+        if (isText) refreshTextPanelFromEntry();
+    };
+
     renderGrid();
 
     container.appendChild(scrollWrap);
+    container.appendChild(textPanel);
+    updateContentVisibility();
 
     // Adaptive icon toggle — only in complex shape + no-bg mode
     // Uses nr-toggle: button-based, ::before thumb, no cds-- conflict.
@@ -2329,13 +2429,18 @@ function buildIconContent(container: HTMLElement) {
             else    applyIconToCurrentShape();
         });
 
-    // Icon Color — same swatch popup pattern as background color
+    // Icon Color (or "Text Color" for text-mode entries) — same swatch
+    // popup pattern as background color.
     const iconColorRow = document.createElement('div');
     iconColorRow.className = 'nr-sd-hex-color-row';
     iconColorRow.style.position = 'relative';
     const iconColorLabel = document.createElement('label');
     iconColorLabel.className = 'nr-sd-number-label';
     iconColorLabel.textContent = 'Icon Color';
+    registerPopulator(() => {
+        const entry = currentEditingEntry();
+        iconColorLabel.textContent = entry?.surfaceMode === 'text' ? 'Text Color' : 'Icon Color';
+    });
 
     const curIconColor = (editingIconIndex >= 0 && iconEntries[editingIconIndex])
         ? ((iconEntries[editingIconIndex] as any).iconColor || '') : '';
@@ -2613,6 +2718,7 @@ function buildIconBackgroundContent(container: HTMLElement) {
     iconBgSettingsWrapEl = bgSettingsWrap;
 
     let bgSizeInputRef: HTMLInputElement;
+    const bgSizeRowWrap = document.createElement('div');
     buildSliderField('Bg Size', 'sd-icon-bg-size', 0.5, 4, 0.1,
         (el) => { bgSizeInputRef = el; el.value = String(currentEditingEntry()?.bgSize ?? 1); },
         (el) => { el.id = 'sd-icon-bg-size-value'; },
@@ -2622,7 +2728,60 @@ function buildIconBackgroundContent(container: HTMLElement) {
             if (entry) updateIcon(entry.id, { bgSize: v });
             else        applyIconToCurrentShape();
         },
-        bgSettingsWrap, 'px');
+        bgSizeRowWrap, 'px');
+    bgSettingsWrap.appendChild(bgSizeRowWrap);
+
+    // Text-mode only: independent Bg Size X / Bg Size Y. Hidden in icon
+    // mode; shown when surfaceMode === 'text'. Defaults derived from
+    // ie.bgSize so a freshly switched entry doesn't snap to 1.0.
+    let bgSizeXInputRef: HTMLInputElement;
+    let bgSizeYInputRef: HTMLInputElement;
+    // Bg Size X/Y are stored in REAL PIXELS (unlike the legacy `bgSize`
+    // which is grid units). The slider exposes pixels directly, the
+    // renderer reads them straight — no GU-to-px conversion needed at
+    // render time. Default fallback for entries created before this
+    // change: bgSize (GU) × GRID_SIZE.
+    const bgSizeXRowWrap = document.createElement('div');
+    buildSliderField('Bg Size X', 'sd-icon-bg-size-x', 4, 128, 1,
+        (el) => {
+            bgSizeXInputRef = el;
+            const e = currentEditingEntry();
+            el.value = String(e?.bgSizeX ?? (e?.bgSize ?? 1) * GRID_SIZE);
+        },
+        (el) => { el.id = 'sd-icon-bg-size-x-value'; },
+        () => {
+            const v = parseFloat(bgSizeXInputRef.value);
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { bgSizeX: v });
+            else        applyIconToCurrentShape();
+        },
+        bgSizeXRowWrap, 'px');
+    bgSettingsWrap.appendChild(bgSizeXRowWrap);
+
+    const bgSizeYRowWrap = document.createElement('div');
+    buildSliderField('Bg Size Y', 'sd-icon-bg-size-y', 4, 128, 1,
+        (el) => {
+            bgSizeYInputRef = el;
+            const e = currentEditingEntry();
+            el.value = String(e?.bgSizeY ?? (e?.bgSize ?? 1) * GRID_SIZE);
+        },
+        (el) => { el.id = 'sd-icon-bg-size-y-value'; },
+        () => {
+            const v = parseFloat(bgSizeYInputRef.value);
+            const entry = currentEditingEntry();
+            if (entry) updateIcon(entry.id, { bgSizeY: v });
+            else        applyIconToCurrentShape();
+        },
+        bgSizeYRowWrap, 'px');
+    bgSettingsWrap.appendChild(bgSizeYRowWrap);
+
+    registerPopulator(() => {
+        const entry = currentEditingEntry();
+        const isText = entry?.surfaceMode === 'text';
+        bgSizeRowWrap.style.display  = isText ? 'none' : '';
+        bgSizeXRowWrap.style.display = isText ? '' : 'none';
+        bgSizeYRowWrap.style.display = isText ? '' : 'none';
+    });
 
     // ── Shape switcher ─────────────────────────────────────────────────────
     const shapeRow = document.createElement('div');
@@ -3428,7 +3587,7 @@ function buildInspectorPanel() {
         iconsHeader.className = 'nr-float-section__header';
         const iconsTitle = document.createElement('span');
         iconsTitle.className = 'nr-float-section__title';
-        iconsTitle.textContent = 'Icons';
+        iconsTitle.textContent = 'Icons & Surface Text';
         iconsHeader.appendChild(iconsTitle);
 
         const iconsAddIcon = carbonIconToString(AddLarge16 as CarbonIcon);
@@ -3437,9 +3596,47 @@ function buildInspectorPanel() {
         iconsAddBtn.type = 'button';
         iconsAddBtn.className = 'nr-float-section__btn';
         iconsAddBtn.innerHTML = iconsAddIcon;
-        iconsAddBtn.title = 'Add icon';
-        // Event listener attached after openIconEditor is defined (see below)
+        iconsAddBtn.title = 'Add icon or surface text';
         iconsHeader.appendChild(iconsAddBtn);
+
+        // Picker popup for the + button: lets the user pick Icon vs. Surface
+        // Text rather than maintaining a second header button. Lives at the
+        // document root so it floats above the inspector accordion.
+        const addPickerEl = document.createElement('div');
+        addPickerEl.className = 'nr-icon-add-picker';
+        addPickerEl.style.display = 'none';
+        document.body.appendChild(addPickerEl);
+
+        const iconRow = document.createElement('button');
+        iconRow.type = 'button';
+        iconRow.className = 'nr-icon-add-picker__row';
+        iconRow.innerHTML = `<span class="nr-icon-add-picker__icon">${carbonIconToString(Image16 as CarbonIcon)}</span><span class="nr-icon-add-picker__label">Icon</span>`;
+        addPickerEl.appendChild(iconRow);
+
+        const textRow = document.createElement('button');
+        textRow.type = 'button';
+        textRow.className = 'nr-icon-add-picker__row';
+        textRow.innerHTML = `<span class="nr-icon-add-picker__icon">${carbonIconToString(CharacterSentenceCase16 as CarbonIcon)}</span><span class="nr-icon-add-picker__label">Surface Text</span>`;
+        addPickerEl.appendChild(textRow);
+
+        const hideAddPicker = () => { addPickerEl.style.display = 'none'; };
+        const showAddPicker = () => {
+            const r = iconsAddBtn.getBoundingClientRect();
+            addPickerEl.style.display = '';
+            // Position below the + button, right-aligned to it.
+            const pickerW = addPickerEl.offsetWidth;
+            addPickerEl.style.top  = `${r.bottom + 4}px`;
+            addPickerEl.style.left = `${Math.max(8, r.right - pickerW)}px`;
+        };
+
+        // Dismiss on outside click.
+        document.addEventListener('mousedown', (e) => {
+            if (addPickerEl.style.display === 'none') return;
+            const t = e.target as Node;
+            if (!addPickerEl.contains(t) && !iconsAddBtn.contains(t)) hideAddPicker();
+        }, true);
+
+        // Event listeners attached after openIconEditor is defined (see below)
         iconsLi.appendChild(iconsHeader);
 
         const iconsBody = document.createElement('div');
@@ -3517,25 +3714,8 @@ function buildInspectorPanel() {
             });
             closeRow.appendChild(closeTitle);
 
-            // Delete button in the popup header — mirrors the list-row remove
-            // button so the user can scrap an icon while it's open. Hidden for
-            // the shape-wide Main icon (which is never deletable).
-            if (!entry.isMain) {
-                const deleteBtn = document.createElement('button');
-                deleteBtn.type = 'button';
-                deleteBtn.className = 'nr-icon-editor-close';
-                deleteBtn.title = 'Delete icon from shape';
-                deleteBtn.style.color = 'var(--cds-support-error, #da1e28)';
-                deleteBtn.innerHTML = carbonIconToString(TrashCan16 as CarbonIcon);
-                deleteBtn.addEventListener('click', () => {
-                    removeIcon(entry.id);
-                    popupEl.style.display = 'none';
-                    editingIconIndex = -1;
-                    clearPopulators();
-                    renderIconsList();
-                });
-                closeRow.appendChild(deleteBtn);
-            }
+            // Delete lives exclusively on the slot-list row (the "−"
+            // button), so the editor popup no longer duplicates it.
 
             const closeBtn = document.createElement('button');
             closeBtn.type = 'button';
@@ -3652,12 +3832,18 @@ function buildInspectorPanel() {
                 // shared icon-renderer so the rules (no monochrome here, no
                 // inline tile color, just an opt-out class for color-bearing
                 // sources) match the trees and palette.
+                // Text entries don't have a catalog icon — show the Carbon
+                // "Character sentence case" glyph as a visual mode hint.
                 const preview = document.createElement('div');
                 preview.className = 'nr-icon-entry-preview';
-                const rendered = renderIcon(entry.iconId, 'list');
-                if (rendered) {
-                    preview.innerHTML = rendered.html;
-                    if (rendered.cssClass) preview.classList.add(rendered.cssClass);
+                if (entry.surfaceMode === 'text') {
+                    preview.innerHTML = carbonIconToString(CharacterSentenceCase16 as CarbonIcon);
+                } else {
+                    const rendered = renderIcon(entry.iconId, 'list');
+                    if (rendered) {
+                        preview.innerHTML = rendered.html;
+                        if (rendered.cssClass) preview.classList.add(rendered.cssClass);
+                    }
                 }
                 row.appendChild(preview);
 
@@ -3748,8 +3934,27 @@ function buildInspectorPanel() {
         // Wire + button now that openIconEditor exists. Seed every new entry
         // with the default Cube glyph so a freshly-added icon never renders
         // as an empty placeholder.
-        iconsAddBtn.addEventListener('click', () => {
+        iconsAddBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            // Toggle the picker so a second click on + dismisses it.
+            if (addPickerEl.style.display !== 'none') { hideAddPicker(); return; }
+            showAddPicker();
+        });
+
+        iconRow.addEventListener('click', () => {
+            hideAddPicker();
             addIcon({ iconId: 'cube' });
+            const arr = currentIconsArray();
+            editingIconIndex = arr.length - 1;
+            renderIconsList();
+            openIconEditor(editingIconIndex);
+        });
+
+        textRow.addEventListener('click', () => {
+            hideAddPicker();
+            // Explicit text mode via surfaceMode discriminator. Empty
+            // textContent is allowed (user can fill it in the editor).
+            addIcon({ iconId: '', textContent: '', surfaceMode: 'text', name: 'Text' });
             const arr = currentIconsArray();
             editingIconIndex = arr.length - 1;
             renderIconsList();

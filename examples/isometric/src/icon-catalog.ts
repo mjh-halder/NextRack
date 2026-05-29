@@ -38,7 +38,7 @@ import { unzipSync } from 'fflate';
 
 import { getCarbonIcons } from './carbon-icons-all';
 
-export type IconSource = 'custom' | 'carbon' | 'uploaded' | 'aws' | 'gcp' | 'azure' | 'grid-icon';
+export type IconSource = 'custom' | 'carbon' | 'uploaded' | 'aws' | 'gcp' | 'azure' | 'design';
 
 export interface IconCatalogEntry {
     id: string;
@@ -52,7 +52,7 @@ export interface IconCatalogEntry {
 /**
  * Whether an icon source carries its own colors and should be rendered as-is
  * (no CSS color filtering). Vendor icons (AWS/Azure/GCP) and user uploads are
- * treated as color-bearing; Carbon/custom/grid-icon are line art designed to
+ * treated as color-bearing; Carbon/custom/design are line art designed to
  * be tinted via `filter: brightness(0)` for theme contrast.
  *
  * Trees and palettes consult this to decide whether to add the `nr-icon-color`
@@ -146,63 +146,6 @@ function writeUploadedIcons(icons: StoredUploadedIcon[]): void {
     } catch (e) {
         console.error('[nextrack] Failed to save uploaded icons:', e);
     }
-}
-
-// ── Grid Icons (persisted in localStorage, used in system-designer Icon element) ──
-
-const GRID_ICON_STORAGE_KEY = 'nr-grid-icons-v1';
-
-interface StoredGridIcon {
-    id: string;
-    label: string;
-    svg: string;
-}
-
-function readGridIcons(): StoredGridIcon[] {
-    try {
-        const raw = localStorage.getItem(GRID_ICON_STORAGE_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
-    } catch {
-        return [];
-    }
-}
-
-function writeGridIcons(icons: StoredGridIcon[]): void {
-    try {
-        localStorage.setItem(GRID_ICON_STORAGE_KEY, JSON.stringify(icons));
-    } catch (e) {
-        console.error('[nextrack] Failed to save grid icons:', e);
-    }
-}
-
-export function addGridIcon(label: string, svg: string): string {
-    const id = `grid-icon:${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const stored = readGridIcons();
-    stored.push({ id, label, svg });
-    writeGridIcons(stored);
-    rebuildCatalog();
-    return id;
-}
-
-export function removeGridIcon(id: string): void {
-    const stored = readGridIcons().filter(u => u.id !== id);
-    writeGridIcons(stored);
-    rebuildCatalog();
-}
-
-export function getGridIconCount(): number {
-    return readGridIcons().length;
-}
-
-export function getGridIconEntries(): IconCatalogEntry[] {
-    return readGridIcons().map(u => ({
-        id: u.id,
-        label: u.label,
-        svg: u.svg,
-        source: 'grid-icon' as const,
-    }));
 }
 
 // ── SVG minification for storage ─────────────────────────────────────────────
@@ -742,6 +685,46 @@ export function getAzureIconCount(): number {
     return readVendorIcons('azure').length;
 }
 
+// ── Design Icons (IDB-backed, used by the System Designer Icon element) ─────
+// Monochrome line-art SVGs (theme-tinted, no per-entry colors). Stored in the
+// same IDB store as the vendor packs so admin import/remove and bootstrap
+// behave identically.
+
+export async function addDesignIcons(entries: Array<{ label: string; svg: string }>): Promise<{ added: number; error?: string }> {
+    const stored = readVendorIcons('design');
+    const existing = new Set(stored.map(s => s.label));
+    let added = 0;
+    for (const e of entries) {
+        if (existing.has(e.label)) continue;
+        stored.push({ id: `design:${e.label}`, label: e.label, svg: minifySvg(e.svg), source: 'design' });
+        added++;
+    }
+    const ok = await idbWriteSource('design', stored);
+    if (!ok) return { added, error: 'Failed to save icons to database.' };
+    rebuildCatalog();
+    return { added };
+}
+
+export async function removeAllDesignIcons(): Promise<number> {
+    const count = readVendorIcons('design').length;
+    await idbWriteSource('design', []);
+    rebuildCatalog();
+    return count;
+}
+
+export function getDesignIconCount(): number {
+    return readVendorIcons('design').length;
+}
+
+export function getDesignIconEntries(): IconCatalogEntry[] {
+    return readVendorIcons('design').map(r => ({
+        id: r.id,
+        label: r.label,
+        svg: r.svg,
+        source: 'design' as const,
+    }));
+}
+
 // ── Catalog rebuild ──────────────────────────────────────────────────────────
 
 type CatalogListener = () => void;
@@ -848,15 +831,8 @@ function rebuildCatalog(): void {
         }
     });
 
-    const gridIcons: IconCatalogEntry[] = readGridIcons().map(u => ({
-        id: u.id,
-        label: u.label,
-        svg: u.svg,
-        source: 'grid-icon' as const,
-    }));
-
     ICON_CATALOG.length = 0;
-    ICON_CATALOG.push(...STATIC_CATALOG, ...uploaded, ...gridIcons, ...vendorEntries);
+    ICON_CATALOG.push(...STATIC_CATALOG, ...uploaded, ...vendorEntries);
     if (carbonEntriesCache) ICON_CATALOG.push(...carbonEntriesCache);
     ICON_BY_ID.clear();
     for (const i of ICON_CATALOG) ICON_BY_ID.set(i.id, i);

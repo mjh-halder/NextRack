@@ -1,19 +1,21 @@
 // Bundled-vendor bootstrap.
 //
-// The app ships with AWS / Azure / GCP icon packs as static ZIP assets under
-// `src/assets/`. On startup, for each vendor whose IndexedDB count is zero,
-// we fetch the bundled ZIP, run the same extract+import pipeline the Admin
-// upload uses, and seed the catalog. If a user has uploaded their own pack
-// (count > 0), we leave it alone — bootstrap defers to user state.
+// The app ships with AWS / Azure / GCP / Design icon packs as static ZIP
+// assets under `src/assets/`. On startup, for each pack whose IndexedDB
+// count is zero, we fetch the bundled ZIP, run the same extract+import
+// pipeline the Admin upload uses, and seed the catalog. If a user has
+// uploaded their own pack (count > 0), we leave it alone — bootstrap
+// defers to user state.
 //
-// Bootstrap runs once per page load. It is fire-and-forget; when each vendor
-// finishes importing, `addAwsIcons` / `addGcpIcons` / `addAzureIcons` call
-// `rebuildCatalog()` internally, which fires `onCatalogChange` listeners and
-// refreshes both palettes.
+// Bootstrap runs once per page load. It is fire-and-forget; when each pack
+// finishes importing, the corresponding addFn calls `rebuildCatalog()`
+// internally, which fires `onCatalogChange` listeners and refreshes both
+// palettes.
 
 import awsZipUrl = require('./assets/AWSIcons.zip');
 import azureZipUrl = require('./assets/AzureIcons.zip');
 import gcpZipUrl = require('./assets/GCPIcons.zip');
+import designZipUrl = require('./assets/DesignIcons.zip');
 
 import {
     catalogReady,
@@ -21,12 +23,14 @@ import {
     addAwsIcons,
     addGcpIcons,
     addAzureIcons,
+    addDesignIcons,
     getAwsIconCount,
     getGcpIconCount,
     getAzureIconCount,
+    getDesignIconCount,
 } from './icon-catalog';
 
-type Vendor = 'aws' | 'gcp' | 'azure';
+type Vendor = 'aws' | 'gcp' | 'azure' | 'design';
 
 interface VendorSpec {
     vendor: Vendor;
@@ -36,9 +40,10 @@ interface VendorSpec {
 }
 
 const SPECS: VendorSpec[] = [
-    { vendor: 'aws',   zipUrl: awsZipUrl,   getCount: getAwsIconCount,   addFn: addAwsIcons   },
-    { vendor: 'gcp',   zipUrl: gcpZipUrl,   getCount: getGcpIconCount,   addFn: addGcpIcons   },
-    { vendor: 'azure', zipUrl: azureZipUrl, getCount: getAzureIconCount, addFn: addAzureIcons },
+    { vendor: 'aws',    zipUrl: awsZipUrl,    getCount: getAwsIconCount,    addFn: addAwsIcons    },
+    { vendor: 'gcp',    zipUrl: gcpZipUrl,    getCount: getGcpIconCount,    addFn: addGcpIcons    },
+    { vendor: 'azure',  zipUrl: azureZipUrl,  getCount: getAzureIconCount,  addFn: addAzureIcons  },
+    { vendor: 'design', zipUrl: designZipUrl, getCount: getDesignIconCount, addFn: addDesignIcons },
 ];
 
 async function loadOne(spec: VendorSpec): Promise<void> {
@@ -61,9 +66,10 @@ async function loadOne(spec: VendorSpec): Promise<void> {
 }
 
 /**
- * Seed empty vendor catalogs (AWS / GCP / Azure) from the bundled ZIP assets.
- * No-op for vendors that already have icons in IndexedDB. Awaits `catalogReady`
- * so the count check sees the hydrated state, then loads vendors in parallel.
+ * Seed empty catalogs (AWS / GCP / Azure / Design) from the bundled ZIP
+ * assets. No-op for packs that already have icons in IndexedDB. Awaits
+ * `catalogReady` so the count check sees the hydrated state, then loads
+ * packs in parallel.
  */
 export async function bootstrapBundledVendorIcons(): Promise<void> {
     await catalogReady;

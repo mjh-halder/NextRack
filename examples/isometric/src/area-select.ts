@@ -158,6 +158,23 @@ export class AreaSelect {
                 const el = cell as dia.Element;
                 el.translate(dx, dy);
             });
+
+            // Move link waypoints along when both endpoints are part of the
+            // group (otherwise their vertices stay at their old absolute
+            // positions and produce kinked edges). Also include any link
+            // explicitly added to the selection.
+            const selectedIds = new Set<string>();
+            this.selected.forEach(c => { if (!c.isLink()) selectedIds.add(String(c.id)); });
+            this.paper.model.getLinks().forEach((link: dia.Link) => {
+                const srcId = String((link.get('source') as { id?: string })?.id ?? '');
+                const tgtId = String((link.get('target') as { id?: string })?.id ?? '');
+                const linkSelected = this.selected.has(link);
+                const bothEndsSelected = srcId && tgtId && selectedIds.has(srcId) && selectedIds.has(tgtId);
+                if (!linkSelected && !bothEndsSelected) return;
+                const verts = link.vertices();
+                if (!verts || verts.length === 0) return;
+                link.vertices(verts.map(v => ({ x: v.x + dx, y: v.y + dy })));
+            });
         });
 
         this.paper.on('element:pointerup', () => {

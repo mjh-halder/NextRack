@@ -43,18 +43,21 @@ export function initPorts(shape: dia.Element, view: PortView): void {
     const existing = new Set(shape.getPorts().map(p => p.id));
     const { width: w, height: h } = shape.size();
     const iH = (shape.get('isometricHeight') as number) ?? 0;
-    const positions = getPortPositions(w, h, iH, view);
+    const rotation = (shape.get('labelRotation') as number) || 0;
+    const positions = getPortPositions(w, h, iH, view, rotation);
     const items: dia.Element.Port[] = PORT_IDS
         .filter(id => !existing.has(id))
         .map(id => ({ id, group: id, args: positions[id] }));
     if (items.length > 0) shape.addPorts(items);
 }
 
-/** Update existing port positions (called on view toggle / resize / iH change). */
+/** Update existing port positions (called on view toggle / resize / iH /
+ *  labelRotation change). */
 export function updatePortPositions(shape: dia.Element, view: PortView): void {
     const { width: w, height: h } = shape.size();
     const iH = (shape.get('isometricHeight') as number) ?? 0;
-    const positions = getPortPositions(w, h, iH, view);
+    const rotation = (shape.get('labelRotation') as number) || 0;
+    const positions = getPortPositions(w, h, iH, view, rotation);
     for (const id of PORT_IDS) {
         shape.portProp(id, 'args', positions[id]);
     }
@@ -70,27 +73,49 @@ export type PortView = 'isometric' | '2d';
  *
  * In 2D the shape collapses to a SHAPE_CELL_SIZE icon centered on the cell,
  * so the ports follow that visual instead of the underlying cell footprint.
+ *
+ * The `rotation` parameter (`labelRotation` attribute, degrees) keeps the
+ * ports aligned with the visually rotated body. Without it the ports would
+ * stay on the original cell bbox edges while the body has been transformed.
  */
 export function getPortPositions(
-    w: number, h: number, _iH: number, view: PortView
+    w: number, h: number, _iH: number, view: PortView, rotation = 0,
 ): Record<string, { x: number; y: number }> {
-    if (view === '2d') {
-        const cx = w / 2;
-        const cy = h / 2;
-        const half = SHAPE_CELL_SIZE / 2;
-        return {
-            front: { x: cx,        y: cy + half },
-            back:  { x: cx,        y: cy - half },
-            left:  { x: cx - half, y: cy },
-            right: { x: cx + half, y: cy },
+    const base = view === '2d'
+        ? (() => {
+            const cx = w / 2;
+            const cy = h / 2;
+            const half = SHAPE_CELL_SIZE / 2;
+            return {
+                front: { x: cx,        y: cy + half },
+                back:  { x: cx,        y: cy - half },
+                left:  { x: cx - half, y: cy },
+                right: { x: cx + half, y: cy },
+            };
+        })()
+        : {
+            front: { x: w / 2, y: h },
+            back:  { x: w / 2, y: 0 },
+            left:  { x: 0,     y: h / 2 },
+            right: { x: w,     y: h / 2 },
+        };
+    if (!rotation) return base;
+    // Rotate around the cell centre to track the visual body transform.
+    const cx = w / 2;
+    const cy = h / 2;
+    const rad = (rotation * Math.PI) / 180;
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    const out: Record<string, { x: number; y: number }> = {};
+    for (const [key, p] of Object.entries(base)) {
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        out[key] = {
+            x: cx + dx * cos - dy * sin,
+            y: cy + dx * sin + dy * cos,
         };
     }
-    return {
-        front: { x: w / 2, y: h },
-        back:  { x: w / 2, y: 0 },
-        left:  { x: 0,     y: h / 2 },
-        right: { x: w,     y: h / 2 },
-    };
+    return out;
 }
 
 export { PORT_RADIUS, PORT_COLOR };

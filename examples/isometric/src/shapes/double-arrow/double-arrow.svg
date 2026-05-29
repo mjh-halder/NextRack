@@ -6,10 +6,10 @@
         stroke="none"
     />
     <path @selector="body"
-        :d="{{arrowPath([size, barRatio])}}"
-        fill="rgba(82, 82, 82, 0.06)"
-        stroke="#8d8d8d"
-        stroke-width="2"
+        :d="{{arrowPath([size, barRatio, arrowWidth])}}"
+        fill="rgba(82, 82, 82, 0.5)"
+        stroke="none"
+        stroke-width="0"
         stroke-linejoin="round"
     />
     <text @selector="label"

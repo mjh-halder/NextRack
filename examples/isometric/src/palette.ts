@@ -945,13 +945,26 @@ export class ComponentPalette {
             const dragged = this.graph.getCell(this.dragCellId);
             if (!dragged) return;
 
-            // Element → zone transfer?
+            // Element drag — three zones along the row height:
+            //   top 25%    → extract to root (drop ABOVE zone)
+            //   middle 50% → enter zone
+            //   bottom 25% → extract to root (drop BELOW zone)
             if (!dragged.get('isFrame')) {
                 evt.preventDefault();
                 if (evt.dataTransfer) evt.dataTransfer.dropEffect = 'move';
+                const rect = row.getBoundingClientRect();
+                const dy = evt.clientY - rect.top;
                 this.clearDropIndicators();
-                row.classList.add('nr-tree-row--drop-into');
-                this.onZoneDropHighlight?.(cellId);
+                if (dy < rect.height * 0.25) {
+                    row.classList.add('nr-tree-row--drop-above');
+                    this.onZoneDropHighlight?.(null);
+                } else if (dy > rect.height * 0.75) {
+                    row.classList.add('nr-tree-row--drop-below');
+                    this.onZoneDropHighlight?.(null);
+                } else {
+                    row.classList.add('nr-tree-row--drop-into');
+                    this.onZoneDropHighlight?.(cellId);
+                }
                 return;
             }
 
@@ -978,8 +991,14 @@ export class ComponentPalette {
             evt.stopPropagation();
 
             if (!dragged.get('isFrame')) {
-                // Element → zone: transfer and reposition.
-                this.transferToZone(this.dragCellId, cellId);
+                // Element drop — top/bottom = extract to root, middle = enter zone.
+                const rect = row.getBoundingClientRect();
+                const dy = evt.clientY - rect.top;
+                if (dy < rect.height * 0.25 || dy > rect.height * 0.75) {
+                    this.extractToRoot(this.dragCellId);
+                } else {
+                    this.transferToZone(this.dragCellId, cellId);
+                }
             } else if (this.canReorderInto(this.dragCellId, cellId)) {
                 // Zone → zone: reorder.
                 const rect = row.getBoundingClientRect();
@@ -1062,6 +1081,19 @@ export class ComponentPalette {
         const { height: eh }   = (element as dia.Element).size();
         const pad = GRID_SIZE;
         (element as dia.Element).position(zx + pad, zy + zh - eh - pad);
+    }
+
+    /**
+     * Detach an element from its current zone so it lives at the top level
+     * (no parent). Position is left where it is on the canvas — the user
+     * may want to move it later. Used by the tree's drop-above/drop-below
+     * gestures to lift elements out of a zone.
+     */
+    private extractToRoot(elementId: string): void {
+        const element = this.graph.getCell(elementId) as dia.Element | null;
+        if (!element) return;
+        const currentParent = element.getParentCell();
+        if (currentParent) (currentParent as dia.Element).unembed(element);
     }
 
     private buildList() {

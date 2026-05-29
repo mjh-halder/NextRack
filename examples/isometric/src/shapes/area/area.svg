@@ -1,6 +1,6 @@
 <g highlighter-selector="body">
     <path @selector="body"
-        d="M 0 0 H calc(w) V calc(h) H 0 Z"
+        :d="{{bodyPath([size, normalizedVerts, areaCorners, vertexCornerRadii])}}"
         fill="rgba(0, 67, 206, 0.5)"
         stroke="none"
         stroke-width="0"

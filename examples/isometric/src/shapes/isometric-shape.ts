@@ -54,7 +54,7 @@ export default class IsometricShape extends dia.Element<IsometricElementAttribut
                 this.set('ports', { groups: PORT_GROUPS, items: [] }, { silent: true });
             }
             initPorts(this, this.currentPortView);
-            this.on('change:size change:isometricHeight', () => this.updatePortPositions());
+            this.on('change:size change:isometricHeight change:labelRotation', () => this.updatePortPositions());
         }
         this.toggleView(View.Isometric);
     }

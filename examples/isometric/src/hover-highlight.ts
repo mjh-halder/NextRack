@@ -201,6 +201,7 @@ function buildSelectRects(g: SVGElement, ns: string, x: number, y: number, w: nu
             sq.setAttribute('rx', '1');
             sq.setAttribute('ry', '1');
             sq.setAttribute('filter', `url(#${filterId})`);
+            sq.classList.add('nr-select-resize-square');
             g.appendChild(sq);
         }
     }
@@ -316,6 +317,32 @@ export function clearSelectFor(cellView: dia.CellView): void {
 export function clearSelect(): void {
     selectMap.forEach((entry, cellId) => removeRingEntry(entry, cellId, 'select-ring'));
     selectMap.clear();
+}
+
+/**
+ * Recolour the selection outline of a given cell (Area path-edit mode uses
+ * this to turn the outline red instead of stacking a second red stroke on
+ * the shape body). Pass `null` to restore the default black/white outline.
+ *
+ * Also hides the white resize squares while accented — they would conflict
+ * visually with the vertex/midpoint handles of the path-edit tools.
+ */
+export function setSelectOutlineAccent(cellId: string, color: string | null): void {
+    const entry = selectMap.get(cellId);
+    if (!entry?.group) return;
+    const rects = entry.group.querySelectorAll<SVGRectElement>(':scope > rect');
+    // Convention: rect[0] = outer (black 0.5), rect[1] = inner (white 0.5).
+    const [outer, inner] = [rects[0], rects[1]];
+    if (color) {
+        if (outer) { outer.setAttribute('stroke', color); outer.setAttribute('stroke-width', '1.5'); }
+        if (inner) inner.setAttribute('stroke', color);
+    } else {
+        if (outer) { outer.setAttribute('stroke', '#000000'); outer.setAttribute('stroke-width', '0.5'); }
+        if (inner) inner.setAttribute('stroke', '#ffffff');
+    }
+    entry.group.querySelectorAll<SVGRectElement>('.nr-select-resize-square').forEach(sq => {
+        sq.style.display = color ? 'none' : '';
+    });
 }
 
 // ── Connection highlights (grey select rings) ───────────────────────────

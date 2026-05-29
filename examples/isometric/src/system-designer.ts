@@ -1,8 +1,8 @@
 import { g, dia, V, highlighters } from '@joint/core';
 import Obstacles from './obstacles';
 import IsometricShape, { View, ToolKeys } from './shapes/isometric-shape';
-import { Link, Frame, cellNamespace } from './shapes';
-import { sortElements, drawGrid, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle, icon2DHref } from './utils';
+import { Link, Frame, Area, cellNamespace } from './shapes';
+import { sortElements, drawGrid, switchView, transformationMatrix, applyRegistryDefaults, applyShapeStyle, applyShapeFillOpacity, icon2DHref } from './utils';
 import { GRID_SIZE, GRID_COUNT, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
 import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath, NodeMeta } from './inspector';
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
@@ -19,7 +19,7 @@ import { initUndoRedo, undo, redo, clearHistory } from './undo-redo';
 import { initMinimap, updateMinimapView, scheduleMinimapUpdate, setMinimapNavigateCallback } from './minimap';
 import { initResourceBar, showResourceBar, hideResourceBar, showZoneHud, hideZoneHud, detectStretchClusters } from './resource-bar';
 import { initAutoLayout, showLayoutBar, hideLayoutBar } from './auto-layout';
-import { applyHover, clearHover, applySelect, clearSelect, clearSelectFor, refreshSelect, clearConnHighlights as clearConnRings, syncAllRings } from './hover-highlight';
+import { applyHover, clearHover, applySelect, clearSelect, clearSelectFor, refreshSelect, clearConnHighlights as clearConnRings, syncAllRings, setSelectOutlineAccent } from './hover-highlight';
 import { initWorkloadTable, showWorkloadTable, hideWorkloadTable } from './workload-table';
 import { initCalloutLabels, syncCalloutLabel, refreshAllCallouts, removeCallout, setCalloutVisibility } from './callout-labels';
 import { getCanvas } from './canvas-store';
@@ -27,6 +27,7 @@ import { ViewToggle } from './view-toggle';
 import { AreaSelect } from './area-select';
 import { carbonIconToString, CarbonIcon } from './icons';
 import { FrameCornerControl } from './tools';
+import { isAreaMidDragActive, consumePathEditDragHappened } from './tools/area-vertex-tool';
 import TrashCan16 from '@carbon/icons/es/trash-can/16.js';
 import Copy16 from '@carbon/icons/es/copy/16.js';
 import BringToFront16 from '@carbon/icons/es/bring-to-front/16.js';
@@ -121,6 +122,8 @@ function duplicateSingleElement(cell: IsometricShape, offset: number, idMap: Map
         return cc;
     });
 
+    // No per-clone opacity re-application needed: `graph.on('add', ...)`
+    // catches every new cell and the central refresh chokepoint takes care.
     return { clone, children };
 }
 
@@ -336,6 +339,9 @@ let treeHighlightedCell: IsometricShape | null = null;
 let currentFrame: Frame | null = null;
 
 let copiedLinkStyle: Record<string, unknown> | null = null;
+// Style clipboard for components — mirrors copiedLinkStyle. Persisted in
+// memory; not survives across sessions.
+let copiedComponentStyle: { shapeOpacity?: number } | null = null;
 
 function clearConnectionHighlights(): void {
     clearConnRings();
@@ -720,9 +726,55 @@ function refreshAllSimpleShapeStyles(): void {
         const style = def?.layers?.[0]?.style;
         if (style) applyShapeStyle(cell as dia.Element, style);
     }
+    // Re-apply shapeOpacity for every cell — applyShapeStyle stamps fresh
+    // fill attributes that wipe the fill-opacity, and ComplexComponent's
+    // own theme handler does the same. The single chokepoint here keeps
+    // grid + inspector in sync without per-call sprinkles.
+    refreshAllShapeFillOpacities();
 }
+
+/**
+ * Walk every cell once and re-apply the persisted `shapeOpacity` to its
+ * view. Single source of truth for opacity rendering — called by the theme/
+ * color-derivation refresh, by graph-add (clones/paste), and on view toggle.
+ * Deferred to the next frame so it runs AFTER JointJS' own re-render that
+ * applyShapeStyle's attr() writes trigger (which would otherwise wipe the
+ * fill-opacity we set here).
+ */
+function refreshAllShapeFillOpacities(): void {
+    requestAnimationFrame(() => {
+        for (const cell of graph.getCells()) {
+            if (cell.isLink()) continue;
+            const op = cell.get('shapeOpacity') as number | undefined;
+            if (op == null || op >= 100) continue;
+            const view = paper.findViewByModel(cell as dia.Element);
+            if (view) applyShapeFillOpacity(view, op / 100);
+        }
+    });
+}
+
+/**
+ * Per-cell version: used by graph-add (new clones) and change:shapeOpacity.
+ * Always applies the current value (including 1.0 to wipe a stale partial
+ * opacity that lingered in the DOM). Defers to the next frame so a freshly
+ * added cell's view exists.
+ */
+function refreshShapeFillOpacity(cell: dia.Cell): void {
+    if (cell.isLink()) return;
+    const op = (cell.get('shapeOpacity') as number | undefined) ?? 100;
+    requestAnimationFrame(() => {
+        const view = paper.findViewByModel(cell as dia.Element);
+        if (view) applyShapeFillOpacity(view, op / 100);
+    });
+}
+
 window.addEventListener('nr-theme-change', refreshAllSimpleShapeStyles);
 window.addEventListener('nr-color-derivation-change', refreshAllSimpleShapeStyles);
+
+// Catches clones, paste, programmatic adds.
+graph.on('add', (cell: dia.Cell) => refreshShapeFillOpacity(cell));
+// Catches inspector edits + paste-style updates.
+graph.on('change:shapeOpacity', (cell: dia.Cell) => refreshShapeFillOpacity(cell));
 
 graph.on('change:position', (cell: dia.Cell) => {
     refreshSelect(cell);
@@ -1837,6 +1889,8 @@ const palette = new ComponentPalette(paletteEl, graph, () => currentView, (shape
             panel.showLabel(shape);
         } else if (shape.get('isIcon')) {
             panel.showIcon(shape);
+        } else if (shape.get('isDoubleArrow')) {
+            panel.showDoubleArrow(shape);
         } else panel.showArea(shape);
         setTreeHighlight(shape);
         const view = paper.findViewByModel(shape);
@@ -2014,7 +2068,8 @@ canvasDropTarget.addEventListener('drop', (e: DragEvent) => {
         placed = shape;
     }
 
-    if (dropZone) dropZone.embed(placed);
+    // Areas don't belong in zones — they're independent design elements.
+    if (dropZone && !placed.get('isArea')) dropZone.embed(placed);
 
     if (currentView === View.Isometric) sortElements(graph);
     palette.refresh();
@@ -2380,6 +2435,12 @@ function findTopmostContainingFrame(element: IsometricShape): Frame | null {
  * and children translate automatically when their parent zone moves.
  */
 function updateZoneAssignment(element: IsometricShape): void {
+    // Areas are independent design elements — never embed them into a zone.
+    if (element.get('isArea')) {
+        const currentParent = element.getParentCell();
+        if (currentParent) currentParent.unembed(element);
+        return;
+    }
     const newZone = findTopmostContainingFrame(element);
     const currentParent = element.getParentCell() as Frame | null;
     if (currentParent?.id === newZone?.id) return;
@@ -2567,13 +2628,59 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
         return;
     }
     if (model.get('isArea')) {
-        (model as IsometricShape).addTools(paper, currentView);
-        currentCell = model as IsometricShape;
+        const isArrow = !!model.get('isDoubleArrow');
+        if (isArrow) {
+            // DoubleArrow shares `isArea: true` for legacy reasons but has
+            // no path-edit mode and its own inspector.
+            (model as IsometricShape).addTools(paper, currentView);
+            currentCell = model as IsometricShape;
+            currentFrame = null;
+            panel.showDoubleArrow(model);
+            setTreeHighlight(null);
+            clearSelect();
+            const arrowView = paper.findViewByModel(model);
+            if (arrowView) requestAnimationFrame(() => applySelect(arrowView));
+            hideLayoutBar();
+            hideZoneHud();
+            return;
+        }
+        const area = model as Area;
+        // Drag-vs-click discrimination: any setPosition call on a vertex
+        // or mid-handle flags the interaction as a drag. Consume the flag
+        // for THIS pointerup; if it was a drag we keep editing, if it was
+        // a click (no drag flag) we exit + deselect — regardless of whether
+        // the cursor happens to sit on an edit handle (the new vertex sits
+        // exactly under the cursor after a mid-drag, so an extra click on
+        // it should still end editing).
+        const wasInEditMode = areaPathEditMode.has(area);
+        const wasDrag = consumePathEditDragHappened();
+        if (wasInEditMode && !wasDrag) {
+            exitAreaPathEdit(area);
+            paper.removeTools();
+            currentCell = null;
+            currentFrame = null;
+            panel.hide();
+            setTreeHighlight(null);
+            clearSelect();
+            hideLayoutBar();
+            hideZoneHud();
+            return;
+        }
+        if (areaPathEditMode.has(area)) {
+            // Tools are kept in sync by the change:normalizedVerts handler +
+            // the nr-area-mid-drag-end listener registered in enterAreaPath
+            // Edit. Re-adding here on every pointerup duplicated work and
+            // racec with the rebuild, so just leave the current toolset
+            // alone unless something actually changed.
+        } else {
+            area.addTools(paper, currentView);
+        }
+        currentCell = area;
         currentFrame = null;
-        panel.showArea(model);
+        panel.showArea(area);
         setTreeHighlight(null);
         clearSelect();
-        const areaView = paper.findViewByModel(model);
+        const areaView = paper.findViewByModel(area);
         if (areaView) requestAnimationFrame(() => applySelect(areaView));
         hideLayoutBar();
         hideZoneHud();
@@ -2625,6 +2732,10 @@ paper.on('element:pointerup', (elementView: dia.ElementView, evt: dia.Event) => 
 
 paper.on('blank:pointerdown', (_evt: dia.Event) => {
     if (_evt.shiftKey) return;
+    // Always exit the path-edit session if one is active — regardless of
+    // what `currentCell` currently points at. Preserves the edited path
+    // (verts stay on the model); only the edit-mode tools / outline reset.
+    if (editingArea) exitAreaPathEdit(editingArea);
     areaSelect.clear();
     clearHover();
     paper.removeTools();
@@ -2863,6 +2974,98 @@ function switchShapeVariation(cell: IsometricShape): void {
     if (currentView === View.Isometric) sortElements(graph);
 }
 
+// ── Area path-edit mode ──────────────────────────────────────────────────────
+// Ephemeral, not persisted: entering "Edit Path" via right-click flips the
+// area into vertex-handle mode; clicking the shape again or deselecting
+// (blank click) drops it back to normal resize mode. Tracked in a WeakSet
+// keyed by the model so multiple areas can coexist correctly.
+
+const areaPathEditMode = new WeakSet<Area>();
+const areaPathEditListeners = new WeakMap<Area, () => void>();
+const areaPathEditRebuildCleanup = new WeakMap<Area, () => void>();
+// Tracked separately from `currentCell` so blank-clicks can reliably exit
+// edit mode regardless of any intervening selection changes.
+let editingArea: Area | null = null;
+
+// Inspector signals corner-style changes via this DOM event so the canvas
+// can swap the tool list (diamonds appear only when style is rounded/cut).
+document.addEventListener('nextrack:area-corners-style-changed', (e) => {
+    const cellId = (e as CustomEvent).detail?.cellId;
+    if (!currentCell || currentCell.id !== cellId) return;
+    if (!(currentCell instanceof Area)) return;
+    if (currentCell.get('isDoubleArrow')) return; // arrow inspector has no corners
+    if (areaPathEditMode.has(currentCell)) return; // edit-mode tools win
+    paper.removeTools();
+    currentCell.addTools(paper, currentView);
+});
+
+// Carbon Red 60 — same edit-mode outline cue PowerPoint uses for path editing.
+const PATH_EDIT_STROKE = '#da1e28';
+
+function enterAreaPathEdit(area: Area): void {
+    if (editingArea && editingArea !== area) exitAreaPathEdit(editingArea);
+    editingArea = area;
+    areaPathEditMode.add(area);
+    // Recolour the selection outline (built by hover-highlight) instead of
+    // stroking the body — avoids the two overlapping outlines.
+    setSelectOutlineAccent(area.id as string, PATH_EDIT_STROKE);
+    const view = paper.findViewByModel(area);
+    if (view) view.el.classList.add('nr-area-path-editing');
+    paper.removeTools();
+    area.addPathEditTools(paper);
+    // Rebuild handles only when the count changes (insert/delete). Pure
+    // vertex moves don't need a rebuild — and rebuilding mid-drag would
+    // destroy the pointer-captured handle and abort the gesture. While a
+    // midpoint drag is active we additionally defer the rebuild until
+    // mouseup so the just-inserted vertex stays under pointer capture.
+    const prev = areaPathEditListeners.get(area);
+    if (prev) area.off('change:normalizedVerts', prev);
+    let lastCount = ((area.get('normalizedVerts') as [number, number][]) ?? []).length;
+    const rebuild = () => {
+        if (!areaPathEditMode.has(area)) return;
+        paper.removeTools();
+        area.addPathEditTools(paper);
+        lastCount = ((area.get('normalizedVerts') as [number, number][]) ?? []).length;
+    };
+    const handler = () => {
+        if (!areaPathEditMode.has(area)) return;
+        if (isAreaMidDragActive()) return; // deferred rebuild on drag end
+        const n = ((area.get('normalizedVerts') as [number, number][]) ?? []).length;
+        if (n === lastCount) return;
+        rebuild();
+    };
+    area.on('change:normalizedVerts', handler);
+    areaPathEditListeners.set(area, handler);
+    // Mid-drag end → finally rebuild with the new vertex count.
+    document.addEventListener('nr-area-mid-drag-end', rebuild);
+    // Remember the rebuild callback so we can unregister it on exit.
+    areaPathEditRebuildCleanup.set(area, () => document.removeEventListener('nr-area-mid-drag-end', rebuild));
+}
+
+function exitAreaPathEdit(area: Area): void {
+    if (!areaPathEditMode.has(area)) return;
+    if (editingArea === area) editingArea = null;
+    areaPathEditMode.delete(area);
+    setSelectOutlineAccent(area.id as string, null);
+    const view = paper.findViewByModel(area);
+    if (view) view.el.classList.remove('nr-area-path-editing');
+    const cleanup = areaPathEditRebuildCleanup.get(area);
+    if (cleanup) { cleanup(); areaPathEditRebuildCleanup.delete(area); }
+    const handler = areaPathEditListeners.get(area);
+    if (handler) {
+        area.off('change:normalizedVerts', handler);
+        areaPathEditListeners.delete(area);
+    }
+}
+
+function deleteAreaVertex(area: Area, index: number): void {
+    const verts = ((area.get('normalizedVerts') as [number, number][]) ?? []).map(v => [v[0], v[1]] as [number, number]);
+    if (index < 0 || index >= verts.length) return;
+    if (verts.length <= 3) return; // a polygon needs at least 3 points
+    verts.splice(index, 1);
+    area.set('normalizedVerts', verts);
+}
+
 function buildActionsForCurrentSelection(): CtxAction[] {
     const actions: CtxAction[] = [];
     if (currentFrame) {
@@ -2875,19 +3078,48 @@ function buildActionsForCurrentSelection(): CtxAction[] {
             { label: 'Duplicate',     icon: CTX_ICON_DUPLICATE, run: () => duplicateZone(frame) },
             { label: 'Delete',        icon: CTX_ICON_DELETE,    run: () => { frame.remove(); } },
         );
-    } else if (currentCell && currentCell.get('isArea')) {
-        const cell = currentCell as dia.Element;
+    } else if (currentCell && currentCell.get('isDoubleArrow')) {
+        // DoubleArrow shares the `isArea: true` flag for legacy reasons but
+        // behaves differently — no path editing, but rotation is meaningful
+        // (it swaps horizontal ↔ vertical orientation).
+        const arrow = currentCell as dia.Element;
         actions.push(
             { label: 'Rotate', icon: CTX_ICON_ROTATE, run: () => {
                 const { applyRotation } = require('./tools/rotate-tool');
-                const cur = (cell.get('labelRotation') as number) || 0;
-                applyRotation(cell, cur === 270 ? 0 : 270, paper);
+                const cur = (arrow.get('labelRotation') as number) || 0;
+                applyRotation(arrow, cur === 270 ? 0 : 270, paper);
             }},
-            { label: 'Move to Front', icon: CTX_ICON_FRONT,     run: () => cell.toFront() },
-            { label: 'Move to Back',  icon: CTX_ICON_BACK,      run: () => cell.toBack()  },
+            { label: 'Move to Front', icon: CTX_ICON_FRONT,     run: () => arrow.toFront() },
+            { label: 'Move to Back',  icon: CTX_ICON_BACK,      run: () => arrow.toBack()  },
             { label: 'Duplicate', icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
             { label: 'Delete',    icon: CTX_ICON_DELETE,    run: deleteSelected },
         );
+    } else if (currentCell && currentCell.get('isArea')) {
+        const area = currentCell as Area;
+        const inEdit = areaPathEditMode.has(area);
+        if (inEdit) {
+            actions.push(
+                { label: 'Delete all Path Points', icon: CTX_ICON_UNLINK, run: () => {
+                    exitAreaPathEdit(area);
+                    area.set('normalizedVerts', []);
+                    paper.removeTools();
+                    area.addTools(paper, currentView);
+                }},
+                { label: 'Exit Edit Path', icon: CTX_ICON_VIEW_OFF, run: () => {
+                    exitAreaPathEdit(area);
+                    paper.removeTools();
+                    area.addTools(paper, currentView);
+                }},
+            );
+        } else {
+            actions.push(
+                { label: 'Edit Path', icon: CTX_ICON_EDIT, run: () => enterAreaPathEdit(area) },
+                { label: 'Move to Front', icon: CTX_ICON_FRONT,     run: () => area.toFront() },
+                { label: 'Move to Back',  icon: CTX_ICON_BACK,      run: () => area.toBack()  },
+                { label: 'Duplicate', icon: CTX_ICON_DUPLICATE, run: duplicateSelected },
+                { label: 'Delete',    icon: CTX_ICON_DELETE,    run: deleteSelected },
+            );
+        }
     } else if (currentCell && currentCell.get('isGridLabel')) {
         const labelEl = currentCell as dia.Element;
         actions.push(
@@ -2923,6 +3155,32 @@ function buildActionsForCurrentSelection(): CtxAction[] {
             actions.push(
                 { label: 'Edit Component', icon: CTX_ICON_EDIT, run: () => {
                     document.dispatchEvent(new CustomEvent('nextrack:navigate-to-shape', { detail: { shapeId: shapeKey } }));
+                }},
+            );
+        }
+        actions.push(
+            { label: 'Copy Style', icon: CTX_ICON_COPY_STYLE, run: () => {
+                copiedComponentStyle = {
+                    shapeOpacity: (cell.get('shapeOpacity') as number) ?? 100,
+                };
+            }},
+        );
+        if (copiedComponentStyle) {
+            actions.push(
+                { label: 'Paste Style', icon: CTX_ICON_PASTE_STYLE, run: () => {
+                    if (!copiedComponentStyle) return;
+                    const s = copiedComponentStyle;
+                    // Apply to current + any other components in the area-select.
+                    const targets: dia.Cell[] = [cell];
+                    for (const sel of areaSelect.selection) {
+                        if (!sel.isLink() && sel !== cell) targets.push(sel);
+                    }
+                    for (const target of targets) {
+                        if (s.shapeOpacity !== undefined) {
+                            // change:shapeOpacity listener handles fill-opacity.
+                            target.set('shapeOpacity', s.shapeOpacity);
+                        }
+                    }
                 }},
             );
         }
@@ -3020,10 +3278,25 @@ paper.on('element:contextmenu', (elementView: dia.ElementView, evt: dia.Event) =
         const ctxZoneView = paper.findViewByModel(model);
         if (ctxZoneView) requestAnimationFrame(() => applySelect(ctxZoneView));
     } else if (model.get('isArea')) {
-        (model as IsometricShape).addTools(paper, currentView);
-        currentCell = model as IsometricShape;
-        currentFrame = null;
-        panel.showArea(model);
+        const isArrow = !!model.get('isDoubleArrow');
+        if (isArrow) {
+            (model as IsometricShape).addTools(paper, currentView);
+            currentCell = model as IsometricShape;
+            currentFrame = null;
+            panel.showDoubleArrow(model);
+        } else {
+            const area = model as Area;
+            // Preserve path-edit handles when right-clicking inside an
+            // already-active edit session; otherwise show normal resize tools.
+            if (areaPathEditMode.has(area)) {
+                area.addPathEditTools(paper);
+            } else {
+                area.addTools(paper, currentView);
+            }
+            currentCell = area;
+            currentFrame = null;
+            panel.showArea(area);
+        }
     } else if (model.get('isGridLabel')) {
         (model as IsometricShape).addTools(paper, currentView);
         currentCell = model as IsometricShape;
@@ -3055,6 +3328,28 @@ paper.on('link:contextmenu', (linkView: dia.LinkView, evt: dia.Event) => {
     setTreeHighlight(null);
     showContextMenu(evt.clientX, evt.clientY, buildActionsForCurrentSelection());
 });
+
+// Per-vertex right-click for Area path-edit mode. Registered on paper.el in
+// capture phase so it runs before JointJS' element:contextmenu — when the
+// click hits an area vertex handle, we offer "Delete this Path Point" and
+// swallow the event so the normal area context menu doesn't open on top.
+paper.el.addEventListener('contextmenu', (evt: MouseEvent) => {
+    if (!(currentCell instanceof Area) || !areaPathEditMode.has(currentCell)) return;
+    const target = evt.target as Element | null;
+    const handle = target?.closest('.nr-area-vertex') as SVGElement | null;
+    if (!handle) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    // The Area's tool-view renders vertex circles in `normalizedVerts` order.
+    const toolsLayer = paper.el.querySelector('.joint-tools-layer') ?? paper.el;
+    const allHandles = Array.from(toolsLayer.querySelectorAll('.nr-area-vertex'));
+    const index = allHandles.indexOf(handle);
+    if (index < 0) return;
+    const area = currentCell;
+    showContextMenu(evt.clientX, evt.clientY, [
+        { label: 'Delete this Path Point', icon: CTX_ICON_UNLINK, run: () => deleteAreaVertex(area, index) },
+    ]);
+}, true);
 
 paper.on('blank:contextmenu', (evt: dia.Event) => {
     evt.preventDefault();

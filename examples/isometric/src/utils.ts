@@ -3,6 +3,7 @@ import IsometricShape, { View } from './shapes/isometric-shape';
 import { GRID_COUNT, GRID_SIZE, SHAPE_CELL_SIZE, SCALE, ISOMETRIC_SCALE, ROTATION_DEGREES } from './theme';
 import { Link } from './shapes';
 import type { ShapeStyle, ShapeDefinition, IconEntry } from './shapes/shape-registry';
+import { isTextEntry } from './shapes/shape-registry';
 import { getPaletteIcon } from './shape-query';
 import { getIconById, stripAwsBackground } from './icon-catalog';
 import { getIconRenderSettings, vendorForSource } from './icon-rendering';
@@ -81,6 +82,122 @@ export function buildCompositeIconSvg(
 }
 
 /**
+ * Build a composite SVG for a TEXT-mode icon entry: same background plumbing
+ * as `buildCompositeIconSvg`, but a `<text>` element instead of `<image>`.
+ *
+ * The text fills the canvas the same way an icon does:
+ *   - font-size scales down with length so 1–3 chars stay legible
+ *   - centred via text-anchor + dominant-baseline
+ *   - fill = explicit colour or `currentColor` (= theme-tinted by the
+ *     consuming surface, same chokepoint Carbon icons use)
+ * Font-family is fixed to IBM Plex Sans (Carbon).
+ */
+export function buildTextIconSvg(
+    text: string,
+    bgColor: string | null,
+    bgShape: 'circle' | 'square' | 'octagon',
+    bgRadius = 6,
+    bgChamfer = 0.18,
+    canvasPx = 64,
+    bgPxX = 64,
+    textColor = 'currentColor',
+    fontWeight: 'normal' | 'bold' = 'bold',
+    bgOpacity = 100,
+    textOpacity = 100,
+    bgPxY?: number,
+    textPx?: number,
+): string {
+    const S = canvasPx;
+    const safeText = (text || '').slice(0, 3);
+    const bgW = bgPxX;
+    const bgH = bgPxY ?? bgPxX; // independent axes; default square
+    // Text glyph size, independent of bg + canvas — so the Size slider
+    // controls text size even when bg is large. Defaults to canvas so
+    // existing callers that don't pass it see the previous behaviour.
+    const TEXT_S = textPx ?? S;
+
+    // Background — independent X/Y axes (text-mode use case).
+    const bgOffX = (S - bgW) / 2;
+    const bgOffY = (S - bgH) / 2;
+    let shapeEl = '';
+    if (bgShape === 'circle') {
+        // Circle becomes an ellipse when the axes differ — keeps the X/Y
+        // sliders meaningful instead of silently dropping one axis.
+        shapeEl = `<ellipse cx="${bgOffX + bgW / 2}" cy="${bgOffY + bgH / 2}" rx="${bgW / 2}" ry="${bgH / 2}"`;
+    } else if (bgShape === 'octagon') {
+        const cx = bgW * bgChamfer;
+        const cy = bgH * bgChamfer;
+        shapeEl = `<polygon points="${bgOffX + cx},${bgOffY} ${bgOffX + bgW - cx},${bgOffY} ${bgOffX + bgW},${bgOffY + cy} ${bgOffX + bgW},${bgOffY + bgH - cy} ${bgOffX + bgW - cx},${bgOffY + bgH} ${bgOffX + cx},${bgOffY + bgH} ${bgOffX},${bgOffY + bgH - cy} ${bgOffX},${bgOffY + cy}"`;
+    } else {
+        shapeEl = `<rect x="${bgOffX}" y="${bgOffY}" width="${bgW}" height="${bgH}" rx="${bgRadius}"`;
+    }
+    const bgOpStr = bgOpacity < 100 ? ` opacity="${(bgOpacity / 100).toFixed(2)}"` : '';
+    const bgEl = bgColor !== null ? `${shapeEl} fill="${bgColor}"${bgOpStr}/>` : '';
+
+    // Heuristic that keeps 1–3-char glyphs comfortably inside an 80% inset
+    // of the requested TEXT box: a single bold letter renders at ~0.7em
+    // wide in IBM Plex; for longer strings we shrink so the natural width
+    // still fits.
+    const len = Math.max(1, safeText.length);
+    const fontSize = Math.min(TEXT_S * 0.7, (TEXT_S * 0.8) / (len * 0.55));
+    const textOpStr = textOpacity < 100 ? ` opacity="${(textOpacity / 100).toFixed(2)}"` : '';
+
+    // SVG escape: only & < > matter inside element content.
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}" overflow="hidden">${bgEl}<text x="${S / 2}" y="${S / 2}" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Sans, sans-serif" font-weight="${fontWeight}" font-size="${fontSize.toFixed(2)}" fill="${textColor}"${textOpStr}>${esc(safeText)}</text></svg>`;
+}
+
+/**
+ * Wrap `buildTextIconSvg` with the same theme/background plumbing the icon
+ * path uses, then return a data-URI ready for `<image href>`. Honoured by
+ * both `icon2DHref` (2D surface) and `liveIconHref` (isoFace surface).
+ */
+function buildTextIconHref(ie: IconEntry, canvasPx: number, surface: 'grid2d' | 'isoFace'): string {
+    const isDark = typeof document !== 'undefined'
+        && document.documentElement.classList.contains('cds--g100');
+    // User override wins; otherwise theme-tint (dark in light mode, light
+    // in dark mode) so plain black source SVGs … err, plain text glyphs
+    // stay legible on either background.
+    const textColor = ie.iconColor && ie.iconColor.length > 0
+        ? ie.iconColor
+        : (isDark ? '#ffffff' : '#161616');
+
+    const bgEnabled = ie.bgEnabled;
+    const bgColor   = bgEnabled ? ie.bgColor : null;
+    const bgShape   = ie.bgShape;
+    const bgRadius  = ie.bgRadius;
+    const bgChamfer = ie.bgChamfer;
+    // 2D ignores the per-entry bgOpacity (mirrors how icon2DHref does it
+    // for icons — resolver-enforced). isoFace honours it.
+    const bgOpacity = surface === 'grid2d' ? 100 : (ie.bgOpacity ?? 100);
+
+    // Bg Size X/Y are stored in real pixels; legacy `bgSize` is GU and
+    // needs the × GRID_SIZE conversion as a fallback.
+    const bgPxRawX = ie.bgSizeX ?? ie.bgSize * GRID_SIZE;
+    const bgPxRawY = ie.bgSizeY ?? ie.bgSize * GRID_SIZE;
+    const bgPxX = surface === 'isoFace' ? bgPxRawX : canvasPx;
+    const bgPxY = surface === 'isoFace' ? bgPxRawY : canvasPx;
+    const textPx = surface === 'isoFace' ? ie.size * GRID_SIZE : canvasPx;
+    const svg = buildTextIconSvg(
+        ie.textContent ?? '',
+        bgColor,
+        bgShape,
+        bgRadius,
+        bgChamfer,
+        canvasPx,
+        bgPxX,
+        textColor,
+        ie.fontWeight ?? 'bold',
+        bgOpacity,
+        ie.iconOpacity ?? 100,
+        bgPxY,
+        textPx,
+    );
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+/**
  * 2D-view icon URL — the single composite path used by the System Designer,
  * the Component Designer, and ComplexComponent.
  *
@@ -92,6 +209,7 @@ export function buildCompositeIconSvg(
  * fields are deliberately ignored here — they are isoFace authoring choices.
  */
 export function icon2DHref(ie: IconEntry): string {
+    if (isTextEntry(ie)) return buildTextIconHref(ie, SHAPE_CELL_SIZE, 'grid2d');
     if (!ie.iconId) return ie.href ?? '';
     const cat = getIconById(ie.iconId);
     if (!cat?.svg) return ie.href ?? '';
@@ -549,4 +667,16 @@ export const switchView = (paper: dia.Paper, view: View, selectedCell: Isometric
     if (selectedCell) {
         selectedCell.addTools(paper, view);
     }
+    // Re-apply custom fill-opacity after the view re-render — toggleView()
+    // resets the SVG attrs that applyShapeFillOpacity writes directly to
+    // the DOM, so without this opacity silently snaps back to 1 on every
+    // 2D↔Iso switch.
+    requestAnimationFrame(() => {
+        paper.model.getElements().forEach((element) => {
+            const op = (element.get('shapeOpacity') as number | undefined);
+            if (op == null || op >= 100) return;
+            const cellView = paper.findViewByModel(element);
+            if (cellView) applyShapeFillOpacity(cellView, op / 100);
+        });
+    });
 }
