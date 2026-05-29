@@ -1,6 +1,6 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './channel.svg';
-import { ChannelShape } from '../isometric-shape';
+import { ChannelShape } from './channel-shape';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 const _defaults = defaultDimensionsFor('channel');

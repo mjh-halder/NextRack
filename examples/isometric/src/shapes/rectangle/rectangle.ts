@@ -1,6 +1,6 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './rectangle.svg';
-import { RectangleShape } from '../isometric-shape';
+import { RectangleShape } from './rectangle-shape';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 const _defaults = defaultDimensionsFor('rectangle');

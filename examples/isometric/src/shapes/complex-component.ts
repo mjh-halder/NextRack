@@ -20,10 +20,10 @@
 import { dia, elementTools } from '@joint/core';
 import IsometricShape, {
     View,
-    RectangleShape,
-    CircleShape,
     CONNECT_KEY,
 } from './isometric-shape';
+import { RectangleShape } from './rectangle/rectangle-shape';
+import { CircleShape } from './circle/circle-shape';
 import { Rectangle } from './rectangle/rectangle';           // proxy for rectangle baseShape
 import { Circle } from './circle/circle';     // proxy for circle baseShape
 import { Octagon } from './octagon/octagon';

@@ -1,6 +1,6 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './pipe.svg';
-import { PipeShape } from '../isometric-shape';
+import { PipeShape } from './pipe-shape';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 const _defaults = defaultDimensionsFor('pipe');

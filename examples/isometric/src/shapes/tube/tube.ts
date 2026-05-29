@@ -1,6 +1,6 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './tube.svg';
-import { TubeShape } from '../isometric-shape';
+import { TubeShape } from './tube-shape';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 const _defaults = defaultDimensionsFor('tube');

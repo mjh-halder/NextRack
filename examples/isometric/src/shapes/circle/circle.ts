@@ -1,6 +1,6 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './circle.svg';
-import { CircleShape } from '../isometric-shape';
+import { CircleShape } from './circle-shape';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 const _defaults = defaultDimensionsFor('circle');

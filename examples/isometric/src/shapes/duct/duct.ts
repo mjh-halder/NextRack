@@ -1,6 +1,6 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './duct.svg';
-import { DuctShape } from '../isometric-shape';
+import { DuctShape } from './duct-shape';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 const _defaults = defaultDimensionsFor('duct');

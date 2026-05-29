@@ -1,7 +1,8 @@
 import { Model, Function } from '@joint/decorators';
 import { elementTools } from '@joint/core';
 import svg from './octagon.svg';
-import { PolygonShape, SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
+import { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
+import { PolygonShape } from '../rectangle/rectangle-shape';
 import { SizeControl, CenterBasedHeightControl, CONNECT_TOOL_PRESET } from '../../tools';
 import { defaultDimensionsFor } from '../shape-capabilities';
 

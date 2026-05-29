@@ -1,6 +1,6 @@
 import { Model, Function } from '@joint/decorators';
 import svg from './hexahedron.svg';
-import { RectangleShape } from '../isometric-shape';
+import { RectangleShape } from '../rectangle/rectangle-shape';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 // Hexahedron = regular cube: equal width, height and depth.
