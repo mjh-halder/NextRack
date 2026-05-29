@@ -3,7 +3,7 @@ import { elementTools } from '@joint/core';
 import svg from './svg-polygon.svg';
 import { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
 import { PolygonShape } from '../rectangle/rectangle-shape';
-import { SizeControl, CenterBasedHeightControl, CONNECT_TOOL_PRESET } from '../../tools';
+import { NextrackSizeControl, NextrackCenterBasedHeightControl, NEXTRACK_CONNECT_TOOL_PRESET } from '../../tools';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 const _defaults = defaultDimensionsFor('svgPolygon');
@@ -28,9 +28,9 @@ export class SvgPolygonShape extends PolygonShape {
         super(...args);
         const { defaultSize: ds, defaultIsometricHeight: dih } = this.attributes;
         this.tools = {
-            [SIZE_KEY]:             new SizeControl({ defaultSize: ds }),
-            [CONNECT_KEY]:          new elementTools.Connect(CONNECT_TOOL_PRESET),
-            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight: dih }),
+            [SIZE_KEY]:             new NextrackSizeControl({ defaultSize: ds }),
+            [CONNECT_KEY]:          new elementTools.Connect(NEXTRACK_CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new NextrackCenterBasedHeightControl({ defaultIsometricHeight: dih }),
         };
     }
 

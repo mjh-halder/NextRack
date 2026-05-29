@@ -4,74 +4,33 @@ import { BG_COLOR, GRID_SIZE, HIGHLIGHT_COLOR } from '../theme';
 const SIZE = 6;
 const CONNECT_TOOL_SIZE = 10;
 const ARROWHEAD_TOOL_SIZE = 15;
-const INTERACTIVE_BLUE = '#0f62fe';
-
-// Carbon icon path data (viewBox 0 0 32 32) — embedded inline so the tool
-// markup stays a single SVG fragment.
-const CARBON_NEXT_FILLED_PATH = 'M2,16A14,14,0,1,0,16,2,14,14,0,0,0,2,16Zm6-1H20.15L14.57,9.3926,16,8l8,8-8,8-1.43-1.4272L20.15,17H8Z';
-const CARBON_CLOSE_PATH = 'M17.4141 16 24 9.4141 22.5859 8 16 14.5859 9.4143 8 8 9.4141 14.5859 16 8 22.5859 9.4143 24 16 17.4141 22.5859 24 24 22.5859 17.4141 16z';
-const CARBON_ARROW_DOWN_RIGHT = 'M10 26 10 24 22.59 24 6 7.41 7.41 6 24 22.59 24 10 26 10 26 26 10 26z';
 
 export const ISOMETRIC_HEIGHT_TOOL_MARKUP: dia.MarkupJSON = util.svg`
     <g @selector="handle" fill="${HIGHLIGHT_COLOR}">
         <circle cursor="ns-resize" stroke="none" fill="#33334F" fill-opacity="0.3" r="${SIZE / 2}"/>
         <circle cursor="ns-resize" stroke="${BG_COLOR}" cx="-3" cy="-3" r="${SIZE / 2}"/>
     </g>
+    <rect @selector="extras" pointer-events="none" fill="none" stroke="${HIGHLIGHT_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
 `;
-
-const SIZE_ICON_PX = 14;
-const SIZE_ICON_HALF = SIZE_ICON_PX / 2;
-const SIZE_ICON_SCALE = SIZE_ICON_PX / 32;
 
 export const SIZE_TOOL_MARKUP: dia.MarkupJSON = util.svg`
-    <g @selector="handle" cursor="nwse-resize" opacity="0">
-        <circle stroke="none" fill="transparent" r="${SIZE_ICON_HALF + 4}"/>
-        <g pointer-events="none" transform="translate(${-SIZE_ICON_HALF},${-SIZE_ICON_HALF}) scale(${SIZE_ICON_SCALE})">
-            <path d="${CARBON_ARROW_DOWN_RIGHT}" fill="${INTERACTIVE_BLUE}" stroke="none"/>
-        </g>
+    <g @selector="handle" cursor="nwse-resize" >
+        <rect stroke="none" fill="transparent" width="${SIZE}" height="${SIZE}"/>
+        <path d="M 0 5 5 5 5 0" fill="${HIGHLIGHT_COLOR}" stroke="none" />
     </g>
+    <rect @selector="extras" pointer-events="none" fill="none" stroke="${HIGHLIGHT_COLOR}" stroke-dasharray="1,1" rx="1" ry="1"/>
 `;
-
-const CARBON_CARET_DOWN = 'M24 12 16 22 8 12z';
-const CARET_PX = 23;
-const CARET_HALF = CARET_PX / 2;
-const CARET_SCALE = CARET_PX / 32;
-
-export const SIZE_TOOL_VERTICAL_MARKUP: dia.MarkupJSON = util.svg`
-    <g @selector="handle" cursor="ns-resize" opacity="0">
-        <circle stroke="none" fill="transparent" r="${CARET_HALF + 4}"/>
-        <g pointer-events="none" transform="translate(${-CARET_HALF},${-CARET_HALF}) scale(${CARET_SCALE})">
-            <path d="${CARBON_CARET_DOWN}" fill="${INTERACTIVE_BLUE}" stroke="none"/>
-        </g>
-    </g>
-`;
-
-export const SIZE_TOOL_HORIZONTAL_MARKUP: dia.MarkupJSON = util.svg`
-    <g @selector="handle" cursor="ew-resize" opacity="0">
-        <circle stroke="none" fill="transparent" r="${CARET_HALF + 4}"/>
-        <g pointer-events="none" transform="translate(${-CARET_HALF},${-CARET_HALF}) scale(${CARET_SCALE}) rotate(-90, 16, 16)">
-            <path d="${CARBON_CARET_DOWN}" fill="${INTERACTIVE_BLUE}" stroke="none"/>
-        </g>
-    </g>
-`;
-
-// Connect tool — Next Filled icon in HIGHLIGHT_COLOR, no background circle.
-// Rendered at the same diameter as RemoveTool (14 px) for visual consistency.
-const CONNECT_ICON_PX = 16;
-const CONNECT_ICON_HALF = CONNECT_ICON_PX / 2;
-const CONNECT_ICON_SCALE = CONNECT_ICON_PX / 32; // 16/32 = 0.5
 
 export const CONNECT_TOOL_MARKUP = util.svg`
-    <circle @selector="button" r="${CONNECT_ICON_HALF}" fill="${BG_COLOR}" cursor="pointer"/>
-    <g @selector="icon" pointer-events="none" transform="rotate(-90) translate(${-CONNECT_ICON_HALF},${-CONNECT_ICON_HALF}) scale(${CONNECT_ICON_SCALE})">
-        <path d="${CARBON_NEXT_FILLED_PATH}" fill="${HIGHLIGHT_COLOR}" stroke="none"/>
-    </g>
+    <rect @selector="button" fill="${HIGHLIGHT_COLOR}" cursor="pointer" width="${CONNECT_TOOL_SIZE}" height="${CONNECT_TOOL_SIZE}"/>
+    <path @selector="icon" d="M 1 4 L 5 4 L 5 1 L 9 5 L 5 9 L 5 6 1 6 z" fill="#FFFFFF" stroke="none" stroke-width="2" pointer-events="none" transform="translate(0,${CONNECT_TOOL_SIZE}), rotate(270)"/>
 `;
 
 export const CONNECT_TOOL_PRESET = {
+    magnet: 'base',
     useModelGeometry: true,
     x: '100%',
-    y: -CONNECT_ICON_PX,
+    y: -CONNECT_TOOL_SIZE,
     markup: CONNECT_TOOL_MARKUP
 }
 
@@ -98,18 +57,11 @@ export class TargetArrowHeadTool extends linkTools.TargetArrowhead {
 
 export class RemoveTool extends linkTools.Remove {
     constructor() {
-        // Circle button radius is 7 (diameter 14). Carbon close is 32×32 viewBox
-        // and should occupy ~10px inside the button → scale = 10/32 = 0.3125,
-        // then translate by -5,-5 to centre it on the circle's (0,0) origin.
-        const iconScale  = 10 / 32;
-        const iconOffset = -5;
         super({
             distance: - 2.5 * GRID_SIZE,
             markup: util.svg`
                 <circle @selector="button" r="7" fill="${HIGHLIGHT_COLOR}" stroke="${BG_COLOR}" cursor="pointer"/>
-                <g @selector="icon" pointer-events="none" transform="translate(${iconOffset},${iconOffset}) scale(${iconScale})">
-                    <path d="${CARBON_CLOSE_PATH}" fill="#FFFFFF" stroke="none"/>
-                </g>
+                <path @selector="icon" d="M -3 -3 3 3 M -3 3 3 -3" fill="none" stroke="#FFFFFF" stroke-width="2" pointer-events="none"/>
             `
         })
     }

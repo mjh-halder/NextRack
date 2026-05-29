@@ -1,5 +1,5 @@
 import { dia, highlighters } from '@joint/core';
-import { SHAPE_CELL_SIZE } from './theme';
+import { SHAPE_CELL_SIZE } from './nextrack-theme';
 
 const HOVER_ID = 'hover-ring';
 const COLOR = '#4589ff';

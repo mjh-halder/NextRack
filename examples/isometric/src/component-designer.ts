@@ -1,8 +1,9 @@
 import { dia, V } from '@joint/core';
-import IsometricShape, { View } from './shapes/isometric-shape';
+import { View } from './shapes/isometric-shape';
+import IsometricShape from './shapes/nextrack-isometric-shape';
 import { cellNamespace } from './shapes';
 import { Rectangle } from './shapes/rectangle/rectangle';
-import { Link } from './shapes/link/link';
+import { NextrackLink as Link } from './shapes/link/nextrack-link';
 import { SHAPE_FACTORIES, BASE_SHAPE_BY_ID, FORM_FACTOR_PREVIEWS, getPreviewFactory } from './shapes/shape-factories';
 import { drawGrid, switchView, transformationMatrix } from './utils';
 import { applyShapeStyle, applyShapeFillOpacity, buildCompositeIconSvg, buildTextIconSvg, icon2DHref } from './nextrack-utils';
@@ -11,7 +12,7 @@ import { SvgPolygonShape } from './shapes/svgpolygon/svg-polygon-shape';
 import { parseSvgFootprint } from './svg-footprint';
 import { Area } from './shapes/area/area';
 import { FrameCornerControl } from './tools';
-import { GRID_SIZE, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE } from './theme';
+import { GRID_SIZE, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE } from './nextrack-theme';
 
 // Component designer uses a fixed 10×10 GU grid, independent of the system designer.
 const CD_GRID_COUNT = 10;

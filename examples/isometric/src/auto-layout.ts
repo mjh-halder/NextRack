@@ -1,6 +1,6 @@
 import { dia, g } from '@joint/core';
 import { DirectedGraph } from '@joint/layout-directed-graph';
-import { GRID_SIZE } from './theme';
+import { GRID_SIZE } from './nextrack-theme';
 import { sortElements } from './utils';
 import { View } from './shapes/isometric-shape';
 import { carbonIconToString, CarbonIcon } from './icons';

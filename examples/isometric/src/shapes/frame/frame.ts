@@ -1,8 +1,9 @@
 import { Model } from '@joint/decorators';
 import { dia, elementTools } from '@joint/core';
 import svg from './frame.svg';
-import IsometricShape, { View, CONNECT_KEY } from '../isometric-shape';
-import { FrameCornerControl, CONNECT_TOOL_PRESET } from '../../tools';
+import { View, CONNECT_KEY } from '../isometric-shape';
+import NextrackIsometricShape from '../nextrack-isometric-shape';
+import { FrameCornerControl, NEXTRACK_CONNECT_TOOL_PRESET } from '../../tools';
 import { GRID_SIZE } from '../../theme';
 
 const defaultSize = {
@@ -18,10 +19,10 @@ const defaultSize = {
     },
     template: svg,
 })
-export class Frame extends IsometricShape {
+export class Frame extends NextrackIsometricShape {
 
     override tools = {
-        [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
+        [CONNECT_KEY]: new elementTools.Connect(NEXTRACK_CONNECT_TOOL_PRESET),
     };
 
     override addTools(paper: dia.Paper, _view: View) {

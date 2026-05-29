@@ -3,7 +3,7 @@ import { elementTools } from '@joint/core';
 import svg from './octagon.svg';
 import { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
 import { PolygonShape } from '../rectangle/rectangle-shape';
-import { SizeControl, CenterBasedHeightControl, CONNECT_TOOL_PRESET } from '../../tools';
+import { NextrackSizeControl, NextrackCenterBasedHeightControl, NEXTRACK_CONNECT_TOOL_PRESET } from '../../tools';
 import { defaultDimensionsFor } from '../shape-capabilities';
 
 const _defaults = defaultDimensionsFor('octagon');
@@ -25,9 +25,9 @@ export class Octagon extends PolygonShape {
         super(...args);
         const { defaultSize, defaultIsometricHeight } = this.attributes;
         this.tools = {
-            [SIZE_KEY]: new SizeControl({ defaultSize }),
-            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
-            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+            [SIZE_KEY]: new NextrackSizeControl({ defaultSize }),
+            [CONNECT_KEY]: new elementTools.Connect(NEXTRACK_CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new NextrackCenterBasedHeightControl({ defaultIsometricHeight }),
         };
     }
 

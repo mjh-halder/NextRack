@@ -1,9 +1,10 @@
 import { dia } from '@joint/core';
-import IsometricShape, { View } from './shapes/isometric-shape';
+import { View } from './shapes/isometric-shape';
+import IsometricShape from './shapes/nextrack-isometric-shape';
 import { Frame, Area, DoubleArrow, GridLabel, Icon } from './shapes';
 import { ComplexComponent } from './shapes/complex-component';
 import { META_KEY, NodeMeta } from './inspector';
-import { GRID_SIZE } from './theme';
+import { GRID_SIZE } from './nextrack-theme';
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
 import './shape-store';
 import { getPreviewFactory } from './shapes/shape-factories';

@@ -1,5 +1,5 @@
 import { dia, elementTools, g, util } from '@joint/core';
-import { GRID_SIZE } from '../theme';
+import { GRID_SIZE } from '../nextrack-theme';
 import { showDragTooltip } from './drag-tooltip';
 
 type Corner = 'tl' | 'tr' | 'br' | 'bl';

@@ -9,17 +9,18 @@
  */
 
 import { elementTools } from '@joint/core';
-import IsometricShape, { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
-import { SizeControl, CenterBasedHeightControl, CONNECT_TOOL_PRESET } from '../../tools';
+import { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
+import NextrackIsometricShape from '../nextrack-isometric-shape';
+import { NextrackSizeControl, NextrackCenterBasedHeightControl, NEXTRACK_CONNECT_TOOL_PRESET } from '../../tools';
 
-export class DuctShape extends IsometricShape {
+export class DuctShape extends NextrackIsometricShape {
     constructor(...args: any[]) {
         super(...args);
         const { defaultSize, defaultIsometricHeight } = this.attributes;
         this.tools = {
-            [SIZE_KEY]: new SizeControl({ defaultSize, constrainAxis: 'horizontal' }),
-            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
-            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+            [SIZE_KEY]: new NextrackSizeControl({ defaultSize, constrainAxis: 'horizontal' }),
+            [CONNECT_KEY]: new elementTools.Connect(NEXTRACK_CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new NextrackCenterBasedHeightControl({ defaultIsometricHeight }),
         };
     }
 

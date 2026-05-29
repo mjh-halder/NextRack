@@ -6,7 +6,7 @@ import { componentStore, ComponentDefinition } from './component-store';
 import { listCanvases, createCanvas, CanvasRecord } from './canvas-store';
 import { getDataType } from './schema-registry';
 import { META_KEY, LINK_META_KEY } from './inspector';
-import { GRID_SIZE } from './theme';
+import { GRID_SIZE } from './nextrack-theme';
 
 export interface AppRecord {
     id: string;

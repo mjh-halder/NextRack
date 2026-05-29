@@ -1,7 +1,8 @@
 import { Model, Function } from '@joint/decorators';
 import { dia } from '@joint/core';
 import svg from './area.svg';
-import IsometricShape, { View } from '../isometric-shape';
+import { View } from '../isometric-shape';
+import NextrackIsometricShape from '../nextrack-isometric-shape';
 import { FrameCornerControl, AreaVertexControl, AreaEdgeMidControl, AreaCornerRadiusControl } from '../../tools';
 import { GRID_SIZE } from '../../theme';
 
@@ -54,7 +55,7 @@ export function rightAngleVertices(verts: ReadonlyArray<[number, number]>): numb
     },
     template: svg,
 })
-export class Area extends IsometricShape {
+export class Area extends NextrackIsometricShape {
 
     @Function()
     bodyPath(): string {

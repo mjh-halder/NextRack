@@ -12,7 +12,7 @@
 // only on the axis where bbox dimension > 40.
 
 import { connectors, dia, g } from '@joint/core';
-import { SHAPE_CELL_SIZE } from '../theme';
+import { SHAPE_CELL_SIZE } from '../nextrack-theme';
 
 const TWO_D_CLASS = 'nr-2d-icons-only';
 

@@ -1,7 +1,8 @@
 import { Model, Function } from '@joint/decorators';
 import { dia, elementTools, g, util } from '@joint/core';
 import svg from './double-arrow.svg';
-import IsometricShape, { View } from '../isometric-shape';
+import { View } from '../isometric-shape';
+import NextrackIsometricShape from '../nextrack-isometric-shape';
 import { FrameCornerControl } from '../../tools';
 import { showDragTooltip } from '../../tools/drag-tooltip';
 import { GRID_SIZE } from '../../theme';
@@ -198,7 +199,7 @@ class ArrowWidthControl extends elementTools.Control {
     },
     template: svg,
 })
-export class DoubleArrow extends IsometricShape {
+export class DoubleArrow extends NextrackIsometricShape {
 
     @Function()
     arrowPath(): string {

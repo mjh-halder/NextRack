@@ -7,8 +7,9 @@
  */
 
 import { elementTools } from '@joint/core';
-import IsometricShape, { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
-import { SizeControl, ProportionalSizeControl, CenterBasedHeightControl, CONNECT_TOOL_PRESET } from '../../tools';
+import { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
+import NextrackIsometricShape from '../nextrack-isometric-shape';
+import { NextrackSizeControl, NextrackProportionalSizeControl, NextrackCenterBasedHeightControl, NEXTRACK_CONNECT_TOOL_PRESET } from '../../tools';
 
 // ── PolygonShape ──────────────────────────────────────────────────────────────
 // Abstract base for polygon-based isometric shapes.
@@ -20,7 +21,7 @@ import { SizeControl, ProportionalSizeControl, CenterBasedHeightControl, CONNECT
 // The `cornerRadius` attribute is read reactively from the model; set it via
 // `shape.set('cornerRadius', n)` to trigger an SVG re-render.
 
-export abstract class PolygonShape extends IsometricShape {
+export abstract class PolygonShape extends NextrackIsometricShape {
 
     get cornerRadius(): number {
         return this.get('cornerRadius') ?? 0;
@@ -412,9 +413,9 @@ export class RectangleShape extends PolygonShape {
         super(...args);
         const { defaultSize, defaultIsometricHeight } = this.attributes;
         this.tools = {
-            [SIZE_KEY]: new SizeControl({ defaultSize }),
-            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
-            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+            [SIZE_KEY]: new NextrackSizeControl({ defaultSize }),
+            [CONNECT_KEY]: new elementTools.Connect(NEXTRACK_CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new NextrackCenterBasedHeightControl({ defaultIsometricHeight }),
         }
     }
 
@@ -487,9 +488,9 @@ export class ProportionalRectangleShape extends RectangleShape {
         super(...args);
         const { defaultSize, defaultIsometricHeight } = this.attributes;
         this.tools = {
-            [SIZE_KEY]: new ProportionalSizeControl({ defaultSize }),
-            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
-            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+            [SIZE_KEY]: new NextrackProportionalSizeControl({ defaultSize }),
+            [CONNECT_KEY]: new elementTools.Connect(NEXTRACK_CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new NextrackCenterBasedHeightControl({ defaultIsometricHeight }),
         }
     }
 }

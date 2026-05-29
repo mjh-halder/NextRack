@@ -1,7 +1,3 @@
-export * from './center-based-height-tool';
-export * from './size-tool';
-export * from './proportional-size-tool';
-export * from './frame-size-tool';
-export * from './area-vertex-tool';
-export * from './rotate-tool';
-export * from './tools';
+// Tools barrel. NextRack content lives in ./tools-barrel.
+// See docs/adr/0006-mpl-extraction-strategy.md.
+export * from './tools-barrel';

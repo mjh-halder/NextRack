@@ -5,17 +5,18 @@
  */
 
 import { g, elementTools } from '@joint/core';
-import IsometricShape, { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
-import { ProportionalSizeControl, CenterBasedHeightControl, CONNECT_TOOL_PRESET } from '../../tools';
+import { SIZE_KEY, CONNECT_KEY, ISOMETRIC_HEIGHT_KEY } from '../isometric-shape';
+import NextrackIsometricShape from '../nextrack-isometric-shape';
+import { NextrackProportionalSizeControl, NextrackCenterBasedHeightControl, NEXTRACK_CONNECT_TOOL_PRESET } from '../../tools';
 
-export class CircleShape extends IsometricShape {
+export class CircleShape extends NextrackIsometricShape {
     constructor(...args: any[]) {
         super(...args);
         const { defaultSize, defaultIsometricHeight } = this.attributes;
         this.tools = {
-            [SIZE_KEY]: new ProportionalSizeControl({ defaultSize }),
-            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
-            [ISOMETRIC_HEIGHT_KEY]: new CenterBasedHeightControl({ defaultIsometricHeight }),
+            [SIZE_KEY]: new NextrackProportionalSizeControl({ defaultSize }),
+            [CONNECT_KEY]: new elementTools.Connect(NEXTRACK_CONNECT_TOOL_PRESET),
+            [ISOMETRIC_HEIGHT_KEY]: new NextrackCenterBasedHeightControl({ defaultIsometricHeight }),
         }
     }
 

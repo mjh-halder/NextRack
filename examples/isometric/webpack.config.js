@@ -5,7 +5,7 @@ module.exports = {
         extensions: ['.ts', '.tsx', '.js', '.md']
     },
     devtool: 'inline-source-map',
-    entry: './src/index.ts',
+    entry: './src/boot.ts',
     output: {
         filename: 'bundle.js',
         path: path.resolve(__dirname, 'dist'),

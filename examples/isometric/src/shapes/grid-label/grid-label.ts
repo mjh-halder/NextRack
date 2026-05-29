@@ -1,7 +1,8 @@
 import { Model } from '@joint/decorators';
 import { dia } from '@joint/core';
 import svg from './grid-label.svg';
-import IsometricShape, { View } from '../isometric-shape';
+import { View } from '../isometric-shape';
+import NextrackIsometricShape from '../nextrack-isometric-shape';
 import { FrameCornerControl } from '../../tools';
 import { GRID_SIZE } from '../../theme';
 
@@ -19,7 +20,7 @@ const defaultSize = {
     },
     template: svg,
 })
-export class GridLabel extends IsometricShape {
+export class GridLabel extends NextrackIsometricShape {
 
     override addTools(paper: dia.Paper, _view: View) {
         const toolView = new dia.ToolsView({

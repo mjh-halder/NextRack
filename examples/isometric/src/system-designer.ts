@@ -1,11 +1,13 @@
 import { g, dia, V, highlighters } from '@joint/core';
-import Obstacles from './obstacles';
-import IsometricShape, { View, ToolKeys } from './shapes/isometric-shape';
+import Obstacles from './nextrack-obstacles';
+import { View } from './shapes/isometric-shape';
+import IsometricShape from './shapes/nextrack-isometric-shape';
+import { ToolKeys } from './shapes/nextrack-isometric-shape';
 import { Link, Frame, Area, cellNamespace } from './shapes';
 import { stubConnector } from './connectors/stub-connector'; // ADR-0005
 import { sortElements, drawGrid, switchView, transformationMatrix } from './utils';
 import { setGridOpacity, applyRegistryDefaults, applyShapeStyle, applyShapeFillOpacity, icon2DHref } from './nextrack-utils';
-import { GRID_SIZE, GRID_COUNT, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './theme';
+import { GRID_SIZE, GRID_COUNT, SHAPE_CELL_SIZE, HIGHLIGHT_COLOR, SCALE, ISOMETRIC_SCALE, MIN_ZOOM, MAX_ZOOM } from './nextrack-theme';
 import { PropertyPanel, META_KEY, LINK_META_KEY, BADGE_POSITIONS, badgeChamferPath, NodeMeta } from './inspector';
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS } from './shapes/shape-registry';
 import { getPaletteIcon, getHitArea, getCompositeIsoHeight } from './shape-query';
@@ -1609,8 +1611,8 @@ function applyNewDesign(name: string, gridCount: number) {
     panel.hide();
 
     // Resize obstacle grid before clearing so removal events use the correct size
-    obstacles.sizeX = gridCount;
-    obstacles.sizeY = gridCount;
+    obstacles.size = gridCount;
+    obstacles.size = gridCount;
     graph.clear();
     clearHistory();
     // Rebuild the obstacle grid at the new size (graph is empty so this just resets it)
@@ -2055,8 +2057,8 @@ function showToast(message: string) {
 function applyGridResize(newX: number, newY: number) {
     currentGridCountX = newX;
     currentGridCountY = newY;
-    obstacles.sizeX = newX;
-    obstacles.sizeY = newY;
+    obstacles.size = newX;
+    obstacles.size = newY;
     obstacles.update();
 
     rebuildGrid();

@@ -13,7 +13,7 @@
 // fills the visible gap between the marker and the routing endpoint.
 
 import { dia } from '@joint/core';
-import { SHAPE_CELL_SIZE } from '../theme';
+import { SHAPE_CELL_SIZE } from '../nextrack-theme';
 
 const PORT_RADIUS = 3;
 const PORT_COLOR  = 'rgba(0, 0, 0, 0.25)';

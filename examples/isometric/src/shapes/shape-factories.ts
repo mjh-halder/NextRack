@@ -1,4 +1,4 @@
-import IsometricShape from './isometric-shape';
+import IsometricShape from './nextrack-isometric-shape';
 import { Rectangle, Circle } from './index';
 import { Octagon } from './octagon/octagon';
 import { Tube } from './tube/tube';

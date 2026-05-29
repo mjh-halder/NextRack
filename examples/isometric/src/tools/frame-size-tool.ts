@@ -1,6 +1,6 @@
 import { dia, elementTools, g, util } from '@joint/core';
 import { refreshSelect } from '../hover-highlight';
-import { GRID_SIZE } from '../theme';
+import { GRID_SIZE } from '../nextrack-theme';
 
 const ZONE_RESIZE_COLOR = '#4589ff';
 

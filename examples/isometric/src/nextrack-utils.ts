@@ -9,7 +9,7 @@
  */
 
 import { dia } from '@joint/core';
-import { GRID_SIZE, SHAPE_CELL_SIZE } from './theme';
+import { GRID_SIZE, SHAPE_CELL_SIZE } from './nextrack-theme';
 import type { ShapeStyle, ShapeDefinition, IconEntry } from './shapes/shape-registry';
 import { isTextEntry } from './shapes/shape-registry';
 import { getPaletteIcon } from './shape-query';

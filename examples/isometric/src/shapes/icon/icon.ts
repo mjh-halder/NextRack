@@ -1,7 +1,8 @@
 import { Model } from '@joint/decorators';
 import { dia } from '@joint/core';
 import svg from './icon.svg';
-import IsometricShape, { View } from '../isometric-shape';
+import { View } from '../isometric-shape';
+import NextrackIsometricShape from '../nextrack-isometric-shape';
 import { FrameCornerControl } from '../../tools';
 import { GRID_SIZE } from '../../theme';
 
@@ -18,7 +19,7 @@ const defaultSize = {
     },
     template: svg,
 })
-export class Icon extends IsometricShape {
+export class Icon extends NextrackIsometricShape {
 
     override addTools(paper: dia.Paper, _view: View) {
         const toolView = new dia.ToolsView({

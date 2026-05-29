@@ -15,7 +15,7 @@
  */
 
 import { BaseShape } from './shape-definition';
-import { ModifierKey } from './isometric-shape';
+import { ModifierKey } from './nextrack-isometric-shape';
 import { ShapeLayer } from './shape-registry';
 
 // ── Categories ──────────────────────────────────────────────────────────────

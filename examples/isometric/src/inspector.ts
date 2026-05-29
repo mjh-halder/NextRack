@@ -1,5 +1,5 @@
 import { dia } from '@joint/core';
-import IsometricShape from './shapes/isometric-shape';
+import IsometricShape from './shapes/nextrack-isometric-shape';
 import { applyShapeFillOpacity } from './nextrack-utils';
 import { applyLabelPosition } from './label-position';
 import { ShapeRegistry, BUILT_IN_SHAPE_IDS, ShapeDefinition } from './shapes/shape-registry';
@@ -8,7 +8,7 @@ import { PRIMARY_COLORS } from './colors';
 import { getCustomFields, getDataType, FieldDefinition } from './schema-registry';
 import { getProductsByType, getProduct } from './product-catalog';
 import { getCanvas, updateCanvas, CanvasRecord } from './canvas-store';
-import { GRID_SIZE } from './theme';
+import { GRID_SIZE } from './nextrack-theme';
 import { carbonIconToString, CarbonIcon } from './icons';
 import { getDesignIconEntries, IconCatalogEntry, iconKeepsOriginalColor, IconSource } from './icon-catalog';
 

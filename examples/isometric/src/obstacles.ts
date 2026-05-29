@@ -8,8 +8,7 @@ import { GRID_COUNT, GRID_SIZE } from './theme';
 export default class Obstacles {
 
     step: number = GRID_SIZE;
-    sizeX: number = GRID_COUNT;
-    sizeY: number = GRID_COUNT;
+    size: number = GRID_COUNT;
     grid: string[][] = [];
     graph: dia.Graph;
     listener: mvc.Listener<[]>;
@@ -36,25 +35,25 @@ export default class Obstacles {
 
     protected toggleArea(area: g.Rect, value: string) {
         const { x, y, width, height } = area;
-        for (let i = Math.max(0, x); i < Math.min(x + width, this.sizeX); i++) {
-            for (let j = Math.max(0, y); j < Math.min(y + height, this.sizeY); j++) {
+        for (let i = Math.max(0, x); i < Math.min(x + width, this.size); i++) {
+            for (let j = Math.max(0, y); j < Math.min(y + height, this.size); j++) {
                 this.grid[i][j] = value;
             }
         }
     }
 
     protected addCell(cell: dia.Cell) {
-        if (cell.isLink() || cell.get('isFrame') || cell.get('isArea') || cell.get('isGridLabel') || cell.get('componentRole') === 'child') return;
+        if (cell.isLink()) return;
         this.toggleArea(this.getCellArea(cell.getBBox()), cell.cid);
     }
 
     protected removeCell(cell: dia.Cell) {
-        if (cell.isLink() || cell.get('isFrame') || cell.get('isArea') || cell.get('isGridLabel') || cell.get('componentRole') === 'child') return;
+        if (cell.isLink()) return;
         this.toggleArea(this.getCellArea(cell.getBBox()), null);
     }
 
     protected updateCellPosition(cell: dia.Cell) {
-        if (cell.isLink() || cell.get('isFrame') || cell.get('isArea') || cell.get('isGridLabel') || cell.get('componentRole') === 'child') return;
+        if (cell.isLink()) return;
         const prevPosition = cell.previous('position');
         const prevBBox = cell.getBBox();
         prevBBox.x = prevPosition.x;
@@ -64,7 +63,7 @@ export default class Obstacles {
     }
 
     protected updateCellSize(cell: dia.Cell) {
-        if (cell.isLink() || cell.get('isFrame') || cell.get('isArea') || cell.get('isGridLabel') || cell.get('componentRole') === 'child') return;
+        if (cell.isLink()) return;
         const prevSize = cell.previous('size');
         const prevBBox = cell.getBBox();
         prevBBox.width = prevSize.width;
@@ -74,7 +73,7 @@ export default class Obstacles {
     }
 
     protected reset() {
-        this.grid = Array.from({ length: this.sizeX }, () => Array.from({ length: this.sizeY }, () => null));
+        this.grid = Array.from({ length: this.size }, () => Array.from({ length: this.size }, () => null));
     }
 
     // Is the given bounding box free of obstacles?
@@ -85,7 +84,7 @@ export default class Obstacles {
         for (let i = x; i < x + width; i++) {
             for (let j = y; j < y + height; j++) {
                 // check if the cell is out of the grid
-                if (i < 0 || i >= this.sizeX || j < 0 || j >= this.sizeY) return false;
+                if (i < 0 || i >= this.size || j < 0 || j >= this.size) return false;
                 // check if the cell is occupied
                 const value = this.grid[i][j];
                 if (value && value !== key) return false;

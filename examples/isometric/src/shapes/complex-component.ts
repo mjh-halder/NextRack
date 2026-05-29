@@ -18,7 +18,8 @@
  */
 
 import { dia, elementTools } from '@joint/core';
-import IsometricShape, {
+import IsometricShape from './nextrack-isometric-shape';
+import {
     View,
     CONNECT_KEY,
 } from './isometric-shape';
@@ -29,8 +30,8 @@ import { Circle } from './circle/circle';     // proxy for circle baseShape
 import { Octagon } from './octagon/octagon';
 import { SvgPolygonShape } from './svgpolygon/svg-polygon-shape';
 import { ShapeLayer, IconEntry, isTextEntry } from './shape-registry';
-import { CONNECT_TOOL_PRESET } from '../tools';
-import { GRID_SIZE, SHAPE_CELL_SIZE } from '../theme';
+import { NEXTRACK_CONNECT_TOOL_PRESET } from '../tools';
+import { GRID_SIZE, SHAPE_CELL_SIZE } from '../nextrack-theme';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -277,7 +278,7 @@ export class ComplexComponent extends IsometricShape {
     constructor(...args: any[]) {
         super(...args);
         this.tools = {
-            [CONNECT_KEY]: new elementTools.Connect(CONNECT_TOOL_PRESET),
+            [CONNECT_KEY]: new elementTools.Connect(NEXTRACK_CONNECT_TOOL_PRESET),
         };
     }
 

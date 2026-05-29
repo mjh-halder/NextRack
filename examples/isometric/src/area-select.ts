@@ -1,5 +1,5 @@
 import { dia, g } from '@joint/core';
-import IsometricShape from './shapes/isometric-shape';
+import IsometricShape from './shapes/nextrack-isometric-shape';
 import { COMPLEX_COMPONENT_TYPE } from './shapes/complex-component';
 import { applySelect as applySelectRing, clearSelectFor } from './hover-highlight';
 

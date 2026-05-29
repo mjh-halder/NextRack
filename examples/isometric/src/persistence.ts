@@ -1,5 +1,5 @@
 import { dia } from '@joint/core';
-import { GRID_SIZE } from './theme';
+import { GRID_SIZE } from './nextrack-theme';
 import type { DisplayMeta } from './canvas-store';
 
 const FILE_NAME = 'nextrack-diagram.json';

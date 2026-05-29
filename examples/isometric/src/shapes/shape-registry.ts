@@ -1,4 +1,4 @@
-import { GRID_SIZE } from '../theme';
+import { GRID_SIZE } from '../nextrack-theme';
 import { BaseShape } from './shape-definition';
 
 export interface ShapeStyle {
