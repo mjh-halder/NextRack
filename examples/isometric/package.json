@@ -1,13 +1,13 @@
 {
   "name": "@joint/demo-isometric",
   "version": "4.2.4",
-  "main": "src/index.ts",
+  "main": "src/boot.ts",
   "homepage": "https://jointjs.com",
   "author": {
     "name": "client IO",
     "url": "https://client.io"
   },
-  "license": "MPL-2.0",
+  "license": "UNLICENSED",
   "private": true,
   "installConfig": {
     "hoistingLimits": "workspaces"
