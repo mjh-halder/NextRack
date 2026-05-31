@@ -38,9 +38,8 @@ export const SHAPE_CATEGORY: Record<BaseShape, ShapeCategory> = {
 // ── Modifier capability ─────────────────────────────────────────────────────
 
 const ALL_POLYGON_MODIFIERS: readonly ModifierKey[] = [
-    'cornerRadius',
     'chamfer', 'chamferHeight', 'chamferBottom', 'chamferBottomHeight',
-    'twist', 'scaleTopX', 'scaleTopY',
+    'scaleTopX', 'scaleTopY',
     'shedRoof', 'shedRoofDir',
 ];
 

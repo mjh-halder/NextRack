@@ -28,6 +28,7 @@ import {
 import { ShapeRegistry, ShapeDefinition, BUILT_IN_SHAPE_IDS, deleteShape, saveRegistryToStorage, addShape } from './shapes/shape-registry';
 import { shapeStore } from './shape-store';
 import { componentStore, ComponentDefinition } from './component-store';
+import { collectBackup, restoreBackup, backupKeyCount } from './library-backup';
 import { listInventory, removeFromInventory, isDarkMode, SvgInventoryEntry } from './svg-inventory';
 
 type AdminView = 'icon-config' | 'component-library' | 'inventory' | 'data' | 'user-settings';
@@ -253,6 +254,53 @@ function buildBackupSection(host: HTMLElement, rerender: () => void): void {
     });
     row.appendChild(importBtn);
     row.appendChild(fileInput);
+
+    // Full backup: snapshot every NextRack localStorage key (all shape layers,
+    // components, folders, icon config, schemas, canvases) into one envelope.
+    // Unlike "Export components" above this is lossless across all storage
+    // layers — the recommended safety net until cloud persistence lands.
+    const backupBtn = document.createElement('button');
+    backupBtn.type = 'button';
+    backupBtn.className = 'cds--btn cds--btn--primary cds--btn--sm';
+    backupBtn.textContent = 'Full backup (JSON)';
+    backupBtn.title = 'Download a complete backup of all NextRack data in this browser (components, shapes, folders, icons, canvases).';
+    backupBtn.addEventListener('click', () => {
+        const env = collectBackup();
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        downloadFile(`nextrack-backup-${ts}.json`, JSON.stringify(env, null, 2));
+    });
+    row.appendChild(backupBtn);
+
+    // Restore full backup.
+    const restoreBtn = document.createElement('button');
+    restoreBtn.type = 'button';
+    restoreBtn.className = 'cds--btn cds--btn--tertiary cds--btn--sm';
+    restoreBtn.textContent = 'Restore backup (JSON)';
+    const restoreInput = document.createElement('input');
+    restoreInput.type = 'file';
+    restoreInput.accept = 'application/json,.json';
+    restoreInput.style.display = 'none';
+    restoreBtn.addEventListener('click', () => restoreInput.click());
+    restoreInput.addEventListener('change', async () => {
+        const file = restoreInput.files?.[0];
+        if (!file) return;
+        try {
+            const env = JSON.parse(await file.text());
+            const existing = backupKeyCount();
+            if (existing > 0 && !confirm('Restoring overwrites matching data in this browser and reloads the app. Continue?')) {
+                return;
+            }
+            const { restored } = restoreBackup(env);
+            alert(`Restored ${restored} entr${restored === 1 ? 'y' : 'ies'}. The app will reload.`);
+            location.reload();
+        } catch (e) {
+            alert(`Restore failed: ${(e as Error).message}`);
+        } finally {
+            restoreInput.value = '';
+        }
+    });
+    row.appendChild(restoreBtn);
+    row.appendChild(restoreInput);
 
     // Export as code (developer flow — paste into a seed file).
     const codeBtn = document.createElement('button');

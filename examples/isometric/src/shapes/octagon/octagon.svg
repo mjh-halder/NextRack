@@ -1,9 +1,11 @@
 <g
     highlighter-selector="base"
 >
-    <!-- Base octagon — 2D footprint and hit area -->
+    <!-- Footprint — 2D representation, hit area, and the visible bottom
+         plate in ISO. Uses the Iso variant so the bottom corners get cut
+         when chamferBottomSize > 0 (matches the chamfered 3D side faces). -->
     <path @selector="base" @group-selector="common"
-        :d="{{baseOctagonPath([size, cornerRadius])}}"
+        :d="{{baseOctagonPathIso([size, cornerRadius, chamferBottomSize])}}"
         fill="#e0e0e0"
         stroke="#333"
         stroke-linejoin="round"

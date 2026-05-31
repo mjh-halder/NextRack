@@ -435,11 +435,12 @@ export class RectangleShape extends PolygonShape {
         return this.footprintPath(this.baseVertices(), this.cornerRadius);
     }
 
-    /** Isometric base — omitted when chamferBottomSize > 0 because the chamfer
-     *  itself defines the bottom geometry; a separate base plate would leave
-     *  visible artefacts at the chamfered corners. */
+    /** Isometric base — when chamferBottomSize > 0 the corners are cut to
+     *  match the 3D bottom so the visible base plate stays consistent with
+     *  the chamfered side faces (and still shows through in opacity mode). */
     baseRectanglePathIso(): string {
-        if (this.chamferBottomSize > 0) return 'M 0 0 Z';
+        const cb = this.chamferBottomSize;
+        if (cb > 0) return this.chamferedFootprintPath(this.baseVertices(), cb);
         return this.footprintPath(this.baseVertices(), this.cornerRadius);
     }
 

@@ -952,6 +952,11 @@ new ViewToggle(viewToggleContainerEl, 'isometric', (view) => {
     updateMinimapView(currentView, currentGridCountX);
     syncZoomSlider();
     setCalloutVisibility(currentView === View.Isometric);
+    // Paper matrix was just reset for the new view — stored callout pixel
+    // positions are from the previous matrix and would be stale until the
+    // next position/size change. Refresh after the visibility flip so the
+    // no-op short-circuit (visible=false) doesn't swallow this call.
+    refreshAllCallouts();
     // Re-add resize tools for the current selected shape after view switch
     if (currentCell && !(currentCell instanceof Link) && !currentCell.get('isFrame')) {
         const meta = currentCell.get(META_KEY) as Record<string, unknown> | undefined;
@@ -3156,6 +3161,11 @@ function rotateShapeInGrid(cell: IsometricShape): void {
     newShape.position(pos.x, pos.y);
     newShape.set(META_KEY, meta);
     newShape.set('currentBaseShape', pairedBase);
+    // Floating-label state lives on top-level cell attrs, not in META_KEY —
+    // carry it across the rotation so the callout persists with the shape.
+    if (cell.get('calloutLabel')) newShape.set('calloutLabel', true);
+    const _cw = cell.get('calloutWidth'); if (_cw != null) newShape.set('calloutWidth', _cw);
+    const _cd = cell.get('calloutDistance'); if (_cd != null) newShape.set('calloutDistance', _cd);
     newShape.toggleView(currentView);
     // Swap icon face based on current effective face
     const defIcon0 = getPaletteIcon(def);
@@ -3193,6 +3203,7 @@ function rotateShapeInGrid(cell: IsometricShape): void {
     currentCell = newShape;
     panel.show(newShape);
     setTreeHighlight(newShape);
+    syncCalloutLabel(newShape);
 
     graph.stopBatch('rotate-shape');
 }
@@ -3237,6 +3248,11 @@ function switchShapeVariation(cell: IsometricShape): void {
     newShape.position(pos.x, pos.y);
     newShape.set(META_KEY, meta);
     newShape.set('shapeVariation', target);
+    // Floating-label state lives on top-level cell attrs, not in META_KEY —
+    // carry it across the variation switch so the callout persists.
+    if (cell.get('calloutLabel')) newShape.set('calloutLabel', true);
+    const _cw = cell.get('calloutWidth'); if (_cw != null) newShape.set('calloutWidth', _cw);
+    const _cd = cell.get('calloutDistance'); if (_cd != null) newShape.set('calloutDistance', _cd);
     newShape.toggleView(currentView);
 
     const links = graph.getConnectedLinks(cell);
@@ -3256,6 +3272,7 @@ function switchShapeVariation(cell: IsometricShape): void {
     currentCell = newShape;
     panel.show(newShape);
     setTreeHighlight(newShape);
+    syncCalloutLabel(newShape);
 
     graph.stopBatch('switch-variation');
     if (currentView === View.Isometric) nextrackSortElements(graph);
